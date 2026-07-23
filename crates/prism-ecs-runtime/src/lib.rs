@@ -1,4 +1,5 @@
 pub mod fault;
+pub mod inference;
 mod kernel;
 mod ports;
 pub mod schedule;
@@ -9,6 +10,7 @@ pub use fault::{
     FaultMode, FaultPlan, FaultPoint, FaultingCommandStore, FaultingLeaseCoordinator,
     FaultingSnapshotStore,
 };
+pub use inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
 pub use kernel::{
     create_kernel, AgentSnapshot, Command, CommandEnvelope, CommandResult, CommitOutcome,
     KernelHandle, KernelHealth, RuntimeKernel,
@@ -147,7 +149,8 @@ mod tests {
 
         let env = crate::CommandEnvelope::new(Command::Lifecycle(LifecycleCommand::CreateWork(
             CreateWorkCommand {
-                entity: 0, target_entity: 0,
+                entity: 0,
+                target_entity: 0,
                 kind: "idempotency-test".to_string(),
                 resource_claim: "{}".to_string(),
                 output_path: "".to_string(),

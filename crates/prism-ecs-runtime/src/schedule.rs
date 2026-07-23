@@ -3,17 +3,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
+use crate::inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
 use crate::kernel::{
     AdmittedMarker, Command, CommandEnvelope, KernelHandle, PlannedMarker, PublishedMarker,
 };
 use crate::ports::RuntimeError;
-use crate::ports::{
-    DispatchHandle, DispatchRequest, DispatchStatus, ProviderSelectionReceipt,
-    ProviderSelectionRequest, WorkDispatcher,
-};
+use crate::ports::{DispatchHandle, DispatchRequest, DispatchStatus, WorkDispatcher};
 use prism_ecs_constitutional::lifecycle_command::{
     AcquireWorkLeaseCommand, AdmitWorkCommand, LifecycleCommand, MarkObservedCommand,
-    RecordDispatchIntentCommand, RecordWorkPlanCommand,
+    RecordDispatchIntentCommand, RecordWorkPlanCommand, RequestCancellationCommand,
 };
 use prism_ecs_constitutional::work::{WorkInputPath, WorkOutputPath};
 use prism_ecs_constitutional::work::{WorkItemComponent, WorkState};
@@ -64,16 +62,30 @@ pub struct SystemContext<'w> {
     /// Maximum number of non-terminal work items that may be admitted at once.
     /// The committed decision still goes through the bound [`KernelHandle`].
     pub admission_capacity: usize,
+    pub inference_policy: InferenceAdmissionPolicy,
     pub command_buffer: CommandBuffer,
     pub world_view: &'w crate::world_view::WorldViewImpl<'w>,
-    /// The single runtime authority for commands and provider decisions.
-    pub kernel: &'w KernelHandle,
     /// Optional dispatcher for invoking external work.
     pub dispatcher: Option<&'w dyn WorkDispatcher>,
     /// Active dispatch handles to poll.
     pub active_dispatches: &'w std::sync::Mutex<Vec<DispatchHandle>>,
-    /// Selection receipts produced during this tick.
-    pub provider_receipts: &'w std::sync::Mutex<Vec<ProviderSelectionReceipt>>,
+}
+
+impl<'w> SystemContext<'w> {
+    pub fn should_stop(&self) -> bool {
+        self.cancellation.load(Ordering::Acquire) || std::time::Instant::now() >= self.deadline
+    }
+
+    pub fn now_ms(&self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+
+    pub fn cancelled_or_expired(&self, metadata: &InferenceWorkMetadata) -> bool {
+        metadata.deadline_expired(self.now_ms()) || self.should_stop()
+    }
 }
 
 /// Per-system command buffer that feeds into a shared submission channel.
@@ -137,7 +149,6 @@ pub struct TickReceipt {
     pub emitted_commands: Vec<Vec<EmittedCommand>>,
     pub duration_ms: u64,
     pub failure: Option<String>,
-    pub provider_selections: Vec<ProviderSelectionReceipt>,
 }
 
 // ── RuntimeSchedule ────────────────────────────────────────────────────────
@@ -159,14 +170,14 @@ pub struct RuntimeSchedule {
     pub stage_timeout_ms: u64,
     /// Bounded active-work admission policy owned by this schedule.
     pub admission_capacity: usize,
+    /// Token/KV admission and chunking policy for inference work.
+    pub inference_policy: InferenceAdmissionPolicy,
     /// Kernel handle for submitting emitted commands.
     pub kernel: Option<KernelHandle>,
     /// Provider-neutral dispatcher for adapter execution.
     pub dispatcher: Option<std::sync::Arc<dyn WorkDispatcher>>,
     /// Active dispatch handles.
     pub active_dispatches: std::sync::Mutex<Vec<DispatchHandle>>,
-    /// Provider-selection receipts accumulated during a tick.
-    pub provider_receipts: std::sync::Mutex<Vec<ProviderSelectionReceipt>>,
 }
 
 #[derive(Debug)]
@@ -177,6 +188,7 @@ pub enum ScheduleError {
     ConflictingParallelWrite(Vec<(SystemId, SystemId, String)>),
     InvalidStageDependency(SystemId, SystemId),
     InvalidAdmissionCapacity,
+    InvalidInferencePolicy,
 }
 
 impl RuntimeSchedule {
@@ -200,10 +212,10 @@ impl RuntimeSchedule {
             tick_count: AtomicU64::new(0),
             stage_timeout_ms: 5000,
             admission_capacity: 32,
+            inference_policy: InferenceAdmissionPolicy::default(),
             kernel: None,
             dispatcher: None,
             active_dispatches: std::sync::Mutex::new(vec![]),
-            provider_receipts: std::sync::Mutex::new(vec![]),
         }
     }
 
@@ -247,6 +259,17 @@ impl RuntimeSchedule {
             return Err(ScheduleError::InvalidAdmissionCapacity);
         }
         self.admission_capacity = capacity;
+        Ok(())
+    }
+
+    pub fn set_inference_policy(
+        &mut self,
+        policy: InferenceAdmissionPolicy,
+    ) -> Result<(), ScheduleError> {
+        if !policy.validate() {
+            return Err(ScheduleError::InvalidInferencePolicy);
+        }
+        self.inference_policy = policy;
         Ok(())
     }
 
@@ -345,6 +368,16 @@ impl RuntimeSchedule {
                 }
             }
         }
+        hasher.update(&(self.admission_capacity as u64).to_le_bytes());
+        hasher.update(&self.inference_policy.max_inflight_tokens.to_le_bytes());
+        hasher.update(&self.inference_policy.max_kv_tokens.to_le_bytes());
+        hasher.update(&self.inference_policy.prefill_chunk_tokens.to_le_bytes());
+        hasher.update(
+            &self
+                .inference_policy
+                .max_prefill_tokens_per_tick
+                .to_le_bytes(),
+        );
         self.schedule_hash = *hasher.finalize().as_bytes();
 
         Ok(())
@@ -396,9 +429,11 @@ impl RuntimeSchedule {
             .filter(|id| *in_degree.get(id).unwrap_or(&0) == 0)
             .copied()
             .collect();
+        queue.sort_by_key(|id| id.0);
         let mut sorted = Vec::new();
 
-        while let Some(id) = queue.pop() {
+        while !queue.is_empty() {
+            let id = queue.remove(0);
             sorted.push(id);
             if let Some(children) = dependents.get(&id) {
                 for child in children {
@@ -410,6 +445,7 @@ impl RuntimeSchedule {
                     }
                 }
             }
+            queue.sort_by_key(|id| id.0);
         }
 
         if sorted.len() != ids.len() {
@@ -456,7 +492,6 @@ impl RuntimeSchedule {
     pub fn run_tick(&self) -> Result<TickReceipt, RuntimeError> {
         let start = std::time::Instant::now();
         let tick_number = self.tick_count.fetch_add(1, Ordering::SeqCst);
-        self.provider_receipts.lock().unwrap().clear();
         let kernel = self
             .kernel
             .as_ref()
@@ -485,12 +520,11 @@ impl RuntimeSchedule {
                             deadline,
                             cancellation: AtomicBool::new(false),
                             admission_capacity: self.admission_capacity,
+                            inference_policy: self.inference_policy,
                             command_buffer: buffer.clone(),
                             world_view: &world_view,
-                            kernel,
                             dispatcher: self.dispatcher.as_deref(),
                             active_dispatches: &self.active_dispatches,
-                            provider_receipts: &self.provider_receipts,
                         };
                         if let Err(e) = system.run(&ctx) {
                             return Err(RuntimeError::Entity(format!(
@@ -540,7 +574,6 @@ impl RuntimeSchedule {
             }
         }
         let duration_ms = start.elapsed().as_millis() as u64;
-        let provider_selections = self.provider_receipts.lock().unwrap().clone();
         Ok(TickReceipt {
             tick_number,
             schedule_hash: self.schedule_hash,
@@ -548,7 +581,6 @@ impl RuntimeSchedule {
             emitted_commands,
             duration_ms,
             failure: None,
-            provider_selections,
         })
     }
 }
@@ -588,18 +620,25 @@ impl System for ObserveSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_OBSERVE: usize = 64;
+        if ctx.should_stop() {
+            return Ok(());
+        }
         let epoch = ctx.world_view.epoch();
-        let pending: Vec<Entity> = ctx
+        let mut pending: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
             .filter(|(entity, state)| {
                 **state == WorkState::Pending
                     && ctx.world_view.get::<PlannedMarker>(*entity).is_none()
             })
-            .take(MAX_OBSERVE)
             .map(|(entity, _)| entity)
             .collect();
+        pending.sort_by_key(|entity| entity.id());
+        pending.truncate(MAX_OBSERVE);
         for entity in pending {
+            if ctx.should_stop() {
+                break;
+            }
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::MarkObserved(MarkObservedCommand {
@@ -641,7 +680,10 @@ impl System for PlanSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_PLAN: usize = 64;
-        let observed: Vec<Entity> = ctx
+        if ctx.should_stop() {
+            return Ok(());
+        }
+        let mut observed: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
             .filter(|(entity, state)| {
@@ -649,10 +691,14 @@ impl System for PlanSystem {
                     && ctx.world_view.get::<PlannedMarker>(*entity).is_some()
                     && ctx.world_view.get::<AdmittedMarker>(*entity).is_none()
             })
-            .take(MAX_PLAN)
             .map(|(entity, _)| entity)
             .collect();
+        observed.sort_by_key(|entity| entity.id());
+        observed.truncate(MAX_PLAN);
         for entity in observed {
+            if ctx.should_stop() {
+                break;
+            }
             let resource_estimate = ctx
                 .world_view
                 .get::<WorkItemComponent>(entity)
@@ -702,6 +748,9 @@ impl System for AdmitSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_ADMIT_PER_TICK: usize = 64;
+        if ctx.should_stop() {
+            return Ok(());
+        }
         let active = ctx
             .world_view
             .query::<WorkState>()
@@ -710,6 +759,17 @@ impl System for AdmitSystem {
                     && ctx.world_view.get::<AdmittedMarker>(*entity).is_some()
             })
             .count();
+        let mut reserved_tokens: u32 = ctx
+            .world_view
+            .query::<WorkState>()
+            .filter_map(|(entity, state)| {
+                (matches!(*state, WorkState::Ready | WorkState::Leased(_))
+                    && ctx.world_view.get::<AdmittedMarker>(entity).is_some())
+                .then(|| ctx.world_view.get::<InferenceWorkMetadata>(entity))
+                .flatten()
+                .map(InferenceWorkMetadata::reserved_tokens)
+            })
+            .sum();
         let available = ctx.admission_capacity.saturating_sub(active);
         if available == 0 {
             return Ok(());
@@ -725,15 +785,52 @@ impl System for AdmitSystem {
             })
             .map(|(entity, _)| entity)
             .collect();
-        planned.sort_by_key(|entity| entity.id());
-        planned.truncate(available.min(MAX_ADMIT_PER_TICK));
+        planned.sort_by(|a, b| {
+            let a_priority = ctx
+                .world_view
+                .get::<InferenceWorkMetadata>(*a)
+                .map(|metadata| metadata.priority)
+                .unwrap_or(0);
+            let b_priority = ctx
+                .world_view
+                .get::<InferenceWorkMetadata>(*b)
+                .map(|metadata| metadata.priority)
+                .unwrap_or(0);
+            b_priority
+                .cmp(&a_priority)
+                .then_with(|| a.id().cmp(&b.id()))
+        });
+        let mut admitted = 0usize;
         for entity in planned {
+            if admitted >= available.min(MAX_ADMIT_PER_TICK) || ctx.should_stop() {
+                break;
+            }
+            if let Some(metadata) = ctx.world_view.get::<InferenceWorkMetadata>(entity) {
+                if metadata.deadline_expired(ctx.now_ms()) {
+                    ctx.command_buffer
+                        .emit(CommandEnvelope::new(Command::Lifecycle(
+                            LifecycleCommand::RequestCancellation(RequestCancellationCommand {
+                                entity: entity.id(),
+                                reason: "inference deadline expired before admission".to_string(),
+                            }),
+                        )));
+                    continue;
+                }
+                if metadata.required_kv_tokens() > ctx.inference_policy.max_kv_tokens
+                    || reserved_tokens.saturating_add(metadata.reserved_tokens())
+                        > ctx.inference_policy.max_inflight_tokens
+                {
+                    continue;
+                }
+                reserved_tokens = reserved_tokens.saturating_add(metadata.reserved_tokens());
+            }
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::AdmitWork(AdmitWorkCommand {
                         entity: entity.id(),
                     }),
                 )));
+            admitted += 1;
         }
         Ok(())
     }
@@ -768,22 +865,47 @@ impl System for LeaseSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_LEASE: usize = 32;
-        let admitted: Vec<Entity> = ctx
+        if ctx.should_stop() {
+            return Ok(());
+        }
+        let mut admitted: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
             .filter(|(entity, state)| {
                 **state == WorkState::Ready
                     && ctx.world_view.get::<AdmittedMarker>(*entity).is_some()
             })
-            .take(MAX_LEASE)
             .map(|(entity, _)| entity)
             .collect();
+        admitted.sort_by_key(|entity| entity.id());
+        admitted.truncate(MAX_LEASE);
         for entity in admitted {
+            if ctx.should_stop() {
+                break;
+            }
+            if let Some(metadata) = ctx.world_view.get::<InferenceWorkMetadata>(entity) {
+                if metadata.deadline_expired(ctx.now_ms()) {
+                    ctx.command_buffer
+                        .emit(CommandEnvelope::new(Command::Lifecycle(
+                            LifecycleCommand::RequestCancellation(RequestCancellationCommand {
+                                entity: entity.id(),
+                                reason: "inference deadline expired before lease".to_string(),
+                            }),
+                        )));
+                    continue;
+                }
+            }
+            let ttl_ms = ctx
+                .world_view
+                .get::<InferenceWorkMetadata>(entity)
+                .and_then(|metadata| metadata.deadline_ms.checked_sub(ctx.now_ms()))
+                .map(|remaining| remaining.max(1).min(60_000))
+                .unwrap_or(60_000);
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::AcquireWorkLease(AcquireWorkLeaseCommand {
                         work_entity: entity.id(),
-                        ttl_ms: 60000,
+                        ttl_ms,
                         lease_generation: 1,
                     }),
                 )));
@@ -821,56 +943,92 @@ impl System for DispatchSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_DISPATCH: usize = 32;
-        let leased: Vec<Entity> = ctx
+        if ctx.should_stop() {
+            return Ok(());
+        }
+        let mut leased: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
-            .filter(|(_, state)| matches!(state, WorkState::Leased(_)))
-            .take(MAX_DISPATCH)
+            .filter(|(entity, state)| {
+                matches!(state, WorkState::Leased(_))
+                    && ctx.world_view.get::<AdmittedMarker>(*entity).is_some()
+            })
             .map(|(entity, _)| entity)
             .collect();
+        leased.sort_by_key(|entity| entity.id());
+        leased.truncate(MAX_DISPATCH);
         for entity in &leased {
-            let selection = ctx.kernel.select_provider(&ProviderSelectionRequest {
-                operation: "work_dispatch".to_string(),
-                requested_provider: Some("auto".to_string()),
-                fallback_providers: vec!["metal".to_string(), "cpu".to_string()],
-            });
-            if let Ok(mut receipts) = ctx.provider_receipts.lock() {
-                receipts.push(selection.clone());
+            if ctx.should_stop() {
+                break;
             }
-
-            let Some(backend) = selection.selected_backend().map(str::to_owned) else {
-                ctx.command_buffer
-                    .emit(CommandEnvelope::new(Command::Lifecycle(
-                        LifecycleCommand::FailWork(
-                            prism_ecs_constitutional::lifecycle_command::FailWorkCommand {
-                                work_entity: entity.id(),
-                                error: format!(
-                                    "provider selection failed: {:?}",
-                                    selection.fallback_reason
-                                ),
-                                lease_generation: 1,
-                                retryable: true,
-                            },
-                        ),
-                    )));
+            let already_active = ctx
+                .active_dispatches
+                .lock()
+                .map(|active| {
+                    active
+                        .iter()
+                        .any(|handle| handle.work_entity == entity.id())
+                })
+                .unwrap_or(true);
+            if already_active {
                 continue;
+            }
+            let now_ms = ctx.now_ms();
+            let (config, deadline_ms) = if let Some(metadata) =
+                ctx.world_view.get::<InferenceWorkMetadata>(*entity)
+            {
+                if metadata.deadline_expired(now_ms) {
+                    ctx.command_buffer
+                        .emit(CommandEnvelope::new(Command::Lifecycle(
+                            LifecycleCommand::RequestCancellation(RequestCancellationCommand {
+                                entity: entity.id(),
+                                reason: "inference deadline expired before dispatch".to_string(),
+                            }),
+                        )));
+                    continue;
+                }
+                let (chunk_start, chunk_end) = match metadata.phase {
+                    InferencePhase::Prefill => metadata.next_prefill_chunk(
+                        ctx.inference_policy
+                            .prefill_chunk_tokens
+                            .min(ctx.inference_policy.max_prefill_tokens_per_tick),
+                    ),
+                    InferencePhase::Decode => {
+                        (metadata.prefilled_tokens, metadata.prefilled_tokens)
+                    }
+                };
+                let phase = match metadata.phase {
+                    InferencePhase::Prefill if chunk_end > chunk_start => "prefill",
+                    _ => "decode",
+                };
+                let config = serde_json::json!({
+                    "phase": phase,
+                    "prefill_start": chunk_start,
+                    "prefill_end": chunk_end,
+                    "decode_token_index": metadata.generated_tokens,
+                    "kv_epoch": metadata.kv_epoch,
+                    "kv_tokens": metadata.kv_tokens,
+                    "token_budget": metadata.reserved_tokens(),
+                })
+                .to_string();
+                let deadline = if metadata.deadline_ms == 0 {
+                    now_ms.saturating_add(30_000)
+                } else {
+                    metadata.deadline_ms
+                };
+                (config, deadline)
+            } else {
+                ("{}".to_string(), now_ms.saturating_add(30_000))
             };
-
-            let deadline_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64
-                + 30000;
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::RecordDispatchIntent(RecordDispatchIntentCommand {
                         work_entity: entity.id(),
-                        backend: backend.clone(),
-                        config: serde_json::to_string(&selection).unwrap_or_else(|_| "{}".into()),
+                        backend: "auto".to_string(),
+                        config: config.clone(),
                         deadline_ms,
                     }),
                 )));
-
             if let Some(dispatcher) = ctx.dispatcher {
                 let output_path = ctx
                     .world_view
@@ -888,8 +1046,8 @@ impl System for DispatchSystem {
                     plan_generation: 0,
                     lease_token: format!("work-lease:{}", entity.id()),
                     deadline_ms,
-                    backend,
-                    config: serde_json::to_string(&selection).unwrap_or_else(|_| "{}".into()),
+                    backend: "auto".to_string(),
+                    config,
                     input_path,
                     output_path,
                 };
@@ -948,17 +1106,28 @@ impl System for CollectSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_COLLECT: usize = 32;
-        let dispatched: Vec<Entity> = ctx
+        if ctx.should_stop() {
+            return Ok(());
+        }
+        let mut dispatched: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
             .filter(|(entity, state)| {
                 matches!(**state, WorkState::Leased(_))
                     && ctx.world_view.get::<PublishedMarker>(*entity).is_none()
+                    && ctx
+                        .world_view
+                        .get::<InferenceWorkMetadata>(*entity)
+                        .is_none()
             })
-            .take(MAX_COLLECT)
             .map(|(entity, _)| entity)
             .collect();
+        dispatched.sort_by_key(|entity| entity.id());
+        dispatched.truncate(MAX_COLLECT);
         for entity in dispatched {
+            if ctx.should_stop() {
+                break;
+            }
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::CompleteWork(
@@ -975,14 +1144,100 @@ impl System for CollectSystem {
             if let Ok(mut active) = ctx.active_dispatches.lock() {
                 let mut i = 0;
                 while i < active.len() {
-                    let handle = &active[i].clone();
-                    match dispatcher.poll(handle) {
+                    if ctx.should_stop() {
+                        break;
+                    }
+                    let handle = active[i].clone();
+                    let entity = Entity::new(handle.work_entity, 0);
+                    let metadata = ctx.world_view.get::<InferenceWorkMetadata>(entity).copied();
+                    let cancelled = ctx
+                        .world_view
+                        .get::<WorkState>(entity)
+                        .is_some_and(|state| *state == WorkState::Cancelled);
+                    let expired =
+                        metadata.is_some_and(|metadata| metadata.deadline_expired(ctx.now_ms()));
+                    if cancelled || expired {
+                        let _ = dispatcher.cancel(&handle);
+                        if !cancelled {
+                            ctx.command_buffer
+                                .emit(CommandEnvelope::new(Command::Lifecycle(
+                                    LifecycleCommand::RequestCancellation(
+                                        RequestCancellationCommand {
+                                            entity: handle.work_entity,
+                                            reason: "inference deadline expired during dispatch"
+                                                .to_string(),
+                                        },
+                                    ),
+                                )));
+                        }
+                        active.swap_remove(i);
+                        continue;
+                    }
+                    match dispatcher.poll(&handle) {
                         Ok(DispatchStatus::Completed(output)) => {
-                            ctx.command_buffer.emit(CommandEnvelope::new(Command::Lifecycle(
-                                LifecycleCommand::CompleteWork(prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
-                                    work_entity: handle.work_entity, output, output_path: String::new(), lease_generation: handle.attempt,
-                                }),
-                            )));
+                            if let Some(metadata) = metadata {
+                                match metadata.phase {
+                                    InferencePhase::Prefill => {
+                                        let next = metadata.next_after_prefill(
+                                            ctx.inference_policy.prefill_chunk_tokens.min(
+                                                ctx.inference_policy.max_prefill_tokens_per_tick,
+                                            ),
+                                        );
+                                        ctx.command_buffer.emit(CommandEnvelope::new(
+                                            Command::AdvanceInference {
+                                                entity: handle.work_entity,
+                                                phase: next.phase,
+                                                prefilled_tokens: next.prefilled_tokens,
+                                                generated_tokens: next.generated_tokens,
+                                                kv_epoch: next.kv_epoch,
+                                                kv_tokens: next.kv_tokens,
+                                            },
+                                        ));
+                                    }
+                                    InferencePhase::Decode
+                                        if metadata.is_complete_after_decode() =>
+                                    {
+                                        ctx.command_buffer.emit(CommandEnvelope::new(
+                                            Command::Lifecycle(
+                                                LifecycleCommand::CompleteWork(
+                                                    prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
+                                                        work_entity: handle.work_entity,
+                                                        output,
+                                                        output_path: String::new(),
+                                                        lease_generation: handle.attempt,
+                                                    },
+                                                ),
+                                            ),
+                                        ));
+                                    }
+                                    InferencePhase::Decode => {
+                                        let next = metadata.next_after_decode();
+                                        ctx.command_buffer.emit(CommandEnvelope::new(
+                                            Command::AdvanceInference {
+                                                entity: handle.work_entity,
+                                                phase: next.phase,
+                                                prefilled_tokens: next.prefilled_tokens,
+                                                generated_tokens: next.generated_tokens,
+                                                kv_epoch: next.kv_epoch,
+                                                kv_tokens: next.kv_tokens,
+                                            },
+                                        ));
+                                    }
+                                }
+                            } else {
+                                ctx.command_buffer.emit(CommandEnvelope::new(
+                                    Command::Lifecycle(
+                                        LifecycleCommand::CompleteWork(
+                                            prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
+                                                work_entity: handle.work_entity,
+                                                output,
+                                                output_path: String::new(),
+                                                lease_generation: handle.attempt,
+                                            },
+                                        ),
+                                    ),
+                                ));
+                            }
                             active.swap_remove(i);
                         }
                         Ok(DispatchStatus::Failed(e)) => {
@@ -1042,17 +1297,24 @@ impl System for PublishSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_PUBLISH: usize = 32;
-        let completed: Vec<Entity> = ctx
+        if ctx.should_stop() {
+            return Ok(());
+        }
+        let mut completed: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
             .filter(|(entity, state)| {
                 **state == WorkState::Completed
                     && ctx.world_view.get::<PublishedMarker>(*entity).is_none()
             })
-            .take(MAX_PUBLISH)
             .map(|(entity, _)| entity)
             .collect();
+        completed.sort_by_key(|entity| entity.id());
+        completed.truncate(MAX_PUBLISH);
         for entity in completed {
+            if ctx.should_stop() {
+                break;
+            }
             let entity_id = entity.id();
             let result_payload = if let Some(path) = ctx.world_view.get::<WorkOutputPath>(entity) {
                 let output_path = path.0.as_str();
@@ -1139,14 +1401,21 @@ impl System for CleanupSystem {
     }
     fn run(&self, ctx: &SystemContext<'_>) -> Result<(), RuntimeError> {
         const MAX_CLEANUP: usize = 32;
-        let terminal: Vec<Entity> = ctx
+        if ctx.should_stop() {
+            return Ok(());
+        }
+        let mut terminal: Vec<Entity> = ctx
             .world_view
             .query::<WorkState>()
             .filter(|(_, state)| state.is_terminal())
-            .take(MAX_CLEANUP)
             .map(|(entity, _)| entity)
             .collect();
+        terminal.sort_by_key(|entity| entity.id());
+        terminal.truncate(MAX_CLEANUP);
         for entity in terminal {
+            if ctx.should_stop() {
+                break;
+            }
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::ReleaseWorkLease(
@@ -1375,6 +1644,200 @@ mod tests {
             schedule.set_admission_capacity(0),
             Err(ScheduleError::InvalidAdmissionCapacity)
         ));
+    }
+
+    #[test]
+    fn inference_admission_is_token_kv_aware_and_priority_deterministic() {
+        let kernel = crate::kernel::RuntimeKernel::new();
+        let handle = kernel.handle();
+        let mut schedule = RuntimeSchedule::new();
+        schedule.set_admission_capacity(4).unwrap();
+        schedule
+            .set_inference_policy(InferenceAdmissionPolicy {
+                max_inflight_tokens: 14,
+                max_kv_tokens: 32,
+                ..InferenceAdmissionPolicy::default()
+            })
+            .unwrap();
+        schedule.register_system(Box::new(ObserveSystem)).unwrap();
+        schedule.register_system(Box::new(PlanSystem)).unwrap();
+        schedule.register_system(Box::new(AdmitSystem)).unwrap();
+        schedule.bind(&handle);
+        schedule.validate().unwrap();
+        kernel.set_schedule(schedule);
+
+        let create = |priority: u32| {
+            handle
+                .submit(CommandEnvelope::new(Command::Lifecycle(
+                    LifecycleCommand::CreateWork(CreateWorkCommand {
+                        entity: 0,
+                        target_entity: 0,
+                        kind: "inference".to_string(),
+                        resource_claim: format!(
+                            r#"{{"prompt_tokens":8,"max_new_tokens":4,"kv_epoch":9,"kv_capacity_tokens":32,"priority":{priority}}}"#
+                        ),
+                        output_path: String::new(),
+                        input_path: String::new(),
+                    }),
+                )))
+                .unwrap()
+                .result
+        };
+        let first = match create(1) {
+            CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
+                work_entity, ..
+            }) => work_entity,
+            result => panic!("expected work creation, got {result:?}"),
+        };
+        let second = match create(2) {
+            CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
+                work_entity, ..
+            }) => work_entity,
+            result => panic!("expected work creation, got {result:?}"),
+        };
+
+        kernel.run_tick().unwrap();
+        let world = handle.lock_world();
+        assert!(
+            world
+                .get_component::<AdmittedMarker>(Entity::new(second, 0))
+                .is_some(),
+            "higher priority request must win the deterministic token budget"
+        );
+        assert!(
+            world
+                .get_component::<AdmittedMarker>(Entity::new(first, 0))
+                .is_none(),
+            "the second request cannot exceed the global token budget"
+        );
+    }
+
+    #[test]
+    fn inference_prefill_advances_in_chunks_and_decode_is_one_token() {
+        let kernel = crate::kernel::RuntimeKernel::new();
+        let handle = kernel.handle();
+        let mut schedule = RuntimeSchedule::new();
+        schedule
+            .set_inference_policy(InferenceAdmissionPolicy {
+                prefill_chunk_tokens: 2,
+                max_prefill_tokens_per_tick: 2,
+                ..InferenceAdmissionPolicy::default()
+            })
+            .unwrap();
+        schedule.register_system(Box::new(ObserveSystem)).unwrap();
+        schedule.register_system(Box::new(PlanSystem)).unwrap();
+        schedule.register_system(Box::new(AdmitSystem)).unwrap();
+        schedule.register_system(Box::new(LeaseSystem)).unwrap();
+        schedule.register_system(Box::new(DispatchSystem)).unwrap();
+        schedule.register_system(Box::new(CollectSystem)).unwrap();
+        schedule.bind(&handle);
+        schedule.validate().unwrap();
+        schedule.set_dispatcher(std::sync::Arc::new(
+            crate::test_adapters::FakeWorkDispatcher,
+        ));
+        kernel.set_schedule(schedule);
+
+        let entity = match handle
+            .submit(CommandEnvelope::new(Command::Lifecycle(
+                LifecycleCommand::CreateWork(CreateWorkCommand {
+                    entity: 0,
+                    target_entity: 0,
+                    kind: "inference".to_string(),
+                    resource_claim: r#"{"prompt_tokens":5,"max_new_tokens":2,"prefill_chunk_tokens":2,"kv_epoch":17,"kv_capacity_tokens":32}"#.to_string(),
+                    output_path: String::new(),
+                    input_path: String::new(),
+                }),
+            )))
+            .unwrap()
+            .result
+        {
+            CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated { work_entity, .. }) => {
+                work_entity
+            }
+            result => panic!("expected work creation, got {result:?}"),
+        };
+
+        for expected_prefilled in [2, 4, 5] {
+            let tick = kernel.run_tick().unwrap();
+            assert!(
+                tick.emitted_commands
+                    .iter()
+                    .flatten()
+                    .any(|command| command.command_type.contains("AdvanceInference")),
+                "each prefill dispatch must advance canonical inference metadata"
+            );
+            let world = handle.lock_world();
+            let metadata = world
+                .get_component::<InferenceWorkMetadata>(Entity::new(entity, 0))
+                .copied()
+                .unwrap();
+            assert_eq!(metadata.prefilled_tokens, expected_prefilled);
+        }
+
+        let decode_tick = kernel.run_tick().unwrap();
+        let world = handle.lock_world();
+        let metadata = world
+            .get_component::<InferenceWorkMetadata>(Entity::new(entity, 0))
+            .copied()
+            .unwrap();
+        assert_eq!(metadata.generated_tokens, 1);
+        assert!(
+            decode_tick
+                .emitted_commands
+                .iter()
+                .flatten()
+                .any(|command| command.command_type.contains("AdvanceInference")),
+            "decode must advance one token through KernelHandle"
+        );
+    }
+
+    #[test]
+    fn inference_deadline_cancels_before_admission() {
+        let kernel = crate::kernel::RuntimeKernel::new();
+        let handle = kernel.handle();
+        let mut schedule = RuntimeSchedule::new();
+        schedule.register_system(Box::new(ObserveSystem)).unwrap();
+        schedule.register_system(Box::new(PlanSystem)).unwrap();
+        schedule.register_system(Box::new(AdmitSystem)).unwrap();
+        schedule.bind(&handle);
+        schedule.validate().unwrap();
+        kernel.set_schedule(schedule);
+
+        let entity = match handle
+            .submit(CommandEnvelope::new(Command::Lifecycle(
+                LifecycleCommand::CreateWork(CreateWorkCommand {
+                    entity: 0,
+                    target_entity: 0,
+                    kind: "inference".to_string(),
+                    resource_claim: r#"{"prompt_tokens":4,"max_new_tokens":1,"deadline_ms":1}"#
+                        .to_string(),
+                    output_path: String::new(),
+                    input_path: String::new(),
+                }),
+            )))
+            .unwrap()
+            .result
+        {
+            CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
+                work_entity, ..
+            }) => work_entity,
+            result => panic!("expected work creation, got {result:?}"),
+        };
+
+        let tick = kernel.run_tick().unwrap();
+        let world = handle.lock_world();
+        assert_eq!(
+            world.get_component::<WorkState>(Entity::new(entity, 0)),
+            Some(&WorkState::Cancelled)
+        );
+        assert!(tick
+            .emitted_commands
+            .iter()
+            .flatten()
+            .any(|command| command.command_type.contains("RequestCancellation")));
+        assert!(world
+            .get_component::<AdmittedMarker>(Entity::new(entity, 0))
+            .is_none());
     }
 
     #[test]
@@ -1922,7 +2385,6 @@ mod tests {
         let mut complete_work_seen = false;
         let mut publish_result_seen = false;
         let mut cleanup_seen = false;
-        let mut provider_selection_seen = false;
 
         let max_ticks: usize = 20;
         for i in 0..max_ticks {
@@ -1970,10 +2432,6 @@ mod tests {
                     }
                 }
             }
-            if !tick.provider_selections.is_empty() {
-                provider_selection_seen = true;
-                assert_eq!(tick.provider_selections[0].selected_backend(), Some("cpu"));
-            }
 
             if publish_result_seen {
                 break;
@@ -2001,10 +2459,6 @@ mod tests {
             "PublishSystem should emit PublishResult with Published status"
         );
         assert!(cleanup_seen, "CleanupSystem should emit cleanup commands");
-        assert!(
-            provider_selection_seen,
-            "DispatchSystem should publish a provider-selection receipt"
-        );
 
         // ── 6. Verify file digest via blake3 hash ──
         let meta = std::fs::metadata(&output_path).expect("output file should exist");

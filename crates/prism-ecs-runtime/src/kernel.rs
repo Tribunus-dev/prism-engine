@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use prism_ecs_core::{Entity, EntityKind, World, WorldEpoch};
 
+use crate::inference::{InferencePhase, InferenceWorkMetadata};
 use crate::ports::{
     Admission, CommandStore, KernelClock, LeaseCoordinator, ProviderSelectionReceipt,
     ProviderSelectionRequest, ProviderSelector, RecoveryReport, RuntimeError, SnapshotPayload,
@@ -45,6 +46,16 @@ pub enum Command {
         source_path: String,
         format: String,
     },
+    /// Advance one completed prefill chunk or decode token through the
+    /// canonical ECS world. The KV epoch is a fence against stale work.
+    AdvanceInference {
+        entity: u64,
+        phase: InferencePhase,
+        prefilled_tokens: u32,
+        generated_tokens: u32,
+        kv_epoch: u64,
+        kv_tokens: u32,
+    },
 
     // ── Lifecycle (typed, domain-specific) ──
     Lifecycle(LifecycleCommand),
@@ -53,9 +64,23 @@ pub enum Command {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum CommandResult {
     // Infrastructure
-    Spawned { entity_id: u64 },
-    Cancelled { entity_id: u64 },
-    Registered { entity_id: u64 },
+    Spawned {
+        entity_id: u64,
+    },
+    Cancelled {
+        entity_id: u64,
+    },
+    Registered {
+        entity_id: u64,
+    },
+    InferenceAdvanced {
+        entity_id: u64,
+        phase: InferencePhase,
+        prefilled_tokens: u32,
+        generated_tokens: u32,
+        kv_epoch: u64,
+        kv_tokens: u32,
+    },
 
     // Lifecycle
     Lifecycle(LifecycleCommandResult),
@@ -89,6 +114,7 @@ impl CommandEnvelope {
             Command::SpawnAgent { .. } => 0,
             Command::CancelAgent { .. } => 0,
             Command::RegisterModel { .. } => 0,
+            Command::AdvanceInference { .. } => 0,
             Command::Lifecycle(lc) => lc.type_id().discriminant(),
         };
         Self {
@@ -109,6 +135,7 @@ impl CommandEnvelope {
             SpawnAgent { .. } => 1,
             CancelAgent { .. } => 2,
             RegisterModel { .. } => 3,
+            AdvanceInference { .. } => 4,
             Lifecycle(_) => self.command_type_id as u64,
         })
     }
@@ -308,6 +335,22 @@ impl KernelHandle {
                 format,
             } => execute_register_model(&mut world, &name, &source_path, &format)
                 .map(|entity_id| CommandResult::Registered { entity_id }),
+            Command::AdvanceInference {
+                entity,
+                phase,
+                prefilled_tokens,
+                generated_tokens,
+                kv_epoch,
+                kv_tokens,
+            } => execute_advance_inference(
+                &mut world,
+                entity,
+                phase,
+                prefilled_tokens,
+                generated_tokens,
+                kv_epoch,
+                kv_tokens,
+            ),
             Command::Lifecycle(lc) => execute_lifecycle(&mut world, lc),
         };
 
@@ -522,6 +565,24 @@ impl RuntimeKernel {
                         )));
                     }
                 }
+            }
+            Command::AdvanceInference {
+                entity,
+                phase,
+                prefilled_tokens,
+                generated_tokens,
+                kv_epoch,
+                kv_tokens,
+            } => {
+                let _ = execute_advance_inference(
+                    &mut world,
+                    entity,
+                    phase,
+                    prefilled_tokens,
+                    generated_tokens,
+                    kv_epoch,
+                    kv_tokens,
+                )?;
             }
             // Re-execute lifecycle commands so entity ID allocation stays
             // consistent across the command sequence. The execute_lifecycle
@@ -928,6 +989,14 @@ fn execute_create_work(
             },
         )
         .map_err(|e| RuntimeError::Entity(format!("failed to set work item: {e}")))?;
+    if matches!(kind, prism_ecs_constitutional::work::WorkKind::RunInference) {
+        world
+            .add_component(
+                spawned.entity,
+                InferenceWorkMetadata::from_resource_claim(&cmd.resource_claim),
+            )
+            .map_err(|e| RuntimeError::Entity(format!("failed to set inference metadata: {e}")))?;
+    }
     if !cmd.output_path.is_empty() {
         world
             .add_component(
@@ -1141,6 +1210,54 @@ fn execute_record_work_plan(
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::WorkPlanRecorded { entity: cmd.entity },
     ))
+}
+
+fn execute_advance_inference(
+    world: &mut World,
+    entity: u64,
+    phase: InferencePhase,
+    prefilled_tokens: u32,
+    generated_tokens: u32,
+    kv_epoch: u64,
+    kv_tokens: u32,
+) -> Result<CommandResult, RuntimeError> {
+    let e = Entity::new(entity, 0);
+    let current = world
+        .get_component::<InferenceWorkMetadata>(e)
+        .copied()
+        .ok_or_else(|| RuntimeError::Entity(format!("inference metadata missing for {entity}")))?;
+    if current.kv_epoch != kv_epoch {
+        return Err(RuntimeError::Entity(format!(
+            "stale KV epoch for inference {entity}: expected {}, received {kv_epoch}",
+            current.kv_epoch
+        )));
+    }
+    if prefilled_tokens < current.prefilled_tokens
+        || generated_tokens < current.generated_tokens
+        || kv_tokens < current.kv_tokens
+    {
+        return Err(RuntimeError::Entity(format!(
+            "inference progress regressed for {entity}"
+        )));
+    }
+    let next = InferenceWorkMetadata {
+        phase,
+        prefilled_tokens,
+        generated_tokens,
+        kv_tokens,
+        ..current
+    };
+    world
+        .add_component(e, next)
+        .map_err(|error| RuntimeError::Entity(format!("advance inference failed: {error}")))?;
+    Ok(CommandResult::InferenceAdvanced {
+        entity_id: entity,
+        phase,
+        prefilled_tokens,
+        generated_tokens,
+        kv_epoch,
+        kv_tokens,
+    })
 }
 
 fn execute_spawn(
