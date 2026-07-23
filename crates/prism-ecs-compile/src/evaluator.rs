@@ -833,7 +833,8 @@ impl ProgressiveStageExecutor for MeasuredEvaluatorAdapter {
         _stage: usize,
         context: &[u8],
     ) -> TernaryObjectiveEvidence {
-        self.evaluate_ternary(genome, context).unwrap_or_default()
+        self.evaluate_ternary(genome, context)
+            .unwrap_or_else(|_| TernaryObjectiveEvidence::missing())
     }
 }
 

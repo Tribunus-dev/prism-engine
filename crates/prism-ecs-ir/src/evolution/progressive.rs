@@ -56,7 +56,7 @@ pub fn logit_cross_entropy(reference: &[f64], candidate: &[f64]) -> f64 {
 }
 
 /// Structured evidence collected for one candidate.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TernaryObjectiveEvidence {
     pub quality: f64,
     pub activation_error: f64,
@@ -95,6 +95,28 @@ pub struct TernaryObjectives {
 }
 
 impl TernaryObjectiveEvidence {
+    /// Evidence returned when evaluation did not produce a behavioral
+    /// measurement.  Missing measurements are represented by non-finite
+    /// values so they cannot be mistaken for zero-error observations.
+    pub fn missing() -> Self {
+        Self {
+            quality: 0.0,
+            activation_error: f64::NAN,
+            logit_divergence: f64::NAN,
+            task_loss: f64::NAN,
+            router_agreement: f64::NAN,
+            router_margin_error: f64::NAN,
+            expert_balance_error: f64::NAN,
+            logit_cross_entropy: f64::NAN,
+            generation_loss: f64::NAN,
+            memory_bytes: 0,
+            latency_ms: f64::NAN,
+            residual_bytes: 0,
+            native_ternary_fraction: 0.0,
+            energy: f64::NAN,
+        }
+    }
+
     /// Whether the measured behavioral dimensions satisfy the hard reference
     /// gates. This is the value that must feed CImage promotion; a scalar
     /// backend fitness score is never sufficient.
@@ -153,6 +175,12 @@ impl TernaryObjectiveEvidence {
             o.generation,
             o.expert_balance,
         ]
+    }
+}
+
+impl Default for TernaryObjectiveEvidence {
+    fn default() -> Self {
+        Self::missing()
     }
 }
 
@@ -323,6 +351,26 @@ impl<'a> ProgressiveParetoSearch<'a> {
 mod tests {
     use super::*;
     struct Executor;
+
+    fn measured_evidence() -> TernaryObjectiveEvidence {
+        TernaryObjectiveEvidence {
+            quality: 0.99,
+            activation_error: 0.01,
+            logit_divergence: 0.01,
+            task_loss: 0.01,
+            router_agreement: 0.99,
+            router_margin_error: 0.01,
+            expert_balance_error: 0.01,
+            logit_cross_entropy: 0.01,
+            generation_loss: 0.01,
+            memory_bytes: 1,
+            latency_ms: 1.0,
+            residual_bytes: 0,
+            native_ternary_fraction: 1.0,
+            energy: 1.0,
+        }
+    }
+
     impl ProgressiveStageExecutor for Executor {
         fn evaluate(
             &self,
@@ -330,19 +378,17 @@ mod tests {
             stage: usize,
             _context: &[u8],
         ) -> TernaryObjectiveEvidence {
-            TernaryObjectiveEvidence {
-                quality: if stage == 0 { 0.99 } else { 1.0 },
-                native_ternary_fraction: if matches!(
-                    g.representation,
-                    super::super::RepresentationAxis::Ternary158
-                ) {
-                    1.0
-                } else {
-                    0.0
-                },
-                router_agreement: 1.0,
-                ..Default::default()
-            }
+            let mut evidence = measured_evidence();
+            evidence.quality = if stage == 0 { 0.99 } else { 1.0 };
+            evidence.native_ternary_fraction = if matches!(
+                g.representation,
+                super::super::RepresentationAxis::Ternary158
+            ) {
+                1.0
+            } else {
+                0.0
+            };
+            evidence
         }
     }
     #[test]
@@ -391,5 +437,20 @@ mod tests {
         let identical = logit_cross_entropy(&[2.0, 1.0], &[2.0, 1.0]);
         let shifted = logit_cross_entropy(&[2.0, 1.0], &[1.0, 2.0]);
         assert!(identical > 0.0 && identical < shifted);
+    }
+
+    #[test]
+    fn missing_behavioral_evidence_is_not_a_passing_observation() {
+        let missing = TernaryObjectiveEvidence::missing();
+        let limits = TernaryAdmissionLimits::default();
+        assert!(!missing.behavioral_passes(&limits));
+        assert!(!limits.admits(&missing));
+    }
+
+    #[test]
+    fn failed_behavioral_threshold_is_rejected() {
+        let mut evidence = measured_evidence();
+        evidence.activation_error = 0.06;
+        assert!(!evidence.behavioral_passes(&TernaryAdmissionLimits::default()));
     }
 }

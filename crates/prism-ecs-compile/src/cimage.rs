@@ -2239,16 +2239,22 @@ pub fn promote_cimage_with_behavioral_evidence(
     behavioral: prism_ecs_ir::evolution::TernaryObjectiveEvidence,
     limits: &prism_ecs_ir::evolution::TernaryAdmissionLimits,
 ) -> Result<NativeTernaryPromotionEvidence, String> {
+    let behavioral_passed = behavioral.behavioral_passes(limits);
     evidence.behavioral_reference = BackendPass {
         attempted: true,
-        passed: behavioral.behavioral_passes(limits),
+        passed: behavioral_passed,
     };
-    evidence.activation_error = behavioral.activation_error;
-    evidence.router_agreement = behavioral.router_agreement;
-    evidence.router_margin_error = behavioral.router_margin_error;
-    evidence.logit_cross_entropy = behavioral.logit_cross_entropy;
-    evidence.generation_loss = behavioral.generation_loss;
-    evidence.expert_balance_error = behavioral.expert_balance_error;
+    evidence.activation_error = Some(behavioral.activation_error);
+    evidence.logit_divergence = Some(behavioral.logit_divergence);
+    evidence.task_loss = Some(behavioral.task_loss);
+    evidence.router_agreement = Some(behavioral.router_agreement);
+    evidence.router_margin_error = Some(behavioral.router_margin_error);
+    evidence.logit_cross_entropy = Some(behavioral.logit_cross_entropy);
+    evidence.generation_loss = Some(behavioral.generation_loss);
+    evidence.expert_balance_error = Some(behavioral.expert_balance_error);
+    if let Some(reason) = evidence.behavioral_reject_reason(limits) {
+        return Err(format!("cannot promote CImage: {reason}"));
+    }
     promote_cimage_after_replay(path, evidence)
 }
 
@@ -2828,12 +2834,14 @@ mod tests {
             ane_static: BackendPass::unavailable(),
             cimage_replay: BackendPass::unavailable(),
             behavioral_reference: BackendPass::passed(),
-            activation_error: 0.0,
-            router_agreement: 1.0,
-            router_margin_error: 0.0,
-            logit_cross_entropy: 0.0,
-            generation_loss: 0.0,
-            expert_balance_error: 0.0,
+            activation_error: Some(0.0),
+            logit_divergence: Some(0.0),
+            task_loss: Some(0.0),
+            router_agreement: Some(1.0),
+            router_margin_error: Some(0.0),
+            logit_cross_entropy: Some(0.0),
+            generation_loss: Some(0.0),
+            expert_balance_error: Some(0.0),
             ane_selected: false,
             packed_abi_digest: "abi-digest".into(),
             reference_digest: "reference-digest".into(),
@@ -2842,6 +2850,128 @@ mod tests {
         assert!(promoted.cimage_replay.passed);
         let reader = CImageReader::open(&path).expect("reopen promoted CImage");
         reader.validate_payload_ranges().expect("validate replay");
+        let _ = std::fs::remove_file(path);
+    }
+
+    fn write_unpromoted_native_test_image(path: &std::path::Path) {
+        let mut writer = CImageWriter::new(path).expect("create CImage");
+        writer
+            .append_native_ternary_with_scales(
+                "weights",
+                &[0, 1, 2, 0],
+                &[0, 0, 128, 63],
+                1,
+                4,
+                TensorType::Ternary158,
+                TernaryDescriptor::legacy_for_type(&TensorType::Ternary158).unwrap(),
+            )
+            .expect("append ternary payload");
+        writer.finalize().expect("write unpromoted CImage");
+    }
+
+    fn promotion_evidence_without_behavioral_measurements() -> NativeTernaryPromotionEvidence {
+        NativeTernaryPromotionEvidence {
+            cpu_canary: BackendPass::passed(),
+            accelerate_reconstruction: BackendPass::passed(),
+            metal_packed: BackendPass::passed(),
+            ane_static: BackendPass::unavailable(),
+            cimage_replay: BackendPass::unavailable(),
+            behavioral_reference: BackendPass::passed(),
+            activation_error: None,
+            logit_divergence: None,
+            task_loss: None,
+            router_agreement: None,
+            router_margin_error: None,
+            logit_cross_entropy: None,
+            generation_loss: None,
+            expert_balance_error: None,
+            ane_selected: false,
+            packed_abi_digest: "abi".into(),
+            reference_digest: "reference".into(),
+        }
+    }
+
+    fn measured_behavioral_test_evidence() -> prism_ecs_ir::evolution::TernaryObjectiveEvidence {
+        prism_ecs_ir::evolution::TernaryObjectiveEvidence {
+            quality: 0.9,
+            activation_error: 0.012,
+            logit_divergence: 0.023,
+            task_loss: 0.034,
+            router_agreement: 0.97,
+            router_margin_error: 0.014,
+            logit_cross_entropy: 0.025,
+            generation_loss: 0.036,
+            expert_balance_error: 0.017,
+            latency_ms: 2.0,
+            native_ternary_fraction: 1.0,
+            energy: 1.0,
+            ..prism_ecs_ir::evolution::TernaryObjectiveEvidence::missing()
+        }
+    }
+
+    #[test]
+    fn promotion_rejects_missing_behavioral_measurement() {
+        let path = std::env::temp_dir().join(format!(
+            "prism_compile_missing_behavioral_{}_{}.cimage",
+            std::process::id(),
+            line!()
+        ));
+        write_unpromoted_native_test_image(&path);
+        let error = promote_cimage_after_replay(&path, promotion_evidence_without_behavioral_measurements())
+            .expect_err("missing behavioral measurements must reject promotion");
+        assert!(error.contains("activation_error measurement is missing"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn promotion_rejects_failed_behavioral_threshold() {
+        let path = std::env::temp_dir().join(format!(
+            "prism_compile_failed_behavioral_{}_{}.cimage",
+            std::process::id(),
+            line!()
+        ));
+        write_unpromoted_native_test_image(&path);
+        let mut behavioral = measured_behavioral_test_evidence();
+        behavioral.activation_error = 0.2;
+        let error = promote_cimage_with_behavioral_evidence(
+            &path,
+            promotion_evidence_without_behavioral_measurements(),
+            behavioral,
+            &prism_ecs_ir::evolution::TernaryAdmissionLimits::default(),
+        )
+        .expect_err("failed behavioral threshold must reject promotion");
+        assert!(error.contains("activation_error 0.2 exceeds maximum"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn promotion_preserves_measured_behavioral_provenance_in_cimage() {
+        let path = std::env::temp_dir().join(format!(
+            "prism_compile_behavioral_provenance_{}_{}.cimage",
+            std::process::id(),
+            line!()
+        ));
+        write_unpromoted_native_test_image(&path);
+        let promoted = promote_cimage_with_behavioral_evidence(
+            &path,
+            promotion_evidence_without_behavioral_measurements(),
+            measured_behavioral_test_evidence(),
+            &prism_ecs_ir::evolution::TernaryAdmissionLimits::default(),
+        )
+        .expect("measured behavioral evidence should promote");
+        assert_eq!(promoted.activation_error, Some(0.012));
+        assert_eq!(promoted.logit_divergence, Some(0.023));
+        assert_eq!(promoted.task_loss, Some(0.034));
+        assert_eq!(promoted.expert_balance_error, Some(0.017));
+
+        let reader = CImageReader::open(&path).expect("reopen promoted CImage");
+        let stored = reader
+            .header
+            .native_ternary_promotion
+            .as_ref()
+            .expect("promotion evidence should be stored");
+        assert_eq!(stored, &promoted);
+        reader.validate_payload_ranges().expect("CImage admission");
         let _ = std::fs::remove_file(path);
     }
 
@@ -3050,12 +3180,14 @@ mod tests {
                 ane_static: BackendPass::passed(),
                 cimage_replay: BackendPass::passed(),
                 behavioral_reference: BackendPass::passed(),
-                activation_error: 0.0,
-                router_agreement: 1.0,
-                router_margin_error: 0.0,
-                logit_cross_entropy: 0.0,
-                generation_loss: 0.0,
-                expert_balance_error: 0.0,
+                activation_error: Some(0.0),
+                logit_divergence: Some(0.0),
+                task_loss: Some(0.0),
+                router_agreement: Some(1.0),
+                router_margin_error: Some(0.0),
+                logit_cross_entropy: Some(0.0),
+                generation_loss: Some(0.0),
+                expert_balance_error: Some(0.0),
                 ane_selected: true,
                 packed_abi_digest: "abi".into(),
                 reference_digest: "reference".into(),

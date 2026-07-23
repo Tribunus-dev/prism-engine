@@ -924,13 +924,14 @@ pub fn compile_source(
                 receipt_path.display()
             ))
         })?;
-        let mut evidence: prism_ecs_quantization::ternarization::promotion::NativeTernaryPromotionEvidence =
+        let evidence: prism_ecs_quantization::ternarization::promotion::NativeTernaryPromotionEvidence =
             serde_json::from_slice(&bytes).map_err(|e| {
                 CompileError::CImageEmitFailed(format!(
                     "parse native promotion evidence {}: {e}",
                     receipt_path.display()
                 ))
             })?;
+        let mut behavioral_evidence = None;
         // Re-run behavioral admission against an actual mapped router tensor;
         // a receipt cannot manufacture a passing reference result.
         if let Some(model_dir) = compiler.source_path.as_ref() {
@@ -962,21 +963,25 @@ pub fn compile_source(
                     let behavioral = probe
                         .evaluate(&genome, &context)
                         .map_err(|e| CompileError::CImageEmitFailed(e.to_string()))?;
-                    evidence.behavioral_reference =
-                        prism_ecs_quantization::ternarization::promotion::BackendPass {
-                            attempted: true,
-                            passed: behavioral.behavioral_passes(
-                                &prism_ecs_ir::evolution::TernaryAdmissionLimits::default(),
-                            ),
-                        };
+                    behavioral_evidence = Some(behavioral);
                 }
             }
         }
         writer
             .finalize_unpromoted()
             .map_err(CompileError::CImageEmitFailed)?;
-        crate::cimage::promote_cimage_after_replay(&output_path, evidence)
+        if let Some(behavioral) = behavioral_evidence {
+            crate::cimage::promote_cimage_with_behavioral_evidence(
+                &output_path,
+                evidence,
+                behavioral,
+                &prism_ecs_ir::evolution::TernaryAdmissionLimits::default(),
+            )
             .map_err(CompileError::CImageEmitFailed)?;
+        } else {
+            crate::cimage::promote_cimage_after_replay(&output_path, evidence)
+                .map_err(CompileError::CImageEmitFailed)?;
+        }
     } else {
         if std::env::var_os("PRISM_EMIT_UNPROMOTED_NATIVE").is_some() {
             writer

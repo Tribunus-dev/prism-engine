@@ -212,11 +212,11 @@ impl JointTilingEvidence {
         &self,
         cpu_canary_passed: bool,
         accelerate_passed: bool,
-        behavioral_reference_passed: bool,
         cimage_replay_passed: bool,
         ane_selected: bool,
         packed_abi_digest: impl Into<String>,
         reference_digest: impl Into<String>,
+        behavioral: Option<prism_ecs_ir::evolution::TernaryObjectiveEvidence>,
     ) -> prism_ecs_quantization::ternarization::promotion::NativeTernaryPromotionEvidence {
         use prism_ecs_quantization::ternarization::promotion::{
             BackendPass, NativeTernaryPromotionEvidence,
@@ -225,6 +225,14 @@ impl JointTilingEvidence {
             attempted: self.native_lane_ready(),
             passed: self.native_lane_ready(),
         };
+        let limits = prism_ecs_ir::evolution::TernaryAdmissionLimits::default();
+        let behavioral_reference =
+            behavioral
+                .as_ref()
+                .map_or_else(BackendPass::unavailable, |evidence| BackendPass {
+                    attempted: true,
+                    passed: evidence.behavioral_passes(&limits),
+                });
         NativeTernaryPromotionEvidence {
             cpu_canary: BackendPass {
                 attempted: true,
@@ -244,16 +252,15 @@ impl JointTilingEvidence {
                 attempted: true,
                 passed: cimage_replay_passed,
             },
-            behavioral_reference: BackendPass {
-                attempted: true,
-                passed: behavioral_reference_passed,
-            },
-            activation_error: 0.0,
-            router_agreement: 0.0,
-            router_margin_error: 0.0,
-            logit_cross_entropy: 0.0,
-            generation_loss: 0.0,
-            expert_balance_error: 0.0,
+            behavioral_reference,
+            activation_error: behavioral.as_ref().map(|e| e.activation_error),
+            logit_divergence: behavioral.as_ref().map(|e| e.logit_divergence),
+            task_loss: behavioral.as_ref().map(|e| e.task_loss),
+            router_agreement: behavioral.as_ref().map(|e| e.router_agreement),
+            router_margin_error: behavioral.as_ref().map(|e| e.router_margin_error),
+            logit_cross_entropy: behavioral.as_ref().map(|e| e.logit_cross_entropy),
+            generation_loss: behavioral.as_ref().map(|e| e.generation_loss),
+            expert_balance_error: behavioral.as_ref().map(|e| e.expert_balance_error),
             ane_selected,
             packed_abi_digest: packed_abi_digest.into(),
             reference_digest: reference_digest.into(),
@@ -1985,12 +1992,11 @@ mod tests {
             profiles_evaluated: Vec::new(),
         };
         let receipt =
-            evidence.native_promotion_evidence(true, true, true, true, true, "abi", "reference");
+            evidence.native_promotion_evidence(true, true, true, true, "abi", "reference", None);
         assert!(!receipt.metal_packed.passed);
         assert!(!receipt.ane_static.passed);
         assert!(!receipt.eligible());
     }
-
     #[test]
     fn non_measured_selection_receipt_is_explicitly_diagnostic() {
         let evaluator = DefaultSearchEvaluator;
@@ -2005,5 +2011,45 @@ mod tests {
         assert!(!receipt.production_evidence);
         assert_eq!(receipt.evidence_source, "synthetic-fallback");
         assert!(receipt.fallback_reason.is_some());
+    }
+    #[test]
+    fn promotion_builder_preserves_measured_behavioral_evidence() {
+        let evidence = JointTilingEvidence {
+            selected_configuration: None,
+            selected_score: None,
+            both_backends_feasible: true,
+            both_backends_measured: true,
+            profiles_evaluated: Vec::new(),
+        };
+        let behavioral = prism_ecs_ir::evolution::TernaryObjectiveEvidence {
+            quality: 0.9,
+            activation_error: 0.012,
+            logit_divergence: 0.023,
+            task_loss: 0.034,
+            router_agreement: 0.97,
+            router_margin_error: 0.014,
+            logit_cross_entropy: 0.025,
+            generation_loss: 0.036,
+            expert_balance_error: 0.017,
+            latency_ms: 2.0,
+            native_ternary_fraction: 1.0,
+            energy: 1.0,
+            ..prism_ecs_ir::evolution::TernaryObjectiveEvidence::missing()
+        };
+        let receipt = evidence.native_promotion_evidence(
+            true,
+            true,
+            true,
+            true,
+            "abi",
+            "reference",
+            Some(behavioral),
+        );
+        assert!(receipt.eligible());
+        assert_eq!(receipt.activation_error, Some(0.012));
+        assert_eq!(receipt.logit_divergence, Some(0.023));
+        assert_eq!(receipt.task_loss, Some(0.034));
+        assert_eq!(receipt.router_agreement, Some(0.97));
+        assert_eq!(receipt.generation_loss, Some(0.036));
     }
 }
