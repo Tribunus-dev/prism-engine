@@ -1352,17 +1352,72 @@ fn execute_cancel_txn(world: &mut World, agent_id: u64) -> Result<(), RuntimeErr
 
 fn execute_register_model(
     world: &mut World,
-    _name: &str,
-    _source_path: &str,
-    _format: &str,
+    name: &str,
+    source_path: &str,
+    format: &str,
 ) -> Result<u64, RuntimeError> {
-    let spawned = world
+    use prism_ecs_constitutional::artifact::{ArtifactDigest, ArtifactMetadata, ArtifactPath};
+    use prism_ecs_constitutional::lifecycle::ArtifactLifecycle;
+    use prism_ecs_constitutional::residency::{ModelArtifactRef, ModelId, ModelLifecycle};
+    use prism_ecs_constitutional::types::DomainId;
+
+    if name.trim().is_empty() || source_path.trim().is_empty() || format.trim().is_empty() {
+        return Err(RuntimeError::Entity(
+            "model registration requires name, source_path, and format".into(),
+        ));
+    }
+
+    // Registration is deterministic across journal replay. When the source is
+    // available, its content is the provenance; otherwise retain a stable
+    // descriptor digest so the model can still be admitted for later loading.
+    let provenance = std::fs::read(source_path).unwrap_or_else(|_| {
+        format!("{name}\0{source_path}\0{format}").into_bytes()
+    });
+    let digest = ArtifactDigest(*blake3::hash(&provenance).as_bytes());
+
+    let artifact = world
         .spawn(EntityKind::Artifact, None)
         .map_err(|e| RuntimeError::Entity(format!("spawn artifact failed: {e}")))?;
-    let entity_id = spawned.entity.id();
-    // TODO: Wire ModelRegistration component from prism-ecs-constitutional
-    // once model registration types are available.
-    Ok(entity_id)
+    let artifact_id = artifact.entity.id();
+    world
+        .add_component(artifact.entity, ArtifactPath(source_path.to_owned()))
+        .and_then(|_| world.add_component(artifact.entity, digest))
+        .and_then(|_| {
+            world.add_component(
+                artifact.entity,
+                ArtifactMetadata {
+                    length: provenance.len() as u64,
+                    path: source_path.to_owned(),
+                },
+            )
+        })
+        .and_then(|_| world.add_component(artifact.entity, ArtifactLifecycle::Discovered))
+        .map_err(|e| RuntimeError::Entity(format!("register artifact components failed: {e}")))?;
+
+    let model = world
+        .spawn(EntityKind::Model, None)
+        .map_err(|e| RuntimeError::Entity(format!("spawn model failed: {e}")))?;
+    let model_id = model.entity.id();
+    let stable_id = uuid::Uuid::from_bytes(
+        blake3::hash(format!("{name}\0{source_path}\0{format}").as_bytes()).as_bytes()[..16]
+            .try_into()
+            .expect("blake3 digest has at least 16 bytes"),
+    );
+    world
+        .add_component(model.entity, ModelId(DomainId(stable_id)))
+        .and_then(|_| {
+            world.add_component(
+                model.entity,
+                ModelArtifactRef {
+                    artifact_id,
+                    digest,
+                },
+            )
+        })
+        .and_then(|_| world.add_component(model.entity, ModelLifecycle::Created))
+        .map_err(|e| RuntimeError::Entity(format!("register model components failed: {e}")))?;
+
+    Ok(model_id)
 }
 
 #[cfg(test)]
@@ -1400,6 +1455,37 @@ mod tests {
         assert_eq!(
             item.kind,
             prism_ecs_constitutional::work::WorkKind::RunInference
+        );
+    }
+
+    #[test]
+    fn model_registration_populates_constitutional_artifact_and_model() {
+        let mut world = World::new();
+        let model_id = execute_register_model(
+            &mut world,
+            "demo",
+            "/models/demo.safetensors",
+            "safetensors",
+        )
+        .expect("model registration");
+        let model = Entity::new(model_id, 0);
+        let model_ref = world
+            .get_component::<prism_ecs_constitutional::residency::ModelArtifactRef>(model)
+            .expect("model artifact reference");
+        assert_eq!(
+            world.get_component::<prism_ecs_constitutional::residency::ModelLifecycle>(model),
+            Some(&prism_ecs_constitutional::residency::ModelLifecycle::Created)
+        );
+        let artifact = Entity::new(model_ref.artifact_id, 0);
+        assert_eq!(world.entity_kind(artifact), Some(EntityKind::Artifact));
+        assert_eq!(
+            world.get_component::<prism_ecs_constitutional::lifecycle::ArtifactLifecycle>(artifact),
+            Some(&prism_ecs_constitutional::lifecycle::ArtifactLifecycle::Discovered)
+        );
+        assert_eq!(
+            world.get_component::<prism_ecs_constitutional::artifact::ArtifactDigest>(artifact)
+                .expect("artifact digest"),
+            &model_ref.digest
         );
     }
 }
