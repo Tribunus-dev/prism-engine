@@ -54,18 +54,24 @@
   frame.append(inspector);
   const explorer = document.createElement('div');
   explorer.className = 'tensor-search-explorer';
-  explorer.innerHTML = '<div class="search-explorer-toolbar"><label>TARGET DEPLOYMENT <select aria-label="Target deployment"><option value="mi300x">MI300X / ROCm-HIP</option><option value="apple">Apple Silicon / Metal</option><option value="xdna">XDNA2 / spatial plan</option></select></label><span class="search-generation">GENERATION 01 / 04</span></div><div class="candidate-frontier" role="list" aria-label="Evolutionary representation candidates"></div><p class="search-explorer-note"></p>';
+  explorer.innerHTML = '<div class="search-explorer-toolbar"><label>TARGET DEPLOYMENT <select aria-label="Target deployment"><option value="mi300x">MI300X / ROCm-HIP</option><option value="apple">Apple Silicon / Metal</option><option value="xdna">XDNA2 / spatial plan</option></select></label><span class="search-generation">GENERATION 01 / 04</span></div><div class="compiler-graph" role="img" aria-label="Compiler graph from tensor source through representation candidates to target execution and proof"><div class="graph-node graph-source"><b>TENSOR</b><span>q_proj.weight</span></div><div class="graph-edge edge-source"></div><div class="graph-candidates"><div class="graph-node graph-candidate" data-candidate="0"><b>BF16</b><span>reference</span></div><div class="graph-node graph-candidate" data-candidate="1"><b>INT8</b><span>per-channel</span></div><div class="graph-node graph-candidate" data-candidate="2"><b>TERNARY</b><span>+ fallback</span></div><div class="graph-node graph-candidate" data-candidate="3"><b>MIXED</b><span>best fit</span></div></div><div class="graph-edge edge-target"></div><div class="graph-node graph-target"><b class="graph-target-name">MI300X</b><span class="graph-target-detail">ROCm/HIP · tiles</span></div><div class="graph-edge edge-proof"></div><div class="graph-node graph-proof"><b>PROOF</b><span>receipt gate</span></div></div><div class="candidate-frontier" role="list" aria-label="Evolutionary representation candidates"></div><p class="search-explorer-note"></p>';
   frame.append(explorer);
   const frontier = explorer.querySelector('.candidate-frontier');
   const note = explorer.querySelector('.search-explorer-note');
   const targetSelect = explorer.querySelector('select');
+  const graphTargetName = explorer.querySelector('.graph-target-name');
+  const graphTargetDetail = explorer.querySelector('.graph-target-detail');
   const renderFrontier = () => {
     frontier.innerHTML = candidates.map((candidate, index) => `<button type="button" class="candidate-chip ${index === Math.min(current, 3) ? 'candidate-selected' : ''}" role="listitem" data-candidate="${index}"><b>${candidate[0]}</b><span>${candidate[1]}</span><em>${candidate[2]}</em></button>`).join('');
     frontier.querySelectorAll('.candidate-chip').forEach(button => button.addEventListener('click', () => {
       frontier.querySelectorAll('.candidate-chip').forEach(item => item.classList.remove('candidate-selected'));
       button.classList.add('candidate-selected');
+      explorer.querySelectorAll('.graph-candidate').forEach(node => node.classList.toggle('graph-active', node.dataset.candidate === button.dataset.candidate));
       note.textContent = `Compiler comparison: ${button.querySelector('b').textContent} evaluated against the BF16 reference for ${targets[target][0]}. The chip describes a search state, not a measured benchmark.`;
     }));
+    explorer.querySelectorAll('.graph-candidate').forEach(node => node.classList.toggle('graph-active', Number(node.dataset.candidate) === Math.min(current, 3)));
+    graphTargetName.textContent = targets[target][0].split(' / ')[0];
+    graphTargetDetail.textContent = targets[target][1];
     note.textContent = `Generation ${String(Math.min(current + 1, 4)).padStart(2, '0')} compares representations against ${targets[target][0]} using ${targets[target][1]}.`;
   };
   targetSelect.addEventListener('change', () => { target = targetSelect.value; renderFrontier(); });
