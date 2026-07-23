@@ -33,6 +33,7 @@ pub mod kv;
 pub mod lanes;
 pub mod memory;
 pub mod modality;
+pub mod mori;
 pub mod receipt;
 pub mod residency;
 pub mod scheduler;
@@ -54,6 +55,10 @@ pub use kv::KvManager;
 pub use lanes::LaneRouter;
 pub use memory::MemoryPressureMonitor;
 pub use modality::{ModalityCapabilities, ModalityProvider};
+pub use mori::{
+    MoriCapabilityKey, MoriEcs, MoriResidency, MoriResidencyStage, MoriRouteDescriptor,
+    MoriRouteStage,
+};
 pub use receipt::ReceiptStore;
 pub use residency::WeightResidencyManager;
 pub use scheduler::InferenceScheduler;
