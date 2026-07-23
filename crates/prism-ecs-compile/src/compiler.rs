@@ -469,6 +469,9 @@ pub fn compile_source(
             early_stop_generations: 10,
             production_mode: compiler.config.production_mode,
             surrogate_measurement_fraction: 0.2,
+            min_quality: None,
+            max_p99_latency_ms: None,
+            max_peak_memory_bytes: None,
         };
         let mut coordinator =
             SearchCoordinator::new(search_config).with_runtime(EvolutionRuntime::global());

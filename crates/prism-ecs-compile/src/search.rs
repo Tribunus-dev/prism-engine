@@ -12,6 +12,8 @@ use prism_ecs_ir::evolution::{
     objectives::{
         ArchiveEntry, BehaviorDescriptor, ObjectiveValue, ObjectiveVector, QualityDiversityArchive,
     },
+    pareto::{DeploymentCandidate, DeploymentEvidence, DeploymentGatePolicy, DeploymentIdentity,
+        DeploymentMeasurements, GateStatus, HardGate, ParetoArchive},
     progressive::ProgressiveStageExecutor,
     variation::VariationOperator,
 };
@@ -467,6 +469,76 @@ fn candidate_measurements(evidence: &JointTilingEvidence) -> serde_json::Value {
     })
 }
 
+/// Promote the search trace's measured records into the durable deployment
+/// archive. This is deliberately done after the existing joint evaluator has
+/// produced its evidence, so the deployment archive cannot accidentally admit
+/// a surrogate-only score as hardware measurement.
+fn deployment_archive_from_records(
+    source: &CanonicalSource,
+    evaluator: &dyn EvaluationStrategy,
+    workload_digest: &str,
+    records: &[CandidateRecord],
+    gate_policy: &DeploymentGatePolicy,
+) -> ParetoArchive {
+    let mut archive = ParetoArchive::default();
+    for record in records {
+        let Ok(genome) = serde_json::from_str::<CandidateGenome>(&record.genome) else { continue };
+        let Some(measurements) = record.measurements.as_ref() else { continue };
+        let engram_digest = sha256_digest(
+            &serde_json::to_string(&genome.engram).unwrap_or_default(),
+        );
+        let number = |name: &str| measurements.get(name).and_then(serde_json::Value::as_f64);
+        let deployment_measurements = DeploymentMeasurements {
+            quality: number("accuracy_score"),
+            p50_latency_ms: number("wall_time_ms"),
+            p99_latency_ms: number("wall_time_ms"),
+            throughput_tokens_per_second: None,
+            peak_memory_bytes: number("peak_memory_mb").map(|v| (v * 1024.0 * 1024.0) as u64),
+            kv_memory_bytes: None,
+            power_watts: None,
+            transfer_bytes: None,
+            engram_residency_bytes: None,
+            engram_lookup_latency_ms: None,
+            engram_hit_rate: None,
+        };
+        let status = match record.status {
+            CandidateStatus::Evaluated => GateStatus::Passed,
+            CandidateStatus::Rejected | CandidateStatus::Failed => GateStatus::Failed,
+        };
+        let mut candidate = DeploymentCandidate::new(
+            DeploymentIdentity {
+                model_digest: source.identity.source_digest.clone(),
+                tokenizer_digest: "unresolved".into(),
+                engram_artifact: Some(engram_digest),
+                target: evaluator.name().into(),
+                workload_digest: workload_digest.into(),
+            },
+            genome,
+            0,
+        );
+        candidate.candidate_digest = record.candidate_digest.clone();
+        let mut gates = gate_policy.evaluate(&deployment_measurements);
+        gates.push(HardGate {
+            name: "joint_backend_execution".into(),
+            status,
+            observed: record.score_vector.first().copied(),
+            limit: None,
+            detail: record.rejection_reason.clone().unwrap_or_else(|| "candidate evaluated".into()),
+        });
+        candidate.evidence = DeploymentEvidence {
+            candidate_digest: record.candidate_digest.clone(),
+            cimage_digest: None,
+            compiler_version: env!("CARGO_PKG_VERSION").into(),
+            backend_version: evaluator.name().into(),
+            measurements: deployment_measurements,
+            gates,
+            receipt_ids: Vec::new(),
+        };
+        archive.insert(candidate);
+    }
+    archive
+}
+
 struct DefaultSearchEvaluator;
 
 struct SearchTilingCostModel;
@@ -638,6 +710,7 @@ impl SearchCoordinator {
                     &[],
                     None,
                 ),
+                deployment_archive: ParetoArchive::default(),
             });
         }
 
@@ -1622,7 +1695,18 @@ impl SearchCoordinator {
             &all_candidates,
             selected_candidate_digest,
         );
-
+        let deployment_archive = deployment_archive_from_records(
+            source,
+            evaluator,
+            &sha256_digest(&String::from_utf8_lossy(context_bytes)),
+            &all_candidates,
+            &DeploymentGatePolicy {
+                min_quality: self.config.min_quality,
+                max_p99_latency_ms: self.config.max_p99_latency_ms,
+                max_peak_memory_bytes: self.config.max_peak_memory_bytes,
+                require_measurements: true,
+            },
+        );
         Ok(SearchResult {
             format_plan,
             trace: self.trace.clone(),
@@ -1633,6 +1717,7 @@ impl SearchCoordinator {
             best_joint_tiling,
             evolution_memory: self.memory.clone(),
             selection_receipt,
+            deployment_archive,
         })
     }
 
@@ -1712,6 +1797,10 @@ pub struct SearchResult {
     /// for diagnostics, but it is explicitly ineligible as production
     /// evidence when the evaluator was not real.
     pub selection_receipt: SearchSelectionReceipt,
+    /// Deployment-level archive containing only candidates with explicit
+    /// admission evidence. This is the handoff to CImage selection and
+    /// runtime policy, distinct from the in-generation genome frontier.
+    pub deployment_archive: ParetoArchive,
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

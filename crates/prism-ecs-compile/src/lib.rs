@@ -340,6 +340,14 @@ pub struct SearchConfig {
     /// the contextual surrogate has enough evidence.
     #[serde(default = "default_surrogate_measurement_fraction")]
     pub surrogate_measurement_fraction: f64,
+    /// Optional hard deployment gates applied when measured candidates are
+    /// promoted into the durable Pareto archive.
+    #[serde(default)]
+    pub min_quality: Option<f64>,
+    #[serde(default)]
+    pub max_p99_latency_ms: Option<f64>,
+    #[serde(default)]
+    pub max_peak_memory_bytes: Option<u64>,
 }
 
 fn default_surrogate_measurement_fraction() -> f64 {
@@ -358,6 +366,9 @@ impl Default for SearchConfig {
             early_stop_generations: 10,
             production_mode: false,
             surrogate_measurement_fraction: default_surrogate_measurement_fraction(),
+            min_quality: None,
+            max_p99_latency_ms: None,
+            max_peak_memory_bytes: None,
         }
     }
 }

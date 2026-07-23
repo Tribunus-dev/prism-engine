@@ -220,6 +220,11 @@ pub struct SearchStateComponent {
     /// reducing hardware measurements to the format plan.
     pub best_joint_tiling: Option<crate::search::JointTilingEvidence>,
     pub selection_receipt: crate::search::SearchSelectionReceipt,
+    /// Durable deployment-level candidates promoted from measured search
+    /// records. Runtime policy consumes this archive, not the scalar genome
+    /// fitness used during mutation.
+    pub deployment_archive: prism_ecs_ir::evolution::ParetoArchive,
+    pub selected_deployment_digest: Option<String>,
 }
 
 impl Component for SearchStateComponent {}
@@ -506,6 +511,11 @@ pub fn system_run_search(world: &mut World) -> Result<(), CompileError> {
                 format_plan: result.format_plan,
                 best_joint_tiling: result.best_joint_tiling,
                 selection_receipt: result.selection_receipt,
+                selected_deployment_digest: result
+                    .deployment_archive
+                    .select(&prism_ecs_ir::evolution::DeploymentPolicy::quality_first())
+                    .map(|candidate| candidate.candidate_digest.clone()),
+                deployment_archive: result.deployment_archive,
             },
         )
         .map_err(|e| CompileError::SearchFailed(e.to_string()))?;
@@ -1326,9 +1336,24 @@ pub fn system_build_receipt(world: &mut World) -> Result<(), CompileError> {
         receipt.events_digest = Some(hex::encode(sha2::Sha256::digest(&bytes)));
     }
 
+    receipt.receipt_id = hex::encode(sha2::Sha256::digest(
+        format!("{}:{}", receipt.output_digest, receipt.search_trace_digest.clone().unwrap_or_default()).as_bytes(),
+    ));
+    let receipt_id = receipt.receipt_id.clone();
+    let cimage_digest = receipt.output_digest.clone();
+
     world
         .insert_component(session, CompilationReceipt(receipt))
         .map_err(|e| CompileError::CompilationFailed(e.to_string()))?;
+
+    // Close the evidence chain for every admitted deployment candidate with
+    // the emitted artifact and the compilation receipt that certified it.
+    if let Ok(search) = world.component_mut::<SearchStateComponent>(session) {
+        for candidate in search.deployment_archive.candidates.values_mut() {
+            candidate.evidence.cimage_digest = Some(cimage_digest.clone());
+            candidate.evidence.receipt_ids.push(receipt_id.clone());
+        }
+    }
 
     // Update session status to Complete.
     if let Ok(status) = world.component_mut::<CompilationSession>(session) {
