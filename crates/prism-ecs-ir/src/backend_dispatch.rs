@@ -112,6 +112,23 @@ pub fn dispatch_codegen(
     }
 }
 
+/// Dispatch with the native AMD XDNA backend supplied by the workspace-level
+/// runtime. `prism-ecs-ir` deliberately does not depend on that runtime (the
+/// runtime already consumes this crate), so the integration point is an
+/// explicit function pointer rather than a wrapper or a cyclic dependency.
+pub fn dispatch_codegen_with_amd_npu(
+    world: &World,
+    root_op: Entity,
+    format: HalFormat,
+    amd_npu_codegen: impl FnOnce(&World, Entity) -> Result<HalExecutable, String>,
+) -> Result<HalExecutable, String> {
+    if format == HalFormat::AmdNpu {
+        amd_npu_codegen(world, root_op)
+    } else {
+        dispatch_codegen(world, root_op, format)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -246,6 +263,26 @@ mod tests {
             err.contains("not yet implemented"),
             "expected 'not yet implemented', got: {err}"
         );
+    }
+
+    #[test]
+    fn dispatch_amd_npu_accepts_native_runtime_callback() {
+        let mut world = World::new();
+        let op: Entity = world
+            .spawn(EntityKind::Node, Some("dummy".into()))
+            .unwrap()
+            .into();
+        let exec = dispatch_codegen_with_amd_npu(&world, op, HalFormat::AmdNpu, |_world, _root| {
+            Ok(HalExecutable {
+                format: HalFormat::AmdNpu,
+                source: "native-xdna".into(),
+                entry_point: "matmul".into(),
+                grid_dims: (1, 1, 1),
+                block_dims: (1, 1, 1),
+            })
+        })
+        .expect("native callback should be used");
+        assert_eq!(exec.source, "native-xdna");
     }
 
     // ── Intel NPU dispatch ────────────────────────────────────────────────

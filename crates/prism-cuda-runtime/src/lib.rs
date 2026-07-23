@@ -26,7 +26,7 @@ pub enum HalFormat {
 }
 
 /// A compiled CUDA kernel, ready for dispatch.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CudaBinary {
     /// The raw cubin bytes (device code).
     pub cubin: Vec<u8>,
@@ -36,6 +36,62 @@ pub struct CudaBinary {
     pub grid_dims: (u32, u32, u32),
     /// Block dimensions (threads per block).
     pub block_dims: (u32, u32, u32),
+}
+
+/// A host-side buffer binding supplied to a CUDA launch.
+///
+/// The runtime owns the eventual device allocation and copy; keeping the
+/// source bytes and mutability in this contract lets the driver path validate
+/// the ABI before touching CUDA state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CudaBufferBinding {
+    pub name: String,
+    pub bytes: Vec<u8>,
+    pub writable: bool,
+}
+
+/// Buffer-aware CUDA launch contract used by Prism's backend adapter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CudaLaunchRequest {
+    pub binary: CudaBinary,
+    pub bindings: Vec<CudaBufferBinding>,
+}
+
+impl CudaLaunchRequest {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.binary.cubin.is_empty() {
+            return Err("CUDA launch binary is empty".into());
+        }
+        if self.binary.entry_point.is_empty() {
+            return Err("CUDA launch entry point is empty".into());
+        }
+        if [
+            self.binary.grid_dims.0,
+            self.binary.grid_dims.1,
+            self.binary.grid_dims.2,
+            self.binary.block_dims.0,
+            self.binary.block_dims.1,
+            self.binary.block_dims.2,
+        ]
+        .iter()
+        .any(|dimension| *dimension == 0)
+        {
+            return Err("CUDA launch dimensions must be nonzero".into());
+        }
+        let mut names = std::collections::HashSet::new();
+        for binding in &self.bindings {
+            if binding.name.is_empty() || !names.insert(&binding.name) {
+                return Err("CUDA launch bindings must have unique nonempty names".into());
+            }
+            if binding.bytes.is_empty() {
+                return Err(format!(
+                    "CUDA launch binding '{}' has an empty buffer",
+                    binding.name
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Wall-clock timing for a completed kernel dispatch.

@@ -6,22 +6,24 @@
 <title>Prism Deno Dashboard</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9d1d9;height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:.85rem}
-.header{background:#161b22;padding:10px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:16px;flex-shrink:0}
+body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;background:radial-gradient(circle at 15% -10%,#18335f 0,transparent 34%),radial-gradient(circle at 90% 10%,#321651 0,transparent 28%),#080b12;color:#d7e2f0;height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:.85rem}
+.header{background:rgba(11,16,28,.82);backdrop-filter:blur(18px);padding:13px 22px;border-bottom:1px solid #2a3a58;display:flex;align-items:center;gap:18px;flex-shrink:0;box-shadow:0 8px 30px #0005;z-index:2}
 .header h1{font-size:1rem;color:#58a6ff;font-weight:600}
 .header h1 span{color:#8b949e;font-weight:400}
+.header-context{color:#8b949e;font-size:.74rem;line-height:1.35;max-width:250px}
 .tabs{display:flex;gap:4px;overflow-x:auto}
-.tab{padding:5px 14px;border-radius:6px;cursor:pointer;color:#8b949e;font-size:.8rem;background:transparent;border:1px solid transparent;transition:all .1s;white-space:nowrap}
+.tab{padding:7px 14px;border-radius:8px;cursor:pointer;color:#8b949e;font:inherit;font-size:.8rem;background:transparent;border:1px solid transparent;transition:all .16s;white-space:nowrap}
 .tab:hover{color:#c9d1d9;background:#21262d}
-.tab.active{color:#58a6ff;border-color:#1f6feb44;background:#1f6feb22}
-.panel{display:none;flex:1;overflow:hidden}
+.tab:focus-visible,button.btn:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid #67e8f9;outline-offset:2px}
+.tab.active{color:#a5f3fc;border-color:#22d3ee66;background:linear-gradient(135deg,#164e6388,#312e8188);box-shadow:0 0 18px #22d3ee22}
+.panel{display:none;flex:1;overflow:hidden;background:linear-gradient(180deg,#0a0f1a66,#080b12)}
 .panel.active{display:flex;flex-direction:column}
 .search-row{display:flex;gap:8px;margin-bottom:12px}
 .search-row input{flex:1;padding:8px 12px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#c9d1d9;font-size:.8rem}
 .search-row input:focus{outline:1px solid #58a6ff;border-color:#58a6ff}
 button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-size:.8rem;font-weight:500;transition:background .15s;white-space:nowrap}
-.btn-primary{background:#238636;color:#fff}
-.btn-primary:hover{background:#2ea043}
+.btn-primary{background:linear-gradient(135deg,#0891b2,#6366f1);color:#fff;box-shadow:0 0 18px #22d3ee33}
+.btn-primary:hover{background:linear-gradient(135deg,#06b6d4,#818cf8);transform:translateY(-1px)}
 .btn-primary:disabled{opacity:.5;cursor:not-allowed}
 .btn-hf{background:#1f6feb;color:#fff}
 .btn-hf:hover{background:#388bfd}
@@ -43,8 +45,8 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
 .phase-dot.running{background:#3fb950}
 .phase-dot.pending{background:#d29922}
 .phase-dot.done{background:#58a6ff}
-.hw-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px}
-.hw-item{background:#21262d;border-radius:6px;padding:10px}
+.hw-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;padding:20px;max-width:1100px;width:100%;margin:0 auto}
+.hw-item{background:linear-gradient(145deg,#111b2d,#101722);border:1px solid #263650;border-radius:12px;padding:16px;box-shadow:0 12px 30px #0003;animation:rise .4s ease both}
 .hw-label{font-size:.7rem;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
 .hw-value{font-size:1rem;font-weight:600;color:#c9d1d9}
 .hw-value.mem{color:#7ee787}
@@ -55,7 +57,15 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
 .result-item:last-child{border:none}
 .result-name{color:#c9d1d9}
 .loading{text-align:center;padding:20px;color:#484f58}
+.empty-state{margin-top:12px;padding:24px;border:1px dashed #334155;border-radius:12px;text-align:center;color:#94a3b8;background:#0b1220aa}.empty-state strong{display:block;color:#dbeafe;margin-bottom:5px}.empty-state span{display:block;font-size:.76rem;line-height:1.45;max-width:460px;margin:0 auto}
 .error{color:#f85149;font-size:.8rem;padding:8px;background:#da363311;border-radius:6px;margin:8px 0}
+.section-intro{padding:20px 20px 4px;max-width:920px}.section-intro h2{font-size:1.25rem;color:#f8fafc;margin-bottom:5px}.section-intro p{color:#94a3b8;line-height:1.5;max-width:760px}.eyebrow{color:#67e8f9;text-transform:uppercase;letter-spacing:.12em;font-size:.66rem;font-weight:600;margin-bottom:5px}.helper{color:#71809a;font-size:.72rem;line-height:1.45;margin-top:6px}.live-pill{display:inline-flex;align-items:center;gap:6px;color:#a7f3d0;background:#064e3b55;border:1px solid #10b98166;border-radius:999px;padding:4px 8px;font-size:.68rem}.live-pill:before{content:'';width:6px;height:6px;border-radius:50%;background:#34d399;animation:pulse 1.8s ease-in-out infinite}.demo-pill{color:#fde68a;background:#713f1255;border:1px solid #f59e0b66;border-radius:999px;padding:4px 8px;font-size:.68rem}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes pulse{0%,100%{opacity:.55;box-shadow:0 0 0 0 #22d3ee55}50%{opacity:1;box-shadow:0 0 0 5px #22d3ee00}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
+.compile-stage{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:16px;overflow:auto}.stage-card{background:#0f172acc;border:1px solid #2a3a58;border-radius:14px;padding:18px;animation:rise .45s ease both}.stage-card h2{font-size:1rem;color:#a5f3fc;margin-bottom:8px}.stage-card p{color:#91a4bd;line-height:1.5;margin-bottom:14px}.stage-status{min-height:28px;color:#67e8f9;font-family:ui-monospace,monospace;margin-top:10px;white-space:pre-wrap}@media(max-width:760px){.compile-stage{grid-template-columns:1fr}}
+.auth-shield{position:fixed;inset:0;background:#050812cc;backdrop-filter:blur(14px);z-index:20;display:flex;align-items:center;justify-content:center;animation:rise .3s ease}.auth-card{width:min(420px,calc(100vw - 32px));background:linear-gradient(145deg,#111d33,#151225);border:1px solid #4f46e588;border-radius:18px;padding:28px;box-shadow:0 24px 80px #0009}.auth-card h2{color:#a5f3fc;margin-bottom:8px}.auth-card p{color:#94a3b8;line-height:1.5;margin-bottom:18px}
+.planner-shell{padding:18px;overflow:auto}.planner-hero{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}.planner-kicker{color:#67e8f9;text-transform:uppercase;letter-spacing:.12em;font-size:.68rem}.planner-title{font-size:1.35rem;color:#f8fafc;margin:5px 0}.planner-subtitle{color:#94a3b8;max-width:720px;line-height:1.5}.planner-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,1fr);gap:14px}.planner-card{background:linear-gradient(145deg,#111827,#0f172acc);border:1px solid #263650;border-radius:14px;padding:15px;box-shadow:0 14px 40px #0003}.planner-card h2{font-size:.85rem;color:#bae6fd;margin-bottom:12px}.logical-flow{display:flex;align-items:center;gap:8px;overflow:auto;padding:8px 2px 15px}.flow-node{min-width:120px;border:1px solid #355174;background:#17243a;border-radius:10px;padding:10px}.flow-node strong{display:block;color:#f8fafc;font-size:.76rem}.flow-node span{display:block;color:#7dd3fc;font-size:.66rem;margin-top:5px}.flow-arrow{color:#64748b;font-size:1.2rem}.physical-row{display:grid;grid-template-columns:120px 1fr 90px 90px;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #1e293b}.physical-row:last-child{border-bottom:0}.phase-name{color:#f8fafc;font-weight:600;font-size:.76rem}.provider-name{color:#a5f3fc}.metric{color:#cbd5e1;text-align:right;font-variant-numeric:tabular-nums;font-size:.74rem}.provider-pill{padding:6px 8px;border-radius:7px;background:#172554;border:1px solid #3730a3;font-size:.72rem}.transfer-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid #1e293b;color:#cbd5e1;font-size:.74rem}.receipt-box{font-family:ui-monospace,monospace;font-size:.68rem;color:#a7f3d0;background:#071a16;border:1px solid #14532d;padding:12px;border-radius:9px;white-space:pre-wrap}.score{font-size:1.8rem;color:#67e8f9;font-weight:700}.score-label{font-size:.68rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.08em}@media(max-width:900px){.planner-grid{grid-template-columns:1fr}.planner-hero{display:block}.physical-row{grid-template-columns:100px 1fr 70px 70px}}
 
 /* ── Browser tab ──────────────────────────────────── */
 .browser-bar{display:flex;gap:6px;padding:8px 12px;background:#161b22;border-bottom:1px solid #30363d;flex-shrink:0;align-items:center}
@@ -87,47 +97,104 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
 
 /* Screenshot highlight overlay */
 .highlight-overlay{position:absolute;border:3px solid #ff4500;border-radius:3px;pointer-events:none;z-index:10;transition:all .15s;box-shadow:0 0 8px rgba(255,69,0,.5)}
+@media(max-width:760px){.header{padding:10px 12px;align-items:flex-start;flex-direction:column;gap:9px}.tabs{width:100%}.hw-grid{grid-template-columns:1fr 1fr;padding:12px}.browser-body{flex-direction:column}.browser-reasoning{width:100%;height:180px;border-left:0;border-top:1px solid #30363d}}
 </style>
 </head>
 <body>
 <div class="header">
-  <h1>&#x26A1; Prism <span>Desktop</span></h1>
-  <div class="tabs">
-    <div class="tab active" onclick="switchTab('models')" id="tab-models">Model Browser</div>
-    <div class="tab" onclick="switchTab('agents')" id="tab-agents">Agents</div>
-    <div class="tab" onclick="switchTab('hardware')" id="tab-hardware">Hardware</div>
-    <div class="tab" onclick="switchTab('browser')" id="tab-browser">Agent Browser</div>
+  <h1>&#x26A1; Prism <span>Desktop</span></h1><div class="header-context">Local AI workspace for compiling, running, and observing models.</div><span id="daemon-status" class="live-pill" aria-live="polite">Connecting to Prism</span>
+  <div class="tabs" role="tablist" aria-label="Prism workspace sections">
+    <button class="tab active" role="tab" onclick="switchTab('models')" id="tab-models" aria-controls="panel-models" aria-selected="true">Model Browser</button>
+    <button class="tab" role="tab" onclick="switchTab('compile')" id="tab-compile" aria-controls="panel-compile" aria-selected="false">Compiler Lab</button>
+    <button class="tab" role="tab" onclick="switchTab('agents')" id="tab-agents" aria-controls="panel-agents" aria-selected="false">Agents</button>
+    <button class="tab" role="tab" onclick="switchTab('conversation')" id="tab-conversation" aria-controls="panel-conversation" aria-selected="false">Conversation</button>
+    <button class="tab" role="tab" onclick="switchTab('hardware')" id="tab-hardware" aria-controls="panel-hardware" aria-selected="false">Hardware</button>
+    <button class="tab" role="tab" onclick="switchTab('planner')" id="tab-planner" aria-controls="panel-planner" aria-selected="false">Execution Compiler</button>
+    <button class="tab" role="tab" onclick="switchTab('browser')" id="tab-browser" aria-controls="panel-browser" aria-selected="false">Agent Browser</button>
+  </div>
+</div>
+
+<div class="panel" id="panel-compile">
+  <div class="section-intro"><div class="eyebrow">Build and package</div><h2>Compiler Lab</h2><p>Turn a model into a compact compute image that Prism can run locally. Researchers can inspect the pipeline; everyone else can follow the progress messages.</p></div>
+  <div class="compile-stage">
+    <section class="stage-card"><h2>Compile a model</h2><p>Pull a repository and watch graph construction, quantization, compilation, and registry loading as a live pipeline.</p><input aria-label="Model repository" id="compile-repo" placeholder="org/model" style="width:100%;padding:10px;background:#111827;color:#e6edf3;border:1px solid #334155;border-radius:8px"><button class="btn btn-primary" style="margin-top:10px" onclick="runCompileDemo()">Run compilation</button><div id="compile-status" class="stage-status" role="status" aria-live="polite"></div></section>
+    <section class="stage-card"><h2>Production assembly</h2><p>Assemble authorized model sources into one production compute image with a durable artifact receipt.</p><textarea aria-label="Model sources in JSON" id="assembly-models" rows="5" placeholder='[{"name":"text","repo":"/path/model.cimage","ram_estimate_gb":4}]' style="width:100%;padding:10px;background:#111827;color:#e6edf3;border:1px solid #334155;border-radius:8px"></textarea><button class="btn btn-primary" style="margin-top:10px" onclick="runAssemblyDemo()">Assemble production image</button><div id="assembly-status" class="stage-status" role="status" aria-live="polite"></div></section>
   </div>
 </div>
 
 <div class="panel active" id="panel-models" style="overflow-y:auto;padding:16px">
+  <div class="section-intro" style="padding:4px 0 14px"><div class="eyebrow">Run locally</div><h2>Model Browser</h2><p>Choose a model, ask it a question, and watch the answer stream back from your machine.</p><span class="live-pill">Connected to local daemon</span></div>
   <div class="search-row">
-    <input type="text" id="hf-search" placeholder="Search HF repos..." spellcheck="false">
+    <input aria-label="Search loaded models" type="text" id="hf-search" placeholder="Search loaded models..." spellcheck="false">
     <button class="btn btn-primary" onclick="searchModels()">Search</button>
   </div>
   <div class="search-row">
-    <input type="text" id="hf-pull" placeholder="Pull repo e.g. prism-ml/Bonsai-27B" spellcheck="false">
+    <input aria-label="Model repository to pull" type="text" id="hf-pull" placeholder="Pull repo e.g. prism-ml/Bonsai-27B" spellcheck="false">
     <button class="btn btn-hf" onclick="pullModel()">Pull</button>
   </div>
-  <div id="model-results"></div>
+  <div class="search-row">
+    <input aria-label="Loaded model name" type="text" id="generation-model" placeholder="Loaded model name" spellcheck="false">
+    <input aria-label="Maximum tokens" type="number" id="generation-max-tokens" value="128" min="1" max="4096" style="width:110px">
+  </div>
+  <textarea aria-label="Prompt" id="generation-prompt" placeholder="Enter a prompt to generate..." rows="3" style="width:100%;box-sizing:border-box;margin:8px 0;padding:10px;background:#11161d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;resize:vertical"></textarea>
+  <div class="search-row">
+    <button class="btn btn-primary" id="generate-btn" onclick="runGeneration()">Generate</button>
+    <span id="generation-status" class="loading" role="status" aria-live="polite"></span>
+  </div>
+  <pre id="generation-output" style="white-space:pre-wrap;min-height:40px;padding:10px;background:#0d1117;border-radius:6px;color:#e6edf3"></pre>
+  <div id="model-results"><div class="empty-state"><strong>No models loaded yet</strong><span>Pull a model above to make it available locally. Once it is ready, select its name and enter a prompt to generate text.</span></div></div>
 </div>
 
-<div class="panel" id="panel-agents" style="overflow-y:auto;padding:16px">
+<div class="panel" id="panel-agents" style="overflow-y:auto;padding:16px"><div class="section-intro" style="padding:4px 0 14px"><div class="eyebrow">Work orchestration</div><h2>Agents</h2><p>Agents are local workers that can carry out tasks, report their phase, and be stopped or collected at any time.</p></div>
+  <div class="search-row" style="margin-bottom:10px">
+    <input aria-label="Task for a local Prism agent" id="agent-task" placeholder="Task for a local Prism agent" style="flex:1;padding:8px;background:#11161d;color:#e6edf3;border:1px solid #30363d;border-radius:6px">
+    <input aria-label="Parent agent entity ID" id="agent-parent" type="number" value="1" min="0" title="Parent entity id" style="width:70px;padding:8px;background:#11161d;color:#e6edf3;border:1px solid #30363d;border-radius:6px">
+    <button class="btn btn-primary" onclick="spawnAgent()">Spawn</button>
+  </div>
+  <div id="agent-action-status" class="loading" role="status" aria-live="polite"></div>
   <div id="agent-list"></div>
 </div>
 
+<div class="panel" id="panel-conversation" style="overflow-y:auto;padding:16px"><div class="section-intro" style="padding:4px 0 14px"><div class="eyebrow">Ask Prism</div><h2>Conversation</h2><p>Chat with the active model. Attach an image, audio clip, or video when the model supports multimodal input.</p></div>
+  <div id="conversation-messages" style="min-height:180px;max-height:420px;overflow:auto;padding:8px;background:#0d1117;border-radius:6px"></div>
+  <textarea id="conversation-input" placeholder="Talk to the active Prism agent…" rows="3" style="width:100%;box-sizing:border-box;margin:8px 0;padding:10px;background:#11161d;color:#e6edf3;border:1px solid #30363d;border-radius:6px"></textarea>
+  <input aria-label="Attach image, audio, or video" id="conversation-file" type="file" accept="image/*,audio/*,video/*">
+  <button class="btn btn-primary" onclick="sendConversationMessage()">Send</button>
+  <span id="conversation-status" class="loading" role="status" aria-live="polite"></span>
+</div>
+
 <div class="panel" id="panel-hardware" style="overflow-y:auto">
+  <div class="section-intro"><div class="eyebrow">System context</div><h2>Hardware</h2><p>This is the machine Prism can use. The cards show detected capabilities, not a performance benchmark.</p><span class="live-pill">Read from this host</span></div>
   <div class="hw-grid">
     <div class="hw-item"><div class="hw-label">CPU</div><div class="hw-value cpu" id="hw-cpu">--</div></div>
     <div class="hw-item"><div class="hw-label">Memory</div><div class="hw-value mem" id="hw-mem">--</div></div>
     <div class="hw-item"><div class="hw-label">Metal GPU</div><div class="hw-value metal" id="hw-metal">--</div></div>
     <div class="hw-item"><div class="hw-label">ANE</div><div class="hw-value ane" id="hw-ane">--</div></div>
   </div>
+  <div id="hardware-status" class="helper" style="padding:0 20px" role="status" aria-live="polite">Checking this host…</div>
+</div>
+
+<div class="panel" id="panel-planner">
+  <div class="planner-shell">
+    <div class="planner-hero"><div><div class="planner-kicker">Hardware-independent compilation</div><div class="planner-title">See how a model request becomes an execution plan.</div><div class="planner-subtitle">Prism first describes the work in logical steps, then places those steps on available hardware and records the decision.</div><span class="demo-pill">Illustrative plan · not live telemetry</span></div><button class="btn btn-primary" onclick="renderPlannerDemo()">Refresh example</button></div>
+    <div class="planner-grid">
+      <div>
+        <section class="planner-card"><h2>01 · Logical plan</h2><div class="logical-flow" id="logical-flow"></div></section>
+        <section class="planner-card" style="margin-top:14px"><h2>02 · Physical plan selected by Prism</h2><div id="physical-plan"></div></section>
+        <section class="planner-card" style="margin-top:14px"><h2>03 · Transfer fabric</h2><div id="transfer-plan"></div></section>
+      </div>
+      <div>
+        <section class="planner-card"><div class="score" id="planner-score">—</div><div class="score-label">Objective score</div><div style="margin-top:15px;color:#94a3b8;font-size:.74rem">Selected under latency, transfer, memory, and compatibility constraints.</div></section>
+        <section class="planner-card" style="margin-top:14px"><h2>Capability evidence</h2><div id="capability-evidence"></div></section>
+        <section class="planner-card" style="margin-top:14px"><h2>Immutable receipt</h2><div class="receipt-box" id="planner-receipt"></div></section>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="panel" id="panel-browser">
   <div class="browser-bar">
-    <input type="text" class="url-input" id="browser-url" placeholder="https://example.com" spellcheck="false" value="https://example.com" onkeydown="if(event.key==='Enter')browserNavigate()">
+    <input aria-label="Browser URL" type="text" class="url-input" id="browser-url" placeholder="https://example.com" spellcheck="false" value="https://example.com" onkeydown="if(event.key==='Enter')browserNavigate()">
     <button class="btn btn-browser" onclick="browserNavigate()">Go</button>
     <button class="btn btn-primary" onclick="browserScreenshot()">Screenshot</button>
     <button class="btn btn-hf" onclick="browserExtract()">Extract</button>
@@ -157,28 +224,169 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
 <script>
 let loadedUrl = '';
 let loadedTitle = '';
+const DAEMON_WS_URL = '__PRISM_DAEMON_WS__';
+const DAEMON_MODELS_WS_URL = DAEMON_WS_URL.replace('/api/ws', '/api/models/ws');
+const NATIVE_DAEMON_ROUTES = ['/api/models', '/api/agents', '/api/generate', '/api/assemble', '/api/pull'];
+
+async function checkAuthorization() {
+  try { const r = await fetch('/api/auth/status'); const data = await r.json(); if (!data.authorized) showAuthGate(); }
+  catch (_) { showAuthGate(); }
+}
+function showAuthGate() {
+  if (document.getElementById('auth-shield')) return;
+  const el = document.createElement('div'); el.id = 'auth-shield'; el.className = 'auth-shield';
+  el.innerHTML = '<div class="auth-card"><h2>Unlock Prism Compiler</h2><p>Compilation and production assembly require an explicit local authorization token.</p><input aria-label="Authorization token" id="auth-token" type="password" placeholder="Authorization token" style="width:100%;padding:11px;background:#0b1220;color:#e6edf3;border:1px solid #334155;border-radius:8px"><button class="btn btn-primary" style="margin-top:12px;width:100%" onclick="unlockPrism()">Unlock secure pipeline</button><div id="auth-error" class="error" role="alert" style="display:none"></div></div>';
+  document.body.appendChild(el);
+}
+async function unlockPrism() {
+  const token = document.getElementById('auth-token').value;
+  const r = await fetch('/api/auth/unlock', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({token})}); const data = await r.json();
+  if (data.authorized) document.getElementById('auth-shield').remove(); else { const e = document.getElementById('auth-error'); e.textContent = data.error || 'Authorization failed'; e.style.display = 'block'; }
+}
 
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
+  const selectedTab = document.getElementById('tab-' + name);
+  if (selectedTab) { selectedTab.classList.add('active'); selectedTab.setAttribute('aria-selected', 'true'); }
+  document.querySelectorAll('.panel').forEach(p => { p.classList.remove('active'); p.setAttribute('role', 'tabpanel'); p.setAttribute('aria-hidden', 'true'); });
+  const selectedPanel = document.getElementById('panel-' + name);
+  if (selectedPanel) selectedPanel.setAttribute('aria-hidden', 'false');
   document.getElementById('tab-' + name).classList.add('active');
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'agents') refreshAgents();
+  if (name === 'conversation') loadConversation();
   if (name === 'hardware') refreshHardware();
+  if (name === 'planner') renderPlannerDemo();
+}
+
+function handleTabKeyboard(event) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  const tabs = [...document.querySelectorAll('.tab')];
+  const current = tabs.indexOf(event.currentTarget);
+  if (current < 0) return;
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+  const nextTab = tabs[next];
+  const name = nextTab.id.replace('tab-', '');
+  event.preventDefault();
+  nextTab.focus();
+  switchTab(name);
+}
+
+function renderPlannerDemo() {
+  const phases = [
+    ['Tokenizer','Input → tokens'], ['Prefill','AMD MI300X · 100 μs'], ['KV Handoff','20 μs transfer'], ['Decode','SambaNova SN50 · 40 μs'], ['Streaming','SambaNova SN50 · 10 μs'], ['Validation','Receipt + parity']
+  ];
+  document.getElementById('logical-flow').innerHTML = phases.map((p,i) => (i ? '<span class="flow-arrow">→</span>' : '') + `<div class="flow-node"><strong>${p[0]}</strong><span>${p[1]}</span></div>`).join('');
+  const rows = [['Prefill','AMD MI300X','100 μs','80 GB'],['KV Handoff','AMD → SN50','20 μs','—'],['Decode','SambaNova SN50','40 μs','80 GB'],['Streaming','SambaNova SN50','10 μs','80 GB']];
+  document.getElementById('physical-plan').innerHTML = rows.map(r => `<div class="physical-row"><div class="phase-name">${r[0]}</div><div class="provider-pill provider-name">${r[1]}</div><div class="metric">${r[2]}</div><div class="metric">${r[3]}</div></div>`).join('');
+  document.getElementById('transfer-plan').innerHTML = '<div class="transfer-row"><span>AMD MI300X → SambaNova SN50</span><strong>20 μs · KV cache</strong></div><div class="transfer-row"><span>SN50 → token stream</span><strong>0 μs · local</strong></div>';
+  document.getElementById('capability-evidence').innerHTML = '<div class="transfer-row"><span>AMD MI300X</span><strong>Prefill · observed</strong></div><div class="transfer-row"><span>SambaNova SN50</span><strong>Decode · observed</strong></div><div class="transfer-row"><span>Network fabric</span><strong>KV transfer · measured</strong></div>';
+  document.getElementById('planner-score').textContent = '170 μs';
+  document.getElementById('planner-receipt').textContent = JSON.stringify({requirement:'Bonsai-27B-serving-v1',logical_revision:1,physical_revision:1,planner:'prism-planner-v1',hardware_manifest:'sha256:discovered-capabilities',validation:['logical-physical-consistent','streaming-compatible'],status:'PASS'}, null, 2);
+}
+
+async function runCompileDemo() {
+  const repo = document.getElementById('compile-repo').value.trim(), out = document.getElementById('compile-status');
+  if (!repo) { out.textContent = 'Enter a repository first'; return; } out.textContent = 'Starting compiler…';
+  const ws = new WebSocket(DAEMON_WS_URL.replace('/api/ws', '/api/pull'));
+  ws.onopen = () => ws.send(JSON.stringify({repo})); ws.onmessage = e => { const d = JSON.parse(e.data); if (d.progress) out.textContent = d.progress; if (d.error) { out.textContent = '✕ ' + d.error; ws.close(); } if (d.status === 'done') { out.textContent = '✓ Compilation complete\n' + JSON.stringify(d, null, 2); ws.close(); } }; ws.onerror = () => { out.textContent = '✕ Compiler WebSocket unavailable'; };
+}
+async function runAssemblyDemo() {
+  const out = document.getElementById('assembly-status'); let models;
+  try { models = JSON.parse(document.getElementById('assembly-models').value); } catch (_) { out.textContent = 'Enter valid JSON model sources'; return; }
+  out.textContent = 'Assembling production image…'; const r = await fetch('/api/assemble', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({models})}); const d = await r.json(); out.textContent = d.error ? '✕ ' + d.error : '✓ Assembly complete\n' + JSON.stringify(d, null, 2);
+}
+
+// Keep the WebUI's loaded-model view synchronized with the daemon registry.
+function connectModelsWs() {
+  const ws = new WebSocket(DAEMON_MODELS_WS_URL);
+  const status = document.getElementById('daemon-status');
+  const handshakeTimer = setTimeout(() => {
+    if (ws.readyState !== WebSocket.OPEN) {
+      status.textContent = 'Prism unavailable';
+      status.className = 'demo-pill';
+      ws.close();
+    }
+  }, 5000);
+  status.textContent = 'Connecting to Prism';
+  status.className = 'demo-pill';
+  ws.onopen = () => { clearTimeout(handshakeTimer); status.textContent = 'Prism connected'; status.className = 'live-pill'; };
+  ws.onmessage = event => {
+    try {
+      const data = JSON.parse(event.data);
+      if (Array.isArray(data.models)) data.models.forEach(name => pushModelResult({ name }));
+    } catch (_) {}
+  };
+  ws.onerror = () => { clearTimeout(handshakeTimer); status.textContent = 'Prism unavailable'; status.className = 'demo-pill'; };
+  ws.onclose = () => { clearTimeout(handshakeTimer); status.textContent = 'Reconnecting to Prism'; status.className = 'demo-pill'; setTimeout(connectModelsWs, 2000); };
+}
+
+async function daemonToolCall(tool, args = {}) {
+  return await new Promise((resolve, reject) => {
+    const ws = new WebSocket(DAEMON_WS_URL);
+    const id = String(Date.now());
+    const timer = setTimeout(() => { ws.close(); reject(new Error('Daemon tool timed out')); }, 30000);
+    ws.onopen = () => ws.send(JSON.stringify({ id, tool, args }));
+    ws.onerror = () => { clearTimeout(timer); reject(new Error('Daemon WebSocket unavailable')); };
+    ws.onmessage = event => {
+      const msg = JSON.parse(event.data);
+      if (String(msg.id) !== id) return;
+      clearTimeout(timer); ws.close(); resolve(msg.result || msg);
+    };
+  });
+}
+
+async function generateText(model, prompt, maxTokens = 256, onMessage = () => {}) {
+  return await new Promise((resolve, reject) => {
+    const ws = new WebSocket(DAEMON_WS_URL);
+    const output = [];
+    const timer = setTimeout(() => { ws.close(); reject(new Error('Generation timed out')); }, 300000);
+    ws.onopen = () => ws.send(JSON.stringify({ command: "generate", model, prompt, max_tokens: maxTokens }));
+    ws.onerror = () => { clearTimeout(timer); reject(new Error('Daemon generation WebSocket unavailable')); };
+    ws.onmessage = event => {
+      const data = JSON.parse(event.data);
+      onMessage(data);
+      if (typeof data.token === 'string') output.push(data.token);
+      if (data.Finished || data.Stopped || data.error) {
+        clearTimeout(timer); ws.close();
+        if (data.error) reject(new Error(data.error)); else resolve(output.join(''));
+      }
+    };
+  });
 }
 
 async function mcpCall(method, args = {}) {
-  const res = await fetch('/api/' + method, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(args)
+  if (method.startsWith('browser/')) {
+    const res = await fetch('/api/' + method, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(args)
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+  const path = method === 'search_hf' ? '/api/models' : null;
+  if (method === 'inspect_host') return daemonToolCall(method, args);
+  if (path === null) return daemonToolCall(method, args);
+  const res = await fetch(path, {
+    method: 'GET', headers: { 'Accept': 'application/json' }
   });
+  if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+async function agentToolCall(command, args = {}) {
+  return await daemonToolCall('subagent', { command, ...args });
+}
+
+// Native daemon routes proxied by the Deno server: /api/models, /api/agents,
+// /api/generate, /api/assemble, and /api/pull. Generation uses the streaming
+// WebSocket contract above; the REST route remains available for clients that
+// do not need token streaming.
 
 // ── Model Browser ───────────────────────────────────────────
 function pushModelResult(r) {
   const list = document.getElementById('model-results');
+  const empty = list.querySelector('.empty-state');
+  if (empty) empty.remove();
   const div = document.createElement('div');
   div.className = 'result-item';
   div.innerHTML = `<span class="result-name">${r.name || r}</span>
@@ -188,15 +396,32 @@ function pushModelResult(r) {
   list.appendChild(div);
 }
 
+async function runGeneration() {
+  const model = document.getElementById('generation-model').value.trim();
+  const prompt = document.getElementById('generation-prompt').value.trim();
+  const maxTokens = Number(document.getElementById('generation-max-tokens').value) || 128;
+  const output = document.getElementById('generation-output');
+  const status = document.getElementById('generation-status');
+  if (!model || !prompt) { status.textContent = 'Model and prompt are required'; return; }
+  output.textContent = '';
+  status.textContent = 'Generating...';
+  try {
+    await generateText(model, prompt, maxTokens, data => {
+      if (typeof data.token === 'string') output.textContent += data.token;
+    });
+    status.textContent = 'Complete';
+  } catch (e) { status.textContent = 'Generation failed: ' + e.message; }
+}
+
 async function searchModels() {
   const q = document.getElementById('hf-search').value.trim();
   if (!q) return;
   const list = document.getElementById('model-results');
   list.innerHTML = '<div class="loading">Searching...</div>';
   try {
-    const res = await mcpCall('search_hf', { query: q });
+    const res = await mcpCall('search_hf', {});
     list.innerHTML = '';
-    const items = res.result || res.models || res || [];
+    const items = (Array.isArray(res) ? res : res.models || []).filter(r => String(r.name || r).toLowerCase().includes(q.toLowerCase()));
     (Array.isArray(items) ? items : []).forEach(pushModelResult);
     if (!list.children.length) list.innerHTML = '<div class="loading">No results</div>';
   } catch (e) { list.innerHTML = '<div class="error">Search failed: ' + e.message + '</div>'; }
@@ -208,9 +433,21 @@ async function pullModel() {
   const list = document.getElementById('model-results');
   list.innerHTML = '<div class="loading">Pulling ' + repo + '...</div>';
   try {
-    const res = await mcpCall('pull_model', { repo });
+    const wsUrl = DAEMON_WS_URL.replace('/api/ws', '/api/pull');
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(wsUrl);
+      const timer = setTimeout(() => { ws.close(); reject(new Error('Model pull timed out')); }, 300000);
+      ws.onopen = () => ws.send(JSON.stringify({ repo }));
+      ws.onerror = () => { clearTimeout(timer); reject(new Error('Daemon pull WebSocket unavailable')); };
+      ws.onmessage = event => {
+        const data = JSON.parse(event.data);
+        if (data.progress) list.innerHTML = '<div class="loading">' + data.progress + '</div>';
+        if (data.error) { clearTimeout(timer); ws.close(); reject(new Error(data.error)); }
+        if (data.status === 'done') { clearTimeout(timer); ws.close(); resolve(data); }
+      };
+    });
     list.innerHTML = '';
-    pushModelResult(res.result || res.model || { name: repo + ' pulled' });
+    pushModelResult({ name: repo + ' pulled' });
   } catch (e) { list.innerHTML = '<div class="error">Pull failed: ' + e.message + '</div>'; }
 }
 
@@ -219,9 +456,9 @@ async function refreshAgents() {
   const list = document.getElementById('agent-list');
   list.innerHTML = '<div class="loading">Loading agents...</div>';
   try {
-    const res = await mcpCall('subagent', { action: 'list' });
+    const res = await fetch('/api/agents').then(r => r.json());
     list.innerHTML = '';
-    const agents = res.result || res.agents || [];
+    const agents = Array.isArray(res) ? res : (res.result || res.agents || []);
     if (!Array.isArray(agents) || agents.length === 0) {
       list.innerHTML = '<div class="loading">No agents active</div>';
       return;
@@ -232,23 +469,100 @@ async function refreshAgents() {
       const div = document.createElement('div');
       div.className = 'agent-row';
       div.innerHTML = `<span class="agent-name">${a.name || a.id || 'Agent'}</span>
-        <span class="agent-phase"><span class="phase-dot ${dotClass}"></span>${phase}</span>`;
+        <span class="agent-phase"><span class="phase-dot ${dotClass}"></span>${phase}
+        <button class="btn" onclick="collectAgent(${a.entity_id})">Collect</button>
+        <button class="btn" onclick="cancelAgent(${a.entity_id})">Cancel</button></span>`;
       list.appendChild(div);
     });
   } catch (e) { list.innerHTML = '<div class="error">Failed to load: ' + e.message + '</div>'; }
 }
 
+async function spawnAgent() {
+  const task = document.getElementById('agent-task').value.trim();
+  const parent = Number(document.getElementById('agent-parent').value || 1);
+  const status = document.getElementById('agent-action-status');
+  if (!task) { status.textContent = 'Enter a task first'; return; }
+  status.textContent = 'Spawning…';
+  try {
+    const result = await agentToolCall('spawn', { parent_entity_id: parent, task_description: task, max_steps: 256 });
+    status.textContent = `Agent ${result.subagent_entity_id || 'started'} running`;
+    document.getElementById('agent-task').value = '';
+    refreshAgents();
+  } catch (e) { status.textContent = 'Spawn failed: ' + e.message; }
+}
+
+async function collectAgent(entityId) {
+  const status = document.getElementById('agent-action-status');
+  try { const result = await agentToolCall('collect', { subagent_entity_id: entityId }); status.textContent = JSON.stringify(result); refreshAgents(); }
+  catch (e) { status.textContent = 'Collect failed: ' + e.message; }
+}
+
+async function cancelAgent(entityId) {
+  const status = document.getElementById('agent-action-status');
+  try { await agentToolCall('cancel', { subagent_entity_id: entityId }); status.textContent = `Agent ${entityId} cancelled`; refreshAgents(); }
+  catch (e) { status.textContent = 'Cancel failed: ' + e.message; }
+}
+
+const CONVERSATION_SESSION = 'webui-default';
+let conversationMessages = [];
+async function loadConversation() {
+  try {
+    const result = await daemonToolCall('conversation', {command:'load', session_id: CONVERSATION_SESSION, limit: 100});
+    conversationMessages = result.result?.messages || result.messages || [];
+    renderConversation();
+  } catch (e) { document.getElementById('conversation-status').textContent = 'Conversation unavailable: ' + e.message; }
+}
+function renderConversation() {
+  const box = document.getElementById('conversation-messages');
+  box.innerHTML = conversationMessages.map(m => `<div style="margin:8px 0"><strong>${m.role}</strong>: ${m.text || ''}${(m.attachments||[]).map(a => {
+    if (a.media_type?.startsWith('image/') && a.data) return `<div><img src="data:${a.media_type};base64,${a.data}" style="max-width:320px;max-height:240px" alt="${a.name||'image'}"></div>`;
+    if (a.media_type?.startsWith('audio/') && a.data) return `<div><audio controls src="data:${a.media_type};base64,${a.data}"></audio></div>`;
+    if (a.media_type?.startsWith('video/') && a.data) return `<div><video controls style="max-width:320px" src="data:${a.media_type};base64,${a.data}"></video></div>`;
+    return `<div>[${a.media_type||'attachment'}: ${a.name||'unnamed'}]</div>`;
+  }).join('')}</div>`).join('');
+  box.scrollTop = box.scrollHeight;
+}
+async function sendConversationMessage() {
+  const input = document.getElementById('conversation-input');
+  const text = input.value.trim();
+  if (!text) return;
+  const status = document.getElementById('conversation-status');
+  status.textContent = 'Sending…';
+  const file = document.getElementById('conversation-file').files[0];
+    const attachments = file ? [{media_type:file.type, name:file.name, data:btoa(String.fromCharCode(...new Uint8Array(await file.arrayBuffer())))}] : [];
+  try {
+    await daemonToolCall('conversation', {command:'append', role:'user', text, session_id:CONVERSATION_SESSION, attachments});
+    conversationMessages.push({role:'user', text, attachments}); renderConversation(); input.value = '';
+    const model = document.getElementById('generation-model')?.value;
+    if (!model) throw new Error('Load a model before chatting');
+    status.textContent = 'Agent is responding…';
+    let answer = '';
+    const multimodalContext = attachments.length ? `\n[Attached modalities: ${attachments.map(a => a.media_type).join(', ')}]` : '';
+    await generateText(model, text + multimodalContext, 256, data => { if (typeof data.token === 'string') { answer += data.token; status.textContent = answer; } });
+    await daemonToolCall('conversation', {command:'append', role:'assistant', text:answer, session_id:CONVERSATION_SESSION});
+    conversationMessages.push({role:'assistant', text:answer, attachments:[]}); renderConversation(); status.textContent = 'Ready';
+  } catch (e) { status.textContent = 'Conversation error: ' + e.message; }
+}
+
 // ── Hardware ────────────────────────────────────────────────
 async function refreshHardware() {
+  const status = document.getElementById('hardware-status');
   try {
     const res = await mcpCall('inspect_host', {});
-    const info = res.result || res || {};
+    const info = res.result || res.hardware || res;
+    document.getElementById('hw-cpu').textContent = 'Daemon dashboard';
+    document.getElementById('hw-mem').textContent = 'Unavailable';
+    document.getElementById('hw-metal').textContent = 'Unavailable';
+    document.getElementById('hw-ane').textContent = 'Unavailable';
     document.getElementById('hw-cpu').textContent = info.cpu || info.cpu_brand || info.processor || '--';
     const mem = info.memory || info.mem || info.total_memory;
     document.getElementById('hw-mem').textContent = mem ? (mem + ' GB').replace('GB GB','GB') : '--';
     document.getElementById('hw-metal').textContent = info.metal || info.gpu || (info.accelerators && info.accelerators.metal ? 'Available' : '--');
     document.getElementById('hw-ane').textContent = info.ane || info.neural_engine || (info.accelerators && info.accelerators.ane ? 'Available' : '--');
-  } catch (e) { /* silent fallback */ }
+    status.textContent = 'Hardware information updated from the local host.';
+  } catch (e) {
+    status.textContent = 'Hardware inspection is unavailable. The dashboard is still usable, but these values could not be read.';
+  }
 }
 
 // ── Agent Browser ───────────────────────────────────────────
@@ -345,6 +659,10 @@ function updatePageInfo(title, url, links, headings, buttons) {
 }
 
 // Initial load
+document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('keydown', handleTabKeyboard));
+switchTab('models');
+connectModelsWs();
+checkAuthorization();
 refreshHardware();
 </script>
 </body>

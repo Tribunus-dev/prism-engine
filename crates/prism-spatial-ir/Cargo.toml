@@ -1,0 +1,17 @@
+[package]
+name = "prism-spatial-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sha2.workspace = true
+serde = { workspace = true, features = ["derive"] }
+bincode = "1"
+serde_json.workspace = true
+half.workspace = true
+thiserror.workspace = true
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+uuid.workspace = true
+rand.workspace = true

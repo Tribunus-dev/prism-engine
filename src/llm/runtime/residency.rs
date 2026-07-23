@@ -7,11 +7,16 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
+use std::time::Instant;
+
+use std::sync::Arc;
 
 use super::super::manifest::{LlmCapabilityManifest, LlmModelFamily, SessionId};
 use super::super::server::{
     CoreMlVisibilityState, WeightEvictionStatus, WeightResidencyKey, WeightResidencyReceipt,
 };
+use super::memory_hierarchy::TieredMemoryHierarchy;
+use prism_ecs_core::memory_tier::{MemoryTier, ResidencyLeaseRecord};
 
 /// Handle tracking a loaded model's runtime state in unified memory.
 ///
@@ -39,6 +44,7 @@ struct LoadedModelHandle {
     loaded: bool,
     /// Model family recorded from the manifest at load time.
     manifest_model_family: LlmModelFamily,
+    last_used: Instant,
 }
 
 /// Manages weight residency for LLM inference.
@@ -51,6 +57,10 @@ struct LoadedModelHandle {
 /// `WeightResidencyKey` does not derive those traits directly.
 pub struct WeightResidencyManager {
     loaded: Mutex<HashMap<crate::image::types::ArtifactDigest, LoadedModelHandle>>,
+    /// Optional tiered memory hierarchy for Colibrì-style tier management.
+    /// When `Some`, allocations are tracked across memory tiers.
+    pub hierarchy: Option<Arc<TieredMemoryHierarchy>>,
+    max_weight_bytes: u64,
 }
 
 impl WeightResidencyManager {
@@ -58,6 +68,27 @@ impl WeightResidencyManager {
     pub fn new() -> Self {
         Self {
             loaded: Mutex::new(HashMap::new()),
+            hierarchy: None,
+            max_weight_bytes: u64::MAX,
+        }
+    }
+
+    /// Creates a new `WeightResidencyManager` with an attached tiered hierarchy.
+    pub fn with_hierarchy(hierarchy: Arc<TieredMemoryHierarchy>) -> Self {
+        Self {
+            loaded: Mutex::new(HashMap::new()),
+            hierarchy: Some(hierarchy),
+            max_weight_bytes: u64::MAX,
+        }
+    }
+
+    /// Creates a manager with an explicit persistent-weight capacity. Models
+    /// with active leases are never evicted; idle models are evicted LRU-first.
+    pub fn with_capacity(max_weight_bytes: u64) -> Self {
+        Self {
+            loaded: Mutex::new(HashMap::new()),
+            hierarchy: None,
+            max_weight_bytes,
         }
     }
 
@@ -93,9 +124,22 @@ impl WeightResidencyManager {
             dtype_profile: "default".into(),
         };
 
+        // Record allocation in tiered hierarchy if available (defaults to UnifiedCpu
+        // for initial load, matching the unified memory pool).
+        if let Some(ref hier) = self.hierarchy {
+            let bytes = manifest.residency_requirements.persistent_weight_bytes;
+            if let Err(e) = hier.allocate(MemoryTier::UnifiedCpu, &key.cimage_digest.0, bytes) {
+                return Err(format!(
+                    "tiered hierarchy allocation failed for '{}': {}",
+                    path, e
+                ));
+            }
+        }
+
+        let weight_bytes = manifest.residency_requirements.persistent_weight_bytes;
         let handle = LoadedModelHandle {
             key: key.clone(),
-            weight_bytes: 0,
+            weight_bytes,
             metal_visible: true,
             accelerate_visible: true,
             coreml_visibility: CoreMlVisibilityState::Full,
@@ -103,6 +147,7 @@ impl WeightResidencyManager {
             session_leases: HashSet::new(),
             loaded: true,
             manifest_model_family: manifest.model_family,
+            last_used: Instant::now(),
         };
 
         let digest = key.cimage_digest.clone();
@@ -112,7 +157,88 @@ impl WeightResidencyManager {
             .map_err(|e| format!("weight residency lock poisoned: {e}"))?;
 
         map.insert(digest, handle);
+        self.evict_to_capacity_locked(&mut map, Some(&key.cimage_digest))?;
         Ok(key)
+    }
+
+    fn evict_to_capacity_locked(
+        &self,
+        map: &mut HashMap<crate::image::types::ArtifactDigest, LoadedModelHandle>,
+        keep: Option<&crate::image::types::ArtifactDigest>,
+    ) -> Result<(), String> {
+        let mut total: u64 = map.values().map(|h| h.weight_bytes).sum();
+        while total > self.max_weight_bytes {
+            let candidate = map
+                .iter()
+                .filter(|(digest, h)| Some(*digest) != keep && h.lease_count == 0)
+                .min_by_key(|(_, h)| h.last_used)
+                .map(|(digest, h)| (digest.clone(), h.weight_bytes));
+            let Some((digest, bytes)) = candidate else {
+                return Err(format!(
+                    "weight capacity exceeded: need {total} bytes, capacity {}",
+                    self.max_weight_bytes
+                ));
+            };
+            map.remove(&digest);
+            total = total.saturating_sub(bytes);
+        }
+        Ok(())
+    }
+
+    /// Evicts idle models until the configured capacity is satisfied.
+    /// Returns the digests removed from residency.
+    pub fn evict_idle(&self) -> Result<Vec<crate::image::types::ArtifactDigest>, String> {
+        let mut map = self.loaded.lock().map_err(|e| e.to_string())?;
+        let before: HashSet<_> = map.keys().cloned().collect();
+        self.evict_to_capacity_locked(&mut map, None)?;
+        Ok(before
+            .difference(&map.keys().cloned().collect())
+            .cloned()
+            .collect())
+    }
+
+    /// Records a tier-aware lease for the given weight residency.
+    ///
+    /// Creates a `ResidencyLeaseRecord` in the tiered hierarchy (if present)
+    /// tracking the allocation on `tier`. Returns the lease record on success.
+    pub fn lease_weight(
+        &self,
+        key: &WeightResidencyKey,
+        tier: MemoryTier,
+        owner: &str,
+    ) -> Option<ResidencyLeaseRecord> {
+        let hier = self.hierarchy.as_ref()?;
+        let map = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
+        let handle = Self::get_ref(&map, key)?;
+
+        let lease = ResidencyLeaseRecord::new(
+            handle.key.cimage_digest.0.clone(),
+            tier,
+            handle.weight_bytes,
+            owner.to_string(),
+        );
+
+        // Re-allocate in the target tier (may trigger eviction from that tier).
+        if hier
+            .allocate(tier, &lease.allocation_key, lease.bytes)
+            .is_err()
+        {
+            // If allocation fails, return None — caller handles fallback.
+            return None;
+        }
+
+        Some(lease)
+    }
+
+    /// Releases a tier-aware lease, freeing the allocation from the hierarchy.
+    ///
+    /// Removes the weight residency from its tracked tier in the hierarchy
+    /// (if present). After release, the weight may be evicted during the
+    /// next clock sweep.
+    pub fn release_weight(&self, key: &WeightResidencyKey, tier: MemoryTier) {
+        if let Some(ref hier) = self.hierarchy {
+            hier.free(tier, &key.cimage_digest.0);
+        }
     }
 
     /// Pins a weight residency for the given session, incrementing the
@@ -135,6 +261,7 @@ impl WeightResidencyManager {
         if handle.session_leases.insert(*session_id) {
             handle.lease_count += 1;
         }
+        handle.last_used = Instant::now();
         Ok(())
     }
 
@@ -159,6 +286,7 @@ impl WeightResidencyManager {
             return Err("session not holding a lease on this weight residency".to_string());
         }
         handle.lease_count = handle.lease_count.saturating_sub(1);
+        handle.last_used = Instant::now();
         Ok(())
     }
 
@@ -407,4 +535,3 @@ mod tests {
         assert!(mgr.eviction_eligible().is_empty());
     }
 }
-

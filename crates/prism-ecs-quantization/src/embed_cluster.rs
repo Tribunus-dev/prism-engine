@@ -79,10 +79,10 @@ pub fn quantize_block(values: &[f32; 256]) -> (u16, [u8; 64]) {
 
 /// Process a flat weight array in 256-element blocks, append scales + nibbles.
 pub fn process_weights(weights_f32: &[f32], scales_out: &mut Vec<u8>, weights_out: &mut Vec<u8>) {
-    let padded = if weights_f32.len() % 256 == 0 {
+    let padded = if weights_f32.len().is_multiple_of(256) {
         weights_f32.to_vec()
     } else {
-        let n = ((weights_f32.len() + 255) / 256) * 256;
+        let n = weights_f32.len().div_ceil(256) * 256;
         let mut v = weights_f32.to_vec();
         v.resize(n, 0.0);
         v
@@ -116,9 +116,9 @@ pub fn pack_ternary_weights(
         for b in 0..blocks_per_row {
             let col_start = b * block_size;
             let mut block = [0.0f32; 256];
-            for j in 0..block_size {
+            for (j, dst) in block.iter_mut().enumerate() {
                 let src_col = col_start + j;
-                block[j] = if src_col < out_features {
+                *dst = if src_col < out_features {
                     weights[i * out_features + src_col]
                 } else {
                     0.0
@@ -174,7 +174,6 @@ pub fn unpack_ternary_weights(
 // ── Accelerate vDSP (macOS) ──────────────────────────────────────────
 #[cfg(target_os = "macos")]
 #[link(name = "Accelerate", kind = "framework")]
-#[allow(dead_code)]
 extern "C" {
     fn vDSP_dotpr(
         a: *const f32,
@@ -187,7 +186,6 @@ extern "C" {
 }
 
 #[cfg(target_os = "macos")]
-#[allow(dead_code)]
 fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     assert_eq!(a.len(), b.len(), "dot_product: length mismatch");
     let mut result: f32 = 0.0;
@@ -199,7 +197,7 @@ fn dot_product(a: &[f32], b: &[f32]) -> f32 {
 // ── K-Means Clustering (for embedding quantization) ──────────────────
 
 thread_local! {
-    static SEED: std::cell::Cell<u64> = std::cell::Cell::new(42);
+    static SEED: std::cell::Cell<u64> = const { std::cell::Cell::new(42) };
 }
 
 pub fn rand_range(n: usize) -> usize {
@@ -244,7 +242,10 @@ pub fn kmeans_plusplus(
                 dot_product(row, row)
             })
             .collect();
-        let first_centroid = centroids.chunks_exact(dim).last().unwrap();
+        let first_centroid = centroids
+            .chunks_exact(dim)
+            .last()
+            .expect("kmeans_pp: centroids non-empty (first_row just appended)");
         let c_norm2 = dot_product(first_centroid, first_centroid);
         for i in 0..n_rows {
             let dot = dot_product(&data[i * dim..(i + 1) * dim], first_centroid);
@@ -279,8 +280,8 @@ pub fn kmeans_plusplus(
         let threshold = rand_range(usize::MAX) as f64 / usize::MAX as f64 * total_dist;
         let mut cumulative = 0.0_f64;
         let mut next_idx = 0;
-        for i in 0..n_rows {
-            cumulative += min_dist_sq[i] as f64;
+        for (i, &dist) in min_dist_sq.iter().enumerate() {
+            cumulative += dist as f64;
             if cumulative >= threshold && !chosen.contains(&i) {
                 next_idx = i;
                 break;
@@ -403,16 +404,16 @@ pub fn kmeans_iterate(
         counts[c] += 1;
         let row = &data[i * dim..(i + 1) * dim];
         let cent_slice = &mut centroids[c * dim..(c + 1) * dim];
-        for j in 0..dim {
-            cent_slice[j] += row[j];
+        for (j, cent) in cent_slice.iter_mut().enumerate() {
+            *cent += row[j];
         }
     }
     for c in 0..k {
         if counts[c] > 0 {
             let inv = 1.0 / counts[c] as f32;
             let slice = &mut centroids[c * dim..(c + 1) * dim];
-            for j in 0..dim {
-                slice[j] *= inv;
+            for s in slice.iter_mut() {
+                *s *= inv;
             }
         }
     }
@@ -436,7 +437,7 @@ pub fn kmeans_iterate(
 pub fn reorder_by_cluster(
     data: &[f32],
     assignments: &[u32],
-    n_rows: usize,
+    _: usize,
     dim: usize,
     k: usize,
 ) -> Vec<f32> {
@@ -446,13 +447,13 @@ pub fn reorder_by_cluster(
     }
     let mut write_pos: Vec<usize> = Vec::with_capacity(k);
     let mut offset = 0usize;
-    for c in 0..k {
+    for &size in &cluster_sizes {
         write_pos.push(offset);
-        offset += cluster_sizes[c] * dim;
+        offset += size * dim;
     }
     let mut reordered: Vec<f32> = vec![0.0_f32; offset];
-    for i in 0..n_rows {
-        let c = assignments[i] as usize;
+    for (i, &a) in assignments.iter().enumerate() {
+        let c = a as usize;
         let dst = write_pos[c];
         let src = i * dim;
         reordered[dst..dst + dim].copy_from_slice(&data[src..src + dim]);
@@ -562,11 +563,10 @@ mod tests {
             (seed >> 33) as f32 / (1u64 << 31) as f32 - 1.0
         };
 
-        for cluster in 0..k {
-            let mean = &means[cluster];
+        for mean in &means {
             for _ in 0..200 {
-                for d in 0..dim {
-                    data.push(mean[d] + next_f32() * 0.5);
+                for &val in mean {
+                    data.push(val + next_f32() * 0.5);
                 }
             }
         }

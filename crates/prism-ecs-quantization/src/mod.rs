@@ -18,6 +18,7 @@
 //!   optimization, residual codecs, candidate gates, and packaging.
 
 pub mod admission;
+pub mod ane_orchestration;
 pub mod calibration;
 pub mod contract;
 /// Quantization algorithm codec families — AWQ, GPTQ, SmoothQuant.
@@ -40,21 +41,41 @@ pub mod validation;
 pub mod substitution_pass;
 
 // Pre-existing quantization submodules (preserved from original mod.rs).
+pub mod bonsai_cimage;
+/// Metal GPU dispatch for Bonsai ternary GEMV kernel.
+#[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+pub mod bonsai_metal_dispatch;
+/// Bonsai 2-bit → 1.58-bit Tile640 ternary conversion pipeline.
+pub mod bonsai_ternary;
+/// Canonical model source — format-independent model abstraction.
+pub mod canonical_model_source;
 pub mod cimage;
+pub mod compile_config;
 pub mod compiler;
 pub mod embed_cluster;
 /// Execution plan types — local copy for crate-internal use.
-/// CodecFamily and related types live in tribunus-compute-core and will be
-/// migrated to prism-ecs-core.
 pub mod execution_plan;
+/// Generic GGUF tensor reading — format agnostic.
+/// GGUF tensor provider — implements `TensorProvider` for GGUF files.
+#[cfg(feature = "gguf-compile")]
+pub mod gguf_provider;
+/// Generic GGUF tensor reading — format agnostic.
+pub mod gguf_reader;
+pub mod kv_search;
+/// MLX model adapter — format detection and config parsing.
+pub mod mlx_adapter;
 /// NF4 tile640 weight format — local copy for crate-internal use.
-/// These types live in tribunus-compute-core and will be migrated to
-/// prism-ecs-core once the extraction dependency chain is resolved.
 pub mod nf4tile640;
+/// ONNX model adapter — minimal protobuf parser + TensorProvider
+pub mod onnx_adapter;
 pub mod oq;
 pub mod palette;
 /// Per-class precision policy and M1 memory budget admission.
 pub mod precision_policy;
+/// SafeTensor provider — implements `TensorProvider` for safetensors directories.
+pub mod safetensors_provider;
+/// Internal semantic tensor-family classification and layout candidate planning.
+pub mod tensor_layout;
 pub mod turboquant_kv;
 
 pub use admission::quantize_tensor;

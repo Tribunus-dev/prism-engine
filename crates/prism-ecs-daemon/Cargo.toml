@@ -1,0 +1,49 @@
+[package]
+name = "prism-ecs-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Prism ECS daemon — composition root owning the persistent PrismWorld, scheduler, systems, and durability layer"
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-runtime = { path = "../prism-ecs-runtime" }
+prism-ecs-constitutional = { path = "../prism-ecs-constitutional" }
+prism-ecs-source = { path = "../prism-ecs-source" }
+prism-ecs-compile = { path = "../prism-ecs-compile", optional = true }
+prism-ecs-codec = { path = "../prism-ecs-codec" }
+prism-ecs-kernel = { path = "../prism-ecs-kernel" }
+prism-ecs-server = { path = "../prism-ecs-server", optional = true }
+prism-ecs-duckdb = { path = "../prism-ecs-duckdb" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+prism-spatial-ir = { path = "../prism-spatial-ir" }
+
+num_cpus = "1"
+
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+bincode = "1.3"
+md5 = "0.7"
+
+[features]
+default = ["full-compiler"]
+full-compiler = ["dep:prism-ecs-compile"]
+server-integration = ["prism-ecs-server/server"]
+trifecta = []
+
+[[test]]
+name = "component_event_test"
+path = "tests/component_event_test.rs"
+
+[[test]]
+name = "runtime_unification_test"
+path = "tests/runtime_unification_test.rs"
+
+[lib]
+name = "prism_ecs_daemon"

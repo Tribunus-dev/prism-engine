@@ -13,8 +13,11 @@
 //! `cfg`-gated to Linux. On other platforms or when the feature is disabled,
 //! all operations return a clear error string.
 
+pub mod calibration;
 pub mod compiler;
 pub mod dispatch;
+pub mod target;
+pub mod ternary;
 
 use prism_ecs_ir::backend_dispatch::HalFormat;
 

@@ -9,6 +9,7 @@ repository = "https://github.com/Tribunus-dev/prism-engine"
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
+prism-spatial-ir = { path = "../prism-spatial-ir" }
 tempfile = { workspace = true }
 libc = { workspace = true }
 serde = { workspace = true }
