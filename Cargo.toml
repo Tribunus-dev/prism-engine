@@ -165,6 +165,8 @@ members = [
     "crates/prism-ecs-constitutional",
     "crates/prism-ecs-quantization",
     "crates/prism-ecs-runtime",
+    "crates/prism-ecs-protocol",
+    "crates/prism-ecs-protocol-adapter",
     "crates/prism-kv-cache",
     "crates/prism-ecs-ir",
     "crates/prism-ecs-server",

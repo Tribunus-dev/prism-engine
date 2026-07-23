@@ -1,0 +1,11 @@
+[package]
+name = "prism-ecs-protocol-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Runtime adapter for the versioned Prism ECS application protocol"
+
+[dependencies]
+prism-ecs-protocol = { path = "../prism-ecs-protocol" }
+prism-ecs-runtime = { path = "../prism-ecs-runtime" }
+uuid = { workspace = true }

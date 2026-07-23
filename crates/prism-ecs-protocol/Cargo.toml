@@ -1,0 +1,13 @@
+[package]
+name = "prism-ecs-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Versioned application protocol and runtime client boundary for Prism ECS"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+uuid = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

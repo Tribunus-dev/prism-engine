@@ -2653,6 +2653,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism-ecs-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "prism-ecs-protocol-adapter"
+version = "0.1.0"
+dependencies = [
+ "prism-ecs-protocol",
+ "prism-ecs-runtime",
+ "uuid",
+]
+
+[[package]]
 name = "prism-ecs-quantization"
 version = "0.1.0"
 dependencies = [
