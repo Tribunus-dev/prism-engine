@@ -113,8 +113,11 @@ authority.
 
 ## License
 
-Prism Engine is licensed under the GNU Affero General Public License, version 3
-(AGPLv3). See [`LICENSE`](LICENSE). Commercial licenses are available for
-organizations that need an alternative to the AGPLv3 obligations, including
-closed-source distribution or proprietary hosted deployments. To discuss a
-commercial license, email [julian@tribunus.dev](mailto:julian@tribunus.dev).
+Prism Engine is available under a dual-license model: the GNU Affero General
+Public License, version 3 (AGPLv3), or a commercial license. The AGPLv3 option
+is the default for open-source use and carries its corresponding copyleft and
+network-use obligations. Organizations that need to distribute proprietary
+derivatives, keep modifications private, or operate without those AGPLv3
+obligations can request a commercial license by emailing
+[julian@tribunus.dev](mailto:julian@tribunus.dev). See [`LICENSE`](LICENSE) for
+the AGPLv3 terms.

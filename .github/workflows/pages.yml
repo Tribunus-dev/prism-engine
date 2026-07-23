@@ -5,6 +5,7 @@ on:
     branches: ["main"]
     paths:
       - "site/**"
+      - "zine/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -29,7 +30,9 @@ jobs:
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Stage field guide
-        run: cp -R site _site
+        run: |
+          cp -R site _site
+          cp -R zine/* _site/
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
