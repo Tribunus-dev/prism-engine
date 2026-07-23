@@ -1,0 +1,33 @@
+@import url('https://fonts.googleapis.com/css2?family=Ubuntu:ital,wght@0,300;0,400;0,500;0,700;0,900;1,300;1,400;1,500;1,700;1,900&family=Ubuntu+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap');
+
+:root {
+  --sans: 'Ubuntu', system-ui, sans-serif;
+  --mono: 'Ubuntu Mono', ui-monospace, monospace;
+  --text-secondary: #53605e;
+  --border-subtle: #c7d2cc;
+}
+
+body { font-family: var(--sans); }
+.hero-lede, .section-heading > p, .working-path-note p, .reality-bands p,
+.journey-guide-card p, .figure-link, .caption-row, .hero-qualifier { color: #53605e; }
+.eyebrow, .tiny-label { color: #49615a; }
+.button.quiet, .link, .working-path-note a, .figure-link a, .reality-bands a { color: #285e62; }
+.status-row span:nth-child(2) { color: #53605e; }
+
+.tensor-journey { background: #eef3ef; }
+.journey-frame { border-color: #b8c8bf; background: #17221f; }
+.journey-caption, .journey-legend { color: #c7d7cd; }
+.journey-controls button { color: #f3faf4; border-color: #698174; }
+.journey-station circle { stroke: #789386; }
+.journey-station text { fill: #d4e1d8; }
+.journey-station rect { fill: #20332b; stroke: #789386; }
+.journey-station .station-index { fill: #b5c7bb; }
+.journey-annotation rect { fill: #20332b; stroke: #789386; }
+.annotation-body { fill: #c7d7cd; }
+
+@media (prefers-color-scheme: dark) {
+  .hero-lede, .section-heading > p, .working-path-note p, .reality-bands p,
+  .journey-guide-card p, .figure-link, .caption-row, .hero-qualifier { color: #c7d7cd; }
+  .eyebrow, .tiny-label { color: #a9c4b4; }
+  .button.quiet, .link, .working-path-note a, .figure-link a, .reality-bands a { color: #b8efc4; }
+}
