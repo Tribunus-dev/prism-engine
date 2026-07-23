@@ -59,6 +59,44 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
 .loading{text-align:center;padding:20px;color:#484f58}
 .empty-state{margin-top:12px;padding:24px;border:1px dashed #334155;border-radius:12px;text-align:center;color:#94a3b8;background:#0b1220aa}.empty-state strong{display:block;color:#dbeafe;margin-bottom:5px}.empty-state span{display:block;font-size:.76rem;line-height:1.45;max-width:460px;margin:0 auto}
 .error{color:#f85149;font-size:.8rem;padding:8px;background:#da363311;border-radius:6px;margin:8px 0}
+.conversation-shell{display:flex;flex-direction:column;gap:12px;max-width:920px;width:100%;margin:0 auto;padding:0 20px 20px;min-height:0;flex:1}
+.conversation-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.conversation-toolbar label{display:flex;align-items:center;gap:8px;color:#94a3b8;font-size:.74rem}
+.conversation-toolbar select{padding:7px 10px;background:#111827;color:#e6edf3;border:1px solid #334155;border-radius:8px;min-width:220px}
+.conversation-status-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 9px;font-size:.68rem;border:1px solid #334155;color:#94a3b8;background:#0f172acc}
+.conversation-status-pill:before{content:'';width:6px;height:6px;border-radius:50%;background:#64748b}
+.conversation-status-pill.streaming{color:#a5f3fc;border-color:#22d3ee66;background:#164e6388}
+.conversation-status-pill.streaming:before{background:#22d3ee;animation:pulse 1.2s ease-in-out infinite}
+.conversation-status-pill.complete{color:#a7f3d0;border-color:#10b98166;background:#064e3b55}
+.conversation-status-pill.complete:before{background:#34d399}
+.conversation-status-pill.stopped{color:#fde68a;border-color:#f59e0b66;background:#713f1255}
+.conversation-status-pill.stopped:before{background:#f59e0b}
+.conversation-status-pill.error{color:#fecaca;border-color:#f8514966;background:#450a0a55}
+.conversation-status-pill.error:before{background:#f85149}
+.conversation-messages{flex:1;min-height:240px;max-height:none;overflow:auto;padding:16px;background:#0d1117;border:1px solid #1e293b;border-radius:12px;scroll-behavior:smooth}
+.conversation-empty{text-align:center;padding:28px 16px;color:#94a3b8}
+.conversation-empty strong{display:block;color:#f8fafc;font-size:1rem;margin-bottom:6px}
+.conversation-empty span{display:block;max-width:560px;margin:0 auto 16px;line-height:1.5;font-size:.78rem}
+.conversation-suggestions{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.conversation-suggestions button,.quick-action{padding:7px 10px;border-radius:999px;border:1px solid #334155;background:#111827;color:#bae6fd;cursor:pointer;font:inherit;font-size:.72rem;transition:all .16s}
+.conversation-suggestions button:hover,.quick-action:hover{border-color:#22d3ee99;background:#164e6388;transform:translateY(-1px)}
+.conversation-card{padding:12px 14px;margin-bottom:10px;border-radius:12px;border:1px solid #263650;background:#111827;animation:rise .25s ease both}
+.conversation-card:last-child{margin-bottom:0}
+.conversation-card.user{margin-left:12%;border-color:#1f6feb66;background:#0f1d33}
+.conversation-card.assistant{margin-right:8%;border-color:#10b98144;background:#0f1f1b}
+.conversation-card.pending{border-color:#22d3ee88;box-shadow:0 0 20px #22d3ee14}
+.conversation-card-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;color:#94a3b8;font-size:.68rem;text-transform:uppercase;letter-spacing:.06em}
+.conversation-card.user .conversation-card-header strong{color:#7dd3fc}
+.conversation-card.assistant .conversation-card-header strong{color:#6ee7b7}
+.conversation-card-body{white-space:pre-wrap;word-break:break-word;color:#e6edf3;line-height:1.55;font-size:.86rem}
+.conversation-card-meta{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #ffffff0d;color:#71809a;font-size:.68rem}
+.conversation-actions{display:flex;gap:6px;flex-wrap:wrap}
+.conversation-composer{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.conversation-composer textarea{flex:1;min-width:240px;resize:vertical;padding:10px;background:#11161d;color:#e6edf3;border:1px solid #334155;border-radius:9px;line-height:1.4}
+.conversation-composer textarea:focus,.conversation-toolbar select:focus{outline:2px solid #67e8f9;outline-offset:1px}
+.conversation-composer .btn{min-height:38px}
+.conversation-attachment{color:#94a3b8;font-size:.72rem;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:760px){.conversation-shell{padding:0 12px 12px}.conversation-card.user,.conversation-card.assistant{margin-left:0;margin-right:0}.conversation-toolbar select{min-width:0;flex:1}.conversation-composer textarea{min-width:100%}}
 .section-intro{padding:20px 20px 4px;max-width:920px}.section-intro h2{font-size:1.25rem;color:#f8fafc;margin-bottom:5px}.section-intro p{color:#94a3b8;line-height:1.5;max-width:760px}.eyebrow{color:#67e8f9;text-transform:uppercase;letter-spacing:.12em;font-size:.66rem;font-weight:600;margin-bottom:5px}.helper{color:#71809a;font-size:.72rem;line-height:1.45;margin-top:6px}.live-pill{display:inline-flex;align-items:center;gap:6px;color:#a7f3d0;background:#064e3b55;border:1px solid #10b98166;border-radius:999px;padding:4px 8px;font-size:.68rem}.live-pill:before{content:'';width:6px;height:6px;border-radius:50%;background:#34d399;animation:pulse 1.8s ease-in-out infinite}.demo-pill{color:#fde68a;background:#713f1255;border:1px solid #f59e0b66;border-radius:999px;padding:4px 8px;font-size:.68rem}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes pulse{0%,100%{opacity:.55;box-shadow:0 0 0 0 #22d3ee55}50%{opacity:1;box-shadow:0 0 0 5px #22d3ee00}}
@@ -139,6 +177,7 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
   <textarea aria-label="Prompt" id="generation-prompt" placeholder="Enter a prompt to generate..." rows="3" style="width:100%;box-sizing:border-box;margin:8px 0;padding:10px;background:#11161d;color:#e6edf3;border:1px solid #30363d;border-radius:6px;resize:vertical"></textarea>
   <div class="search-row">
     <button class="btn btn-primary" id="generate-btn" onclick="runGeneration()">Generate</button>
+    <button class="btn btn-hf" id="generation-stop-btn" onclick="stopGeneration()" disabled>Stop</button>
     <span id="generation-status" class="loading" role="status" aria-live="polite"></span>
   </div>
   <pre id="generation-output" style="white-space:pre-wrap;min-height:40px;padding:10px;background:#0d1117;border-radius:6px;color:#e6edf3"></pre>
@@ -155,12 +194,21 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
   <div id="agent-list"></div>
 </div>
 
-<div class="panel" id="panel-conversation" style="overflow-y:auto;padding:16px"><div class="section-intro" style="padding:4px 0 14px"><div class="eyebrow">Ask Prism</div><h2>Conversation</h2><p>Chat with the active model. Attach an image, audio clip, or video when the model supports multimodal input.</p></div>
-  <div id="conversation-messages" style="min-height:180px;max-height:420px;overflow:auto;padding:8px;background:#0d1117;border-radius:6px"></div>
-  <textarea id="conversation-input" placeholder="Talk to the active Prism agent…" rows="3" style="width:100%;box-sizing:border-box;margin:8px 0;padding:10px;background:#11161d;color:#e6edf3;border:1px solid #30363d;border-radius:6px"></textarea>
-  <input aria-label="Attach image, audio, or video" id="conversation-file" type="file" accept="image/*,audio/*,video/*">
-  <button class="btn btn-primary" onclick="sendConversationMessage()">Send</button>
-  <span id="conversation-status" class="loading" role="status" aria-live="polite"></span>
+<div class="panel" id="panel-conversation" style="overflow-y:auto;padding:16px"><div class="section-intro" style="padding:4px 0 14px"><div class="eyebrow">Ask Prism</div><h2>Conversation</h2><p>Chat with the active model. The daemon owns the conversation record, while this view keeps the interaction focused and interruptible.</p></div>
+  <div class="conversation-shell">
+    <div class="conversation-toolbar">
+      <label for="conversation-model">Model <select id="conversation-model" aria-label="Conversation model"><option value="">No loaded models</option></select></label>
+      <span id="conversation-live-status" class="conversation-status-pill" role="status" aria-live="polite">Ready</span>
+    </div>
+    <div id="conversation-messages" class="conversation-messages" aria-live="polite"></div>
+    <div class="conversation-composer">
+      <textarea id="conversation-input" placeholder="Talk to the active Prism agent…" rows="3" aria-label="Conversation message"></textarea>
+      <button class="btn btn-primary" id="conversation-send-btn" onclick="sendConversationMessage()">Send</button>
+      <button class="btn btn-hf" id="conversation-stop-btn" onclick="stopGeneration()" disabled>Stop</button>
+    </div>
+    <div class="conversation-attachment"><input aria-label="Attach image, audio, or video" id="conversation-file" type="file" accept="image/*,audio/*,video/*"></div>
+    <span id="conversation-status" class="helper" role="status" aria-live="polite">Conversation history is loaded from Prism.</span>
+  </div>
 </div>
 
 <div class="panel" id="panel-hardware" style="overflow-y:auto">
@@ -224,6 +272,7 @@ button.btn{padding:7px 14px;border:none;border-radius:6px;cursor:pointer;font-si
 <script>
 let loadedUrl = '';
 let loadedTitle = '';
+let activeGenerationSocket = null;
 const DAEMON_WS_URL = '__PRISM_DAEMON_WS__';
 const DAEMON_MODELS_WS_URL = DAEMON_WS_URL.replace('/api/ws', '/api/models/ws');
 const NATIVE_DAEMON_ROUTES = ['/api/models', '/api/agents', '/api/generate', '/api/assemble', '/api/pull'];
@@ -314,7 +363,10 @@ function connectModelsWs() {
   ws.onmessage = event => {
     try {
       const data = JSON.parse(event.data);
-      if (Array.isArray(data.models)) data.models.forEach(name => pushModelResult({ name }));
+      if (Array.isArray(data.models)) {
+        data.models.forEach(name => pushModelResult({ name }));
+        syncConversationModels(data.models);
+      }
     } catch (_) {}
   };
   ws.onerror = () => { clearTimeout(handshakeTimer); status.textContent = 'Prism unavailable'; status.className = 'demo-pill'; };
@@ -340,18 +392,55 @@ async function generateText(model, prompt, maxTokens = 256, onMessage = () => {}
   return await new Promise((resolve, reject) => {
     const ws = new WebSocket(DAEMON_WS_URL);
     const output = [];
-    const timer = setTimeout(() => { ws.close(); reject(new Error('Generation timed out')); }, 300000);
+    let settled = false;
+    let timer;
+    activeGenerationSocket = ws;
+    const finish = (callback) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (activeGenerationSocket === ws) activeGenerationSocket = null;
+      callback();
+    };
+    timer = setTimeout(() => finish(() => { ws.close(); reject(new Error('Generation timed out')); }), 300000);
     ws.onopen = () => ws.send(JSON.stringify({ command: "generate", model, prompt, max_tokens: maxTokens }));
-    ws.onerror = () => { clearTimeout(timer); reject(new Error('Daemon generation WebSocket unavailable')); };
+    ws.onerror = () => finish(() => reject(new Error('Daemon generation WebSocket unavailable')));
     ws.onmessage = event => {
       const data = JSON.parse(event.data);
       onMessage(data);
       if (typeof data.token === 'string') output.push(data.token);
-      if (data.Finished || data.Stopped || data.error) {
-        clearTimeout(timer); ws.close();
-        if (data.error) reject(new Error(data.error)); else resolve(output.join(''));
+      if (data.Finished !== undefined || data.Stopped !== undefined || data.error) {
+        finish(() => {
+          ws.close();
+          if (data.error) reject(new Error(data.error));
+          else resolve({ text: output.join(''), stopped: data.Stopped !== undefined });
+        });
       }
     };
+    ws.onclose = () => {
+      if (!settled) finish(() => reject(new Error('Generation stream closed before completion')));
+    };
+  });
+}
+
+function stopGeneration() {
+  if (activeGenerationSocket?.readyState === WebSocket.OPEN) {
+    activeGenerationSocket.send(JSON.stringify({ command: 'stop' }));
+    setConversationState('streaming', 'Stopping…');
+    setGenerationControls(true, true);
+  }
+}
+
+function setGenerationControls(active, stopping = false) {
+  const controls = [
+    ['generate-btn', active],
+    ['generation-stop-btn', !active],
+    ['conversation-send-btn', active],
+    ['conversation-stop-btn', !active],
+  ];
+  controls.forEach(([id, disabled]) => {
+    const element = document.getElementById(id);
+    if (element) element.disabled = stopping ? true : disabled;
   });
 }
 
@@ -403,14 +492,17 @@ async function runGeneration() {
   const output = document.getElementById('generation-output');
   const status = document.getElementById('generation-status');
   if (!model || !prompt) { status.textContent = 'Model and prompt are required'; return; }
+  if (activeGenerationSocket) return;
   output.textContent = '';
   status.textContent = 'Generating...';
+  setGenerationControls(true);
   try {
-    await generateText(model, prompt, maxTokens, data => {
+    const result = await generateText(model, prompt, maxTokens, data => {
       if (typeof data.token === 'string') output.textContent += data.token;
     });
-    status.textContent = 'Complete';
+    status.textContent = result.stopped ? 'Stopped' : 'Complete';
   } catch (e) { status.textContent = 'Generation failed: ' + e.message; }
+  finally { setGenerationControls(false); }
 }
 
 async function searchModels() {
@@ -505,43 +597,222 @@ async function cancelAgent(entityId) {
 
 const CONVERSATION_SESSION = 'webui-default';
 let conversationMessages = [];
+let conversationPendingMessage = null;
+
+function syncConversationModels(models) {
+  const select = document.getElementById('conversation-model');
+  if (!select) return;
+  const previous = select.value || document.getElementById('generation-model')?.value.trim();
+  select.innerHTML = '';
+  if (!models.length) {
+    select.add(new Option('No loaded models', ''));
+    return;
+  }
+  models.forEach(name => select.add(new Option(name, name)));
+  select.value = models.includes(previous) ? previous : models[0];
+  const generationModel = document.getElementById('generation-model');
+  if (generationModel && !generationModel.value) generationModel.value = select.value;
+}
+
+function setConversationState(state, label) {
+  const pill = document.getElementById('conversation-live-status');
+  if (!pill) return;
+  pill.className = 'conversation-status-pill ' + state;
+  pill.textContent = label;
+}
+
 async function loadConversation() {
   try {
     const result = await daemonToolCall('conversation', {command:'load', session_id: CONVERSATION_SESSION, limit: 100});
     conversationMessages = result.result?.messages || result.messages || [];
     renderConversation();
-  } catch (e) { document.getElementById('conversation-status').textContent = 'Conversation unavailable: ' + e.message; }
+    setConversationState('complete', 'Ready');
+    document.getElementById('conversation-status').textContent = 'Conversation history is loaded from Prism.';
+  } catch (e) {
+    setConversationState('error', 'Unavailable');
+    document.getElementById('conversation-status').textContent = 'Conversation unavailable: ' + e.message;
+  }
 }
+
+function addConversationAttachment(container, attachment) {
+  const mediaType = attachment.media_type || '';
+  if (attachment.data && mediaType.startsWith('image/')) {
+    const image = document.createElement('img');
+    image.src = 'data:' + mediaType + ';base64,' + attachment.data;
+    image.alt = attachment.name || 'Attached image';
+    image.style.cssText = 'display:block;max-width:320px;max-height:240px;margin-top:8px;border-radius:8px;border:1px solid #334155';
+    container.appendChild(image);
+  } else if (attachment.data && mediaType.startsWith('audio/')) {
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.src = 'data:' + mediaType + ';base64,' + attachment.data;
+    audio.style.marginTop = '8px';
+    container.appendChild(audio);
+  } else if (attachment.data && mediaType.startsWith('video/')) {
+    const video = document.createElement('video');
+    video.controls = true;
+    video.src = 'data:' + mediaType + ';base64,' + attachment.data;
+    video.style.cssText = 'display:block;max-width:320px;max-height:240px;margin-top:8px;border-radius:8px';
+    container.appendChild(video);
+  } else {
+    const label = document.createElement('div');
+    label.className = 'helper';
+    label.textContent = '[' + (mediaType || 'attachment') + ': ' + (attachment.name || 'unnamed') + ']';
+    container.appendChild(label);
+  }
+}
+
+function renderConversationEmptyState(container) {
+  const empty = document.createElement('div');
+  empty.className = 'conversation-empty';
+  empty.innerHTML = '<strong>Start a local Prism conversation</strong><span>Ask about a loaded model, inspect a run, or use a follow-up below. Suggestions only fill the composer; generation, tools, and persistence remain daemon-owned.</span>';
+  const suggestions = document.createElement('div');
+  suggestions.className = 'conversation-suggestions';
+  [
+    ['Summarize the active model', 'Summarize the active model and its available runtime capabilities.'],
+    ['Explain this run', 'Explain what the current Prism run is doing and what evidence is available.'],
+    ['Help me inspect a graph', 'Help me inspect the loaded model graph and identify its main execution stages.'],
+  ].forEach(([label, prompt]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.addEventListener('click', () => {
+      document.getElementById('conversation-input').value = prompt;
+      document.getElementById('conversation-input').focus();
+    });
+    suggestions.appendChild(button);
+  });
+  empty.appendChild(suggestions);
+  container.appendChild(empty);
+}
+
+function addQuickActions(container, responseText) {
+  const actions = document.createElement('div');
+  actions.className = 'conversation-actions';
+  [
+    ['Simplify', 'Simplify this response in plain language.'],
+    ['Explain', 'Explain this response in more detail.'],
+    ['Find more', 'Find more information related to this response.'],
+  ].forEach(([label, instruction]) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'quick-action';
+    button.textContent = label;
+    button.addEventListener('click', () => sendConversationMessage(`${instruction}\n\nResponse:\n${responseText}`));
+    actions.appendChild(button);
+  });
+  container.appendChild(actions);
+}
+
+function renderConversationMessage(message) {
+  const role = message.role === 'user' ? 'user' : 'assistant';
+  const card = document.createElement('article');
+  card.className = 'conversation-card ' + role + (message.pending ? ' pending' : '');
+
+  const header = document.createElement('div');
+  header.className = 'conversation-card-header';
+  const author = document.createElement('strong');
+  author.textContent = role === 'user' ? 'You' : 'Prism';
+  const phase = document.createElement('span');
+  phase.textContent = message.pending ? 'Streaming' : (message.status === 'stopped' ? 'Stopped' : 'Response');
+  header.append(author, phase);
+  card.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'conversation-card-body';
+  body.textContent = message.text || (message.pending ? 'Prism is thinking…' : '');
+  card.appendChild(body);
+  (message.attachments || []).forEach(attachment => addConversationAttachment(card, attachment));
+
+  if (role === 'assistant' && !message.pending && message.text) {
+    const meta = document.createElement('div');
+    meta.className = 'conversation-card-meta';
+    const label = document.createElement('span');
+    label.textContent = message.status === 'stopped' ? 'Partial response · generation stopped' : 'Rust-ECS streamed response';
+    meta.appendChild(label);
+    addQuickActions(meta, message.text);
+    card.appendChild(meta);
+  }
+  return card;
+}
+
 function renderConversation() {
   const box = document.getElementById('conversation-messages');
-  box.innerHTML = conversationMessages.map(m => `<div style="margin:8px 0"><strong>${m.role}</strong>: ${m.text || ''}${(m.attachments||[]).map(a => {
-    if (a.media_type?.startsWith('image/') && a.data) return `<div><img src="data:${a.media_type};base64,${a.data}" style="max-width:320px;max-height:240px" alt="${a.name||'image'}"></div>`;
-    if (a.media_type?.startsWith('audio/') && a.data) return `<div><audio controls src="data:${a.media_type};base64,${a.data}"></audio></div>`;
-    if (a.media_type?.startsWith('video/') && a.data) return `<div><video controls style="max-width:320px" src="data:${a.media_type};base64,${a.data}"></video></div>`;
-    return `<div>[${a.media_type||'attachment'}: ${a.name||'unnamed'}]</div>`;
-  }).join('')}</div>`).join('');
+  box.replaceChildren();
+  if (!conversationMessages.length) {
+    renderConversationEmptyState(box);
+  } else {
+    conversationMessages.forEach(message => box.appendChild(renderConversationMessage(message)));
+  }
   box.scrollTop = box.scrollHeight;
 }
-async function sendConversationMessage() {
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function sendConversationMessage(promptOverride = '') {
   const input = document.getElementById('conversation-input');
-  const text = input.value.trim();
+  const text = (promptOverride || input.value).trim();
   if (!text) return;
+  if (activeGenerationSocket) return;
+  const model = document.getElementById('conversation-model').value || document.getElementById('generation-model')?.value.trim();
+  if (!model) {
+    setConversationState('error', 'Model required');
+    document.getElementById('conversation-status').textContent = 'Load a model before chatting.';
+    return;
+  }
   const status = document.getElementById('conversation-status');
-  status.textContent = 'Sending…';
+  setConversationState('streaming', 'Thinking…');
+  status.textContent = 'Saving your message and starting a Rust-ECS stream…';
   const file = document.getElementById('conversation-file').files[0];
-    const attachments = file ? [{media_type:file.type, name:file.name, data:btoa(String.fromCharCode(...new Uint8Array(await file.arrayBuffer())))}] : [];
+  const attachments = file ? [{media_type:file.type, name:file.name, data:bytesToBase64(new Uint8Array(await file.arrayBuffer()))}] : [];
+  setGenerationControls(true);
   try {
     await daemonToolCall('conversation', {command:'append', role:'user', text, session_id:CONVERSATION_SESSION, attachments});
-    conversationMessages.push({role:'user', text, attachments}); renderConversation(); input.value = '';
-    const model = document.getElementById('generation-model')?.value;
-    if (!model) throw new Error('Load a model before chatting');
-    status.textContent = 'Agent is responding…';
+    conversationMessages.push({role:'user', text, attachments});
+    conversationPendingMessage = {role:'assistant', text:'', pending:true};
+    conversationMessages.push(conversationPendingMessage);
+    renderConversation();
+    input.value = '';
+    document.getElementById('conversation-file').value = '';
+    status.textContent = 'Prism is responding…';
     let answer = '';
     const multimodalContext = attachments.length ? `\n[Attached modalities: ${attachments.map(a => a.media_type).join(', ')}]` : '';
-    await generateText(model, text + multimodalContext, 256, data => { if (typeof data.token === 'string') { answer += data.token; status.textContent = answer; } });
+    const result = await generateText(model, text + multimodalContext, 256, data => {
+      if (typeof data.token === 'string') {
+        answer += data.token;
+        conversationPendingMessage.text = answer;
+        status.textContent = 'Streaming ' + answer.length + ' characters…';
+        renderConversation();
+      }
+    });
+    answer = result.text;
+    conversationPendingMessage.text = answer;
+    conversationPendingMessage.pending = false;
+    conversationPendingMessage.status = result.stopped ? 'stopped' : 'complete';
     await daemonToolCall('conversation', {command:'append', role:'assistant', text:answer, session_id:CONVERSATION_SESSION});
-    conversationMessages.push({role:'assistant', text:answer, attachments:[]}); renderConversation(); status.textContent = 'Ready';
-  } catch (e) { status.textContent = 'Conversation error: ' + e.message; }
+    conversationPendingMessage = null;
+    renderConversation();
+    setConversationState(result.stopped ? 'stopped' : 'complete', result.stopped ? 'Stopped' : 'Ready');
+    status.textContent = result.stopped ? 'Generation stopped. The partial response was retained by Prism.' : 'Response saved by Prism.';
+  } catch (e) {
+    if (conversationPendingMessage) {
+      conversationPendingMessage.text = 'Conversation error: ' + e.message;
+      conversationPendingMessage.pending = false;
+      conversationPendingMessage.status = 'error';
+      conversationPendingMessage = null;
+      renderConversation();
+    }
+    setConversationState('error', 'Error');
+    status.textContent = 'Conversation error: ' + e.message;
+  } finally {
+    setGenerationControls(false);
+  }
 }
 
 // ── Hardware ────────────────────────────────────────────────
@@ -660,6 +931,17 @@ function updatePageInfo(title, url, links, headings, buttons) {
 
 // Initial load
 document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('keydown', handleTabKeyboard));
+document.getElementById('conversation-input').addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    sendConversationMessage();
+  }
+});
+document.getElementById('conversation-model').addEventListener('change', event => {
+  const model = event.currentTarget.value;
+  const generationModel = document.getElementById('generation-model');
+  if (generationModel && model) generationModel.value = model;
+});
 switchTab('models');
 connectModelsWs();
 checkAuthorization();
