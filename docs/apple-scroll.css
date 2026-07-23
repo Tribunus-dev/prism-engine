@@ -19,3 +19,19 @@
 }
 @media(max-width:800px){.apple-story main{scroll-snap-type:none}.apple-story .scroll-chapter{min-height:0;height:auto}.apple-story .scroll-chapter .section-heading,.apple-story .scroll-chapter .journey-frame,.apple-story .scroll-chapter .lab-window,.apple-story .scroll-chapter .signature-track,.apple-story .scroll-chapter .reality-bands,.apple-story .scroll-chapter .working-path-grid,.apple-story .scroll-chapter .working-path-note,.apple-story .scroll-chapter .caption-row,.apple-story .scroll-chapter .figure-link{transform:none!important;opacity:1!important;filter:none!important;will-change:auto}.apple-story .hero-visual,.apple-story .hero-copy{transform:none!important}}
 @media(prefers-reduced-motion:reduce){.apple-story main{scroll-snap-type:none}.apple-story .scroll-chapter>*{transition:none!important}.apple-story .scroll-chapter .section-heading,.apple-story .scroll-chapter .journey-frame,.apple-story .scroll-chapter .lab-window,.apple-story .scroll-chapter .signature-track,.apple-story .scroll-chapter .reality-bands,.apple-story .scroll-chapter .working-path-grid,.apple-story .scroll-chapter .working-path-note,.apple-story .scroll-chapter .caption-row,.apple-story .scroll-chapter .figure-link{transform:none!important;opacity:1!important;filter:none!important;will-change:auto}}
+
+/* Final motion contract: story content stays in place while state changes. */
+.apple-story .scroll-chapter .section-heading,
+.apple-story .scroll-chapter .journey-frame,
+.apple-story .scroll-chapter .lab-window,
+.apple-story .scroll-chapter .signature-track,
+.apple-story .scroll-chapter .reality-bands,
+.apple-story .scroll-chapter .working-path-grid,
+.apple-story .scroll-chapter .working-path-note,
+.apple-story .scroll-chapter .caption-row,
+.apple-story .scroll-chapter .figure-link,
+.apple-story .scroll-chapter .hero-copy,
+.apple-story .scroll-chapter .hero-visual{transform:none!important;filter:none!important}
+.apple-story [data-scroll-reveal],
+.apple-story [data-scroll-reveal="node"],
+.apple-story [data-scroll-reveal="connector"]{transform:none!important;filter:none!important}
