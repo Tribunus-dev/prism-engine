@@ -1,7 +1,9 @@
 /* Desktop chapters share one viewport stage. Mobile deliberately returns to flow. */
 @media (min-width:801px){
   body{overflow-x:hidden}
-  .scroll-chapter{position:sticky!important;top:0!important;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;max-height:100svh;display:flex;flex-direction:column;justify-content:center;overflow:hidden!important;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px)}
+  .scroll-chapter{position:fixed!important;inset:0!important;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;max-height:100svh;display:flex;flex-direction:column;justify-content:center;overflow:hidden!important;visibility:hidden;opacity:0;pointer-events:none;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px)}
+  .scroll-chapter.is-chapter-active{visibility:visible;opacity:1;pointer-events:auto}
+  .chapter-timeline-spacer{height:100svh;display:block}
   .scroll-chapter.computeimage-anatomy{min-height:100svh;height:100svh}
   .scroll-chapter.computeimage-anatomy .computeimage-sticky{position:relative;top:auto;min-height:0;height:100%;padding-top:0;padding-bottom:0}
   .scroll-chapter>.shell,.scroll-chapter>.section-heading,.scroll-chapter>.working-path-grid,.scroll-chapter>.working-path-note,.scroll-chapter>.lab-window,.scroll-chapter>.caption-row,.scroll-chapter>.journey-frame,.scroll-chapter>.signature-track,.scroll-chapter>.figure-link,.scroll-chapter>.reality-bands{width:min(1160px,calc(100% - 48px));margin-left:auto;margin-right:auto}
@@ -17,5 +19,5 @@
   .scroll-chapter#architecture{background:var(--deep);isolation:isolate}
   .scroll-chapter#status{background:var(--paper);isolation:isolate}
 }
-@media(max-width:800px){.scroll-chapter{position:relative;top:auto;z-index:auto;min-height:0;height:auto;display:block;overflow:visible;padding-top:80px;padding-bottom:80px}}
+@media(max-width:800px){.chapter-timeline-spacer{height:0!important}.scroll-chapter{position:relative!important;inset:auto!important;top:auto;z-index:auto;min-height:0;height:auto;max-height:none;display:block;overflow:visible;padding-top:80px;padding-bottom:80px;visibility:visible;opacity:1;pointer-events:auto}}
 @media(prefers-reduced-motion:reduce){.scroll-chapter.is-chapter-active>*{animation:none!important}}

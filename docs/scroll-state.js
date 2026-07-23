@@ -20,10 +20,19 @@
   document.body.append(rail);
   const items = [...rail.querySelectorAll('[data-scroll-stage]')];
   const description = rail.querySelector('.scroll-state-description');
-  sections.forEach((section, index) => { section.classList.add('scroll-chapter'); section.style.setProperty('--chapter-index', index); });
+  sections.forEach((section, index) => {
+    section.classList.add('scroll-chapter');
+    section.style.setProperty('--chapter-index', index);
+    const spacer = document.createElement('div');
+    spacer.className = 'chapter-timeline-spacer';
+    spacer.setAttribute('aria-hidden', 'true');
+    spacer.style.height = '100svh';
+    section.parentNode.insertBefore(spacer, section);
+    section._prismTimelineSpacer = spacer;
+  });
 
   let boundaries = [];
-  const measure = () => { boundaries = sections.map(section => section.getBoundingClientRect().top + window.scrollY); update(); };
+  const measure = () => { boundaries = sections.map(section => section._prismTimelineSpacer.getBoundingClientRect().top + window.scrollY); update(); };
   const update = () => {
     const probe = window.scrollY + Math.max(1, window.innerHeight * 0.48);
     let index = 0;

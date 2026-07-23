@@ -24,7 +24,7 @@
   const clamp = value => Math.max(0, Math.min(1, value));
   const ease = value => value * value * (3 - 2 * value);
   const measure = () => {
-    boundaries = chapters.map(chapter => chapter.getBoundingClientRect().top + window.scrollY);
+    boundaries = chapters.map(chapter => chapter._prismTimelineSpacer ? chapter._prismTimelineSpacer.getBoundingClientRect().top + window.scrollY : chapter.getBoundingClientRect().top + window.scrollY);
     update();
   };
   const update = () => {
