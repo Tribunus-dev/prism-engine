@@ -16,6 +16,15 @@
     ['06 / KV + VERIFY', 'Search KV-cache policy, check legality, quality, resources, and replay evidence.'],
     ['07 / CIMAGE', 'Seal the tensor view into the target-aware executable CImage.']
   ];
+  const tensorStates = [
+    ['Logical identity', 'attention.q_proj.weight', 'shape [4096, 4096] · BF16 · projection weight', 'Source bytes are named and attributed before any physical choice.', 'SOURCE / MODEL'],
+    ['Graph semantics', 'attention.q_proj.weight', 'role projection · axes [out, in] · dependency attention.q', 'The tensor is attached to ECS graph edges and shape contracts.', 'ECS / GRAPH'],
+    ['Representation frontier', 'attention.q_proj.weight', 'BF16 → INT8 → ternary candidates · loss gate pending', 'Candidate formats are compared against the reference; no choice is implied by the animation.', 'SEARCH / Q + T'],
+    ['Lowered work', 'attention.q_proj.weight', 'matmul uops · tile-independent kernel contract', 'Logical work becomes explicit operations without choosing a vendor kernel yet.', 'LOWER / UOPS'],
+    ['Target execution view', 'attention.q_proj.weight', 'MI300X ROCm/HIP · 32×32 tiles · GPU-local residency', 'The target profile adds tile, kernel, queue, and fallback requirements.', 'TARGET / MI300X'],
+    ['KV + evidence gate', 'attention.q_proj.weight', 'KV policy: compressed candidate · numerical proof pending', 'State policy and validation gates are recorded before publication.', 'PROVE / KV + LOSS'],
+    ['ComputeImage view', 'attention.q_proj.weight', 'model.cimage · execution view sealed · receipt required', 'The artifact can carry the selected view; execution proof still comes from a real run.', 'ARTIFACT / CIMAGE']
+  ];
   let current = 0;
   let timer = null;
   const points = [[110, 235], [250, 100], [410, 370], [585, 100], [750, 370], [915, 100], [1090, 235]];
@@ -24,6 +33,12 @@
     const labels = station.querySelectorAll('text:not(.station-index)');
     if (labels.length >= 2) { labels[0].textContent = stationLabels[index][0]; labels[1].textContent = stationLabels[index][1]; }
   });
+  const frame = svg.closest('.journey-frame');
+  const inspector = document.createElement('aside');
+  inspector.className = 'tensor-inspector';
+  inspector.setAttribute('aria-live', 'polite');
+  inspector.innerHTML = '<div class="tensor-inspector-heading"><span class="tiny-label">TENSOR STATE / SELECTED STAGE</span><strong></strong></div><div class="tensor-inspector-grid"><div><span>FIELD</span><b class="tensor-field-name"></b></div><div><span>VALUE</span><b class="tensor-field-value"></b></div><div><span>HARDWARE MATCH</span><b class="tensor-field-match"></b></div></div><p class="tensor-inspector-explanation"></p><small class="tensor-inspector-disclaimer">Illustrative record. Values describe the compiler contract, not a measured receipt.</small>';
+  frame.append(inspector);
   const journeyDescription = svg.querySelector('#journey-svg-desc');
   if (journeyDescription) journeyDescription.textContent = 'A tensor moves through source memory, ECS-native graph operations, progressive representation candidates, lowered kernels, CPU GPU or NPU spatial placement, KV policy, and a CImage.';
   stations.forEach((station, index) => {
@@ -35,6 +50,12 @@
     const [label, copy] = stages[current];
     stage.textContent = label;
     caption.textContent = copy;
+    const state = tensorStates[current];
+    inspector.querySelector('.tensor-inspector-heading strong').textContent = state[0];
+    inspector.querySelector('.tensor-field-name').textContent = state[1];
+    inspector.querySelector('.tensor-field-value').textContent = state[2];
+    inspector.querySelector('.tensor-field-match').textContent = state[4];
+    inspector.querySelector('.tensor-inspector-explanation').textContent = state[3];
     token.style.transform = `translate(${points[current][0]}px,${points[current][1]}px)`;
     stations.forEach((station, index) => {
       station.classList.toggle('active', index === current);
