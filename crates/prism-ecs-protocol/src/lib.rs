@@ -8,8 +8,10 @@ mod types;
 
 pub use types::{
     Agent, Capability, CapabilitySet, CommandReceipt, CommandResult, ErrorCode, Event, EventBody,
-    Health, ProtocolError, ProtocolRequest, ProtocolVersion, RequestBody, CURRENT_PROTOCOL_VERSION,
-    MAX_AGENT_LIST_LIMIT, PROTOCOL_NAME,
+    Health, MessageRecord, MessageRole, ProtocolError, ProtocolRequest, ProtocolVersion,
+    RequestBody, ThreadStatus, ToolApproval, ToolApprovalDecision, ToolApprovalState,
+    WorkflowEvent, WorkflowEventKind, WorkflowRecord, WorkflowSnapshot, CURRENT_PROTOCOL_VERSION,
+    MAX_AGENT_LIST_LIMIT, MAX_WORKFLOW_MESSAGES, PROTOCOL_NAME,
 };
 
 #[cfg(test)]
@@ -74,5 +76,58 @@ mod tests {
             encoded["request_id"],
             json!(Uuid::from_u128(15).to_string())
         );
+    }
+
+    #[test]
+    fn workflow_events_replay_into_a_snapshot() {
+        let thread_id = Uuid::from_u128(16);
+        let approval_id = Uuid::from_u128(17);
+        let events = vec![
+            WorkflowEvent {
+                thread_id,
+                sequence: 1,
+                kind: WorkflowEventKind::ThreadOpened,
+            },
+            WorkflowEvent {
+                thread_id,
+                sequence: 2,
+                kind: WorkflowEventKind::MessageAppended {
+                    message_id: Uuid::from_u128(18),
+                    role: MessageRole::User,
+                    content: "inspect the build".into(),
+                },
+            },
+            WorkflowEvent {
+                thread_id,
+                sequence: 3,
+                kind: WorkflowEventKind::ToolApprovalRequested {
+                    approval_id,
+                    tool_name: "repo_read".into(),
+                    arguments: json!({"path":"Cargo.toml"}),
+                },
+            },
+            WorkflowEvent {
+                thread_id,
+                sequence: 4,
+                kind: WorkflowEventKind::ToolApprovalResolved {
+                    approval_id,
+                    decision: ToolApprovalDecision::Approve,
+                },
+            },
+        ];
+
+        let snapshot = WorkflowSnapshot::replay(thread_id, &events).expect("replay succeeds");
+        assert_eq!(snapshot.revision, 4);
+        assert_eq!(snapshot.messages.len(), 1);
+        assert_eq!(snapshot.approvals[0].state, ToolApprovalState::Approved);
+    }
+
+    #[test]
+    fn workflow_capabilities_are_additive_and_queryable() {
+        let capabilities = CapabilitySet::workflow();
+        assert!(capabilities.supports(Capability::RequestToolApproval));
+        assert!(capabilities.supports(Capability::CancelThread));
+        assert!(CapabilitySet::default().supports(Capability::CancelAgent));
+        assert!(!CapabilitySet::default().supports(Capability::CancelThread));
     }
 }

@@ -8,4 +8,9 @@ description = "Runtime adapter for the versioned Prism ECS application protocol"
 [dependencies]
 prism-ecs-protocol = { path = "../prism-ecs-protocol" }
 prism-ecs-runtime = { path = "../prism-ecs-runtime" }
+prism-mcp-core = { path = "../../prism-mcp-core" }
+serde_json = { workspace = true }
 uuid = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

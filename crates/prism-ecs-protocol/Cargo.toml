@@ -7,6 +7,7 @@ description = "Versioned application protocol and runtime client boundary for Pr
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]

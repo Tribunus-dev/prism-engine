@@ -2667,6 +2667,9 @@ version = "0.1.0"
 dependencies = [
  "prism-ecs-protocol",
  "prism-ecs-runtime",
+ "prism-mcp-core",
+ "serde_json",
+ "tempfile",
  "uuid",
 ]
 

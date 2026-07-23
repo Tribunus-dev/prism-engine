@@ -7,11 +7,14 @@
 
 use prism_ecs_protocol::{
     Agent, CapabilitySet, CommandReceipt, CommandResult, ErrorCode, Event, EventBody, Health,
-    ProtocolError, ProtocolRequest, RequestBody, CURRENT_PROTOCOL_VERSION, MAX_AGENT_LIST_LIMIT,
-    PROTOCOL_NAME,
+    ProtocolError, ProtocolRequest, RequestBody, WorkflowEvent, WorkflowEventKind, WorkflowRecord,
+    WorkflowSnapshot, CURRENT_PROTOCOL_VERSION, MAX_AGENT_LIST_LIMIT, PROTOCOL_NAME,
 };
 use prism_ecs_runtime::{Command, CommandEnvelope, CommandResult as RuntimeCommandResult};
 use prism_ecs_runtime::{KernelHandle, RuntimeError};
+use prism_mcp_core::ProjectionStore;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Client-side protocol boundary implemented by a runtime-backed adapter.
@@ -23,6 +26,344 @@ pub trait ApplicationClient {
 #[derive(Clone)]
 pub struct RuntimeClient {
     handle: KernelHandle,
+}
+
+/// Persistence boundary for the Rust-owned conversation/workflow state.
+///
+/// Implementations may use the daemon's durable projection store. The
+/// protocol adapter never owns ECS state and never writes directly to a
+/// database.
+pub trait WorkflowStore: Send + Sync {
+    fn load(&self, thread_id: Uuid) -> Result<Option<WorkflowRecord>, String>;
+    fn save(&self, record: &WorkflowRecord) -> Result<(), String>;
+}
+
+/// Runtime cancellation boundary. The daemon composition root can connect
+/// this to its existing inference cancellation manager without importing that
+/// runtime into the protocol contract crate.
+pub trait WorkflowCancellation: Send + Sync {
+    fn cancel(&self, thread_id: Uuid) -> Result<(), String>;
+}
+
+#[derive(Default)]
+pub struct NoopWorkflowCancellation;
+
+impl WorkflowCancellation for NoopWorkflowCancellation {
+    fn cancel(&self, _thread_id: Uuid) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct InMemoryWorkflowStore {
+    records: Mutex<HashMap<Uuid, WorkflowRecord>>,
+}
+
+impl WorkflowStore for InMemoryWorkflowStore {
+    fn load(&self, thread_id: Uuid) -> Result<Option<WorkflowRecord>, String> {
+        self.records
+            .lock()
+            .map_err(|_| "workflow store lock poisoned".to_string())
+            .map(|records| records.get(&thread_id).cloned())
+    }
+
+    fn save(&self, record: &WorkflowRecord) -> Result<(), String> {
+        let mut records = self
+            .records
+            .lock()
+            .map_err(|_| "workflow store lock poisoned".to_string())?;
+        records.insert(record.snapshot.thread_id, record.clone());
+        Ok(())
+    }
+}
+
+/// Adapter over the existing daemon projection storage seam. SQLite-backed
+/// daemon profiles persist this record; a projection implementation that is
+/// only in-memory remains intentionally non-durable.
+pub struct ProjectionWorkflowStore {
+    projection: Arc<dyn ProjectionStore>,
+}
+
+impl ProjectionWorkflowStore {
+    pub fn new(projection: Arc<dyn ProjectionStore>) -> Self {
+        Self { projection }
+    }
+
+    fn key(thread_id: Uuid) -> String {
+        format!("prism.workflow.{thread_id}")
+    }
+}
+
+impl WorkflowStore for ProjectionWorkflowStore {
+    fn load(&self, thread_id: Uuid) -> Result<Option<WorkflowRecord>, String> {
+        let value = match self.projection.get_trace(&Self::key(thread_id)) {
+            Ok(value) => value,
+            Err(error) if error.to_string().contains("no such table") => None,
+            Err(error) => return Err(error.to_string()),
+        };
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let record: WorkflowRecord = serde_json::from_value(value)
+            .map_err(|error| format!("decode workflow record: {error}"))?;
+        if record.snapshot.thread_id != thread_id {
+            return Err("workflow record thread id does not match key".into());
+        }
+        Ok(Some(record))
+    }
+
+    fn save(&self, record: &WorkflowRecord) -> Result<(), String> {
+        let value = serde_json::to_value(record)
+            .map_err(|error| format!("encode workflow record: {error}"))?;
+        self.projection
+            .put_trace(&Self::key(record.snapshot.thread_id), &value)
+            .map_err(|error| error.to_string())
+    }
+}
+
+struct WorkflowService<S, C> {
+    store: S,
+    cancellation: C,
+}
+
+impl<S: WorkflowStore, C: WorkflowCancellation> WorkflowService<S, C> {
+    fn load(&self, thread_id: Uuid) -> Result<WorkflowRecord, String> {
+        let record = self
+            .store
+            .load(thread_id)?
+            .ok_or_else(|| "thread not found".to_string())?;
+        let replayed = WorkflowSnapshot::replay(thread_id, &record.events)?;
+        if replayed != record.snapshot {
+            return Err("workflow snapshot does not match replay log".into());
+        }
+        Ok(record)
+    }
+
+    fn save_event(
+        &self,
+        mut record: WorkflowRecord,
+        expected_revision: Option<u64>,
+        kind: WorkflowEventKind,
+    ) -> Result<WorkflowEvent, String> {
+        if let Some(expected) = expected_revision {
+            if record.snapshot.revision != expected {
+                return Err(format!(
+                    "revision mismatch: expected {}, got {}",
+                    expected, record.snapshot.revision
+                ));
+            }
+        }
+        let event = WorkflowEvent {
+            thread_id: record.snapshot.thread_id,
+            sequence: record.snapshot.revision + 1,
+            kind,
+        };
+        let mut next_snapshot = record.snapshot.clone();
+        next_snapshot.apply(&event)?;
+        record.events.push(event.clone());
+        record.snapshot = next_snapshot;
+        self.store.save(&record)?;
+        Ok(event)
+    }
+
+    fn open(&self, thread_id: Uuid) -> Result<WorkflowSnapshot, String> {
+        if let Some(record) = self.store.load(thread_id)? {
+            return Ok(record.snapshot);
+        }
+        let record = WorkflowRecord {
+            snapshot: WorkflowSnapshot::new(thread_id),
+            events: Vec::new(),
+        };
+        self.save_event(record, Some(0), WorkflowEventKind::ThreadOpened)?;
+        Ok(self.load(thread_id)?.snapshot)
+    }
+
+    fn handle(&self, request_id: Uuid, body: RequestBody) -> EventBody {
+        let result = match body {
+            RequestBody::OpenThread { thread_id } => {
+                self.open(thread_id).map(EventBody::WorkflowSnapshot)
+            }
+            RequestBody::GetThread { thread_id } => self
+                .load(thread_id)
+                .map(|record| EventBody::WorkflowSnapshot(record.snapshot)),
+            RequestBody::AppendMessage {
+                thread_id,
+                role,
+                content,
+                expected_revision,
+            } => self.load(thread_id).and_then(|record| {
+                self.save_event(
+                    record,
+                    expected_revision,
+                    WorkflowEventKind::MessageAppended {
+                        message_id: Uuid::new_v4(),
+                        role,
+                        content,
+                    },
+                )
+                .map(EventBody::WorkflowEvent)
+            }),
+            RequestBody::RequestToolApproval {
+                thread_id,
+                tool_name,
+                arguments,
+                expected_revision,
+            } => self.load(thread_id).and_then(|record| {
+                self.save_event(
+                    record,
+                    expected_revision,
+                    WorkflowEventKind::ToolApprovalRequested {
+                        approval_id: Uuid::new_v4(),
+                        tool_name,
+                        arguments,
+                    },
+                )
+                .map(EventBody::WorkflowEvent)
+            }),
+            RequestBody::ResolveToolApproval {
+                thread_id,
+                approval_id,
+                decision,
+                expected_revision,
+            } => self.load(thread_id).and_then(|record| {
+                self.save_event(
+                    record,
+                    expected_revision,
+                    WorkflowEventKind::ToolApprovalResolved {
+                        approval_id,
+                        decision,
+                    },
+                )
+                .map(EventBody::WorkflowEvent)
+            }),
+            RequestBody::CancelThread {
+                thread_id,
+                expected_revision,
+            } => self.load(thread_id).and_then(|record| {
+                if let Some(expected) = expected_revision {
+                    if record.snapshot.revision != expected {
+                        return Err(format!(
+                            "revision mismatch: expected {}, got {}",
+                            expected, record.snapshot.revision
+                        ));
+                    }
+                }
+                if record.snapshot.status == prism_ecs_protocol::ThreadStatus::Cancelled {
+                    return Err("thread is already cancelled".into());
+                }
+                self.cancellation.cancel(thread_id)?;
+                self.save_event(record, None, WorkflowEventKind::ThreadCancelled)
+                    .map(EventBody::WorkflowEvent)
+            }),
+            _ => Err("request is not a workflow operation".into()),
+        };
+
+        result.unwrap_or_else(|message| {
+            let code = if message == "thread not found" {
+                ErrorCode::ThreadNotFound
+            } else if message.starts_with("revision mismatch") {
+                ErrorCode::RevisionMismatch
+            } else if message == "tool approval not found" {
+                ErrorCode::ApprovalNotFound
+            } else if message == "tool approval is already resolved" {
+                ErrorCode::ApprovalNotPending
+            } else if message.starts_with("cancellation") {
+                ErrorCode::CancellationFailed
+            } else {
+                ErrorCode::InvalidRequest
+            };
+            EventBody::Error(ProtocolError::new(request_id, code, message, false))
+        })
+    }
+}
+
+/// Application client that combines the existing ECS runtime adapter with a
+/// bounded Rust-owned workflow service.
+pub struct WorkflowClient<S, C> {
+    runtime: RuntimeClient,
+    service: Arc<Mutex<WorkflowService<S, C>>>,
+}
+
+impl<S: WorkflowStore + 'static, C: WorkflowCancellation + 'static> WorkflowClient<S, C> {
+    pub fn new(handle: KernelHandle, store: S, cancellation: C) -> Self {
+        Self {
+            runtime: RuntimeClient::new(handle),
+            service: Arc::new(Mutex::new(WorkflowService {
+                store,
+                cancellation,
+            })),
+        }
+    }
+
+    pub fn runtime(&self) -> &RuntimeClient {
+        &self.runtime
+    }
+}
+
+impl<S: WorkflowStore + 'static, C: WorkflowCancellation + 'static> ApplicationClient
+    for WorkflowClient<S, C>
+{
+    fn send(&self, request: ProtocolRequest) -> Event {
+        let request_id = request.request_id;
+        if matches!(
+            request.body,
+            RequestBody::OpenThread { .. }
+                | RequestBody::GetThread { .. }
+                | RequestBody::AppendMessage { .. }
+                | RequestBody::RequestToolApproval { .. }
+                | RequestBody::ResolveToolApproval { .. }
+                | RequestBody::CancelThread { .. }
+        ) {
+            if request.protocol != PROTOCOL_NAME {
+                return Event::new(
+                    request_id,
+                    EventBody::Error(ProtocolError::new(
+                        request_id,
+                        ErrorCode::UnsupportedProtocol,
+                        format!("unsupported protocol: {}", request.protocol),
+                        false,
+                    )),
+                );
+            }
+            if request.version.major != CURRENT_PROTOCOL_VERSION.major
+                || request.version.minor > CURRENT_PROTOCOL_VERSION.minor
+            {
+                return Event::new(
+                    request_id,
+                    EventBody::Error(ProtocolError::new(
+                        request_id,
+                        ErrorCode::UnsupportedVersion,
+                        format!(
+                            "unsupported protocol version {}.{}",
+                            request.version.major, request.version.minor
+                        ),
+                        false,
+                    )),
+                );
+            }
+            let body = self
+                .service
+                .lock()
+                .map(|service| service.handle(request_id, request.body))
+                .unwrap_or_else(|_| {
+                    EventBody::Error(ProtocolError::new(
+                        request_id,
+                        ErrorCode::RuntimeFailure,
+                        "workflow service lock poisoned",
+                        true,
+                    ))
+                });
+            return Event::new(request_id, body);
+        }
+
+        if matches!(request.body, RequestBody::GetCapabilities) {
+            return Event::new(
+                request_id,
+                EventBody::Capabilities(CapabilitySet::workflow()),
+            );
+        }
+        self.runtime.send(request)
+    }
 }
 
 impl RuntimeClient {
@@ -162,6 +503,12 @@ impl ApplicationClient for RuntimeClient {
                 expected_world_epoch,
                 Command::CancelAgent { agent_id },
             ),
+            _ => EventBody::Error(ProtocolError::new(
+                request_id,
+                ErrorCode::UnsupportedCapability,
+                "workflow request requires WorkflowClient",
+                false,
+            )),
         };
 
         Event::new(request_id, body)
@@ -186,8 +533,11 @@ fn map_runtime_error(request_id: Uuid, error: RuntimeError) -> ProtocolError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prism_ecs_protocol::{EventBody, ProtocolError, RequestBody};
+    use prism_ecs_protocol::{
+        Capability, EventBody, ProtocolError, RequestBody, ToolApprovalDecision, ToolApprovalState,
+    };
     use prism_ecs_runtime::{Command, CommandEnvelope, RuntimeKernel};
+    use std::sync::Mutex;
 
     fn request(request_id: Uuid, body: RequestBody) -> ProtocolRequest {
         ProtocolRequest::new(request_id, body)
@@ -275,6 +625,191 @@ mod tests {
                 assert!(!error.retryable);
             }
             other => panic!("expected error event, got {other:?}"),
+        }
+    }
+
+    struct RecordingCancellation(Arc<Mutex<Vec<Uuid>>>);
+
+    impl WorkflowCancellation for RecordingCancellation {
+        fn cancel(&self, thread_id: Uuid) -> Result<(), String> {
+            self.0.lock().unwrap().push(thread_id);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn workflow_client_persists_replayable_messages_and_approval_state() {
+        let thread_id = Uuid::from_u128(21);
+        let client = WorkflowClient::new(
+            RuntimeKernel::new().handle(),
+            InMemoryWorkflowStore::default(),
+            RecordingCancellation(Arc::new(Mutex::new(Vec::new()))),
+        );
+
+        let response = client.send(request(
+            Uuid::from_u128(22),
+            RequestBody::OpenThread { thread_id },
+        ));
+        let snapshot = match response.body {
+            EventBody::WorkflowSnapshot(snapshot) => snapshot,
+            other => panic!("expected workflow snapshot, got {other:?}"),
+        };
+        assert_eq!(snapshot.revision, 1);
+
+        let response = client.send(request(
+            Uuid::from_u128(23),
+            RequestBody::AppendMessage {
+                thread_id,
+                role: prism_ecs_protocol::MessageRole::User,
+                content: "run the safe read".into(),
+                expected_revision: Some(1),
+            },
+        ));
+        assert!(matches!(response.body, EventBody::WorkflowEvent(_)));
+
+        let response = client.send(request(
+            Uuid::from_u128(24),
+            RequestBody::RequestToolApproval {
+                thread_id,
+                tool_name: "repo_read".into(),
+                arguments: serde_json::json!({"path":"Cargo.toml"}),
+                expected_revision: Some(2),
+            },
+        ));
+        let approval_id = match response.body {
+            EventBody::WorkflowEvent(event) => match event.kind {
+                WorkflowEventKind::ToolApprovalRequested { approval_id, .. } => approval_id,
+                other => panic!("expected approval request, got {other:?}"),
+            },
+            other => panic!("expected workflow event, got {other:?}"),
+        };
+
+        let response = client.send(request(
+            Uuid::from_u128(25),
+            RequestBody::ResolveToolApproval {
+                thread_id,
+                approval_id,
+                decision: ToolApprovalDecision::Approve,
+                expected_revision: Some(3),
+            },
+        ));
+        assert!(matches!(response.body, EventBody::WorkflowEvent(_)));
+
+        let response = client.send(request(
+            Uuid::from_u128(26),
+            RequestBody::GetThread { thread_id },
+        ));
+        match response.body {
+            EventBody::WorkflowSnapshot(snapshot) => {
+                assert_eq!(snapshot.revision, 4);
+                assert_eq!(snapshot.messages.len(), 1);
+                assert_eq!(snapshot.approvals[0].state, ToolApprovalState::Approved);
+            }
+            other => panic!("expected workflow snapshot, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workflow_client_fences_stale_writes_and_calls_runtime_cancellation() {
+        let thread_id = Uuid::from_u128(31);
+        let cancellation = RecordingCancellation(Arc::new(Mutex::new(Vec::new())));
+        let calls = cancellation.0.clone();
+        let client = WorkflowClient::new(
+            RuntimeKernel::new().handle(),
+            InMemoryWorkflowStore::default(),
+            cancellation,
+        );
+        client.send(request(
+            Uuid::from_u128(32),
+            RequestBody::OpenThread { thread_id },
+        ));
+        let stale = client.send(request(
+            Uuid::from_u128(33),
+            RequestBody::AppendMessage {
+                thread_id,
+                role: prism_ecs_protocol::MessageRole::User,
+                content: "stale".into(),
+                expected_revision: Some(0),
+            },
+        ));
+        assert!(matches!(
+            stale.body,
+            EventBody::Error(ProtocolError {
+                code: ErrorCode::RevisionMismatch,
+                ..
+            })
+        ));
+
+        let cancelled = client.send(request(
+            Uuid::from_u128(34),
+            RequestBody::CancelThread {
+                thread_id,
+                expected_revision: Some(1),
+            },
+        ));
+        assert!(matches!(cancelled.body, EventBody::WorkflowEvent(_)));
+        assert_eq!(calls.lock().unwrap().as_slice(), &[thread_id]);
+    }
+
+    #[test]
+    fn projection_workflow_store_round_trips_through_daemon_storage_seam() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let db = Arc::new(
+            prism_mcp_core::DbManager::open(&directory.path().join("workflow.db"), "", 2)
+                .expect("open sqlite projection store"),
+        );
+        let thread_id = Uuid::from_u128(41);
+        let client = WorkflowClient::new(
+            RuntimeKernel::new().handle(),
+            ProjectionWorkflowStore::new(db.clone()),
+            NoopWorkflowCancellation,
+        );
+        client.send(request(
+            Uuid::from_u128(42),
+            RequestBody::OpenThread { thread_id },
+        ));
+        client.send(request(
+            Uuid::from_u128(43),
+            RequestBody::AppendMessage {
+                thread_id,
+                role: prism_ecs_protocol::MessageRole::Assistant,
+                content: "persisted".into(),
+                expected_revision: Some(1),
+            },
+        ));
+
+        let second_client = WorkflowClient::new(
+            RuntimeKernel::new().handle(),
+            ProjectionWorkflowStore::new(db),
+            NoopWorkflowCancellation,
+        );
+        let response = second_client.send(request(
+            Uuid::from_u128(44),
+            RequestBody::GetThread { thread_id },
+        ));
+        match response.body {
+            EventBody::WorkflowSnapshot(snapshot) => {
+                assert_eq!(snapshot.revision, 2);
+                assert_eq!(snapshot.messages[0].content, "persisted");
+            }
+            other => panic!("expected persisted snapshot, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn workflow_client_advertises_only_workflow_capabilities_for_workflow_requests() {
+        let client = WorkflowClient::new(
+            RuntimeKernel::new().handle(),
+            InMemoryWorkflowStore::default(),
+            NoopWorkflowCancellation,
+        );
+        let response = client.send(request(Uuid::from_u128(51), RequestBody::GetCapabilities));
+        match response.body {
+            EventBody::Capabilities(capabilities) => {
+                assert!(capabilities.supports(Capability::AppendMessage));
+                assert!(capabilities.supports(Capability::CancelThread));
+            }
+            other => panic!("expected capability snapshot, got {other:?}"),
         }
     }
 }
