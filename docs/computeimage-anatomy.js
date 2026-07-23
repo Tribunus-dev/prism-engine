@@ -19,8 +19,9 @@
     frame = 0;
     if (reduced.matches) return;
     const rect = chapter.getBoundingClientRect();
+    const chapterProgress = Number.parseFloat(chapter.style.getPropertyValue('--chapter-progress'));
     const travel = Math.max(chapter.offsetHeight - window.innerHeight, 1);
-    const amount = clamp(-rect.top / travel);
+    const amount = Number.isFinite(chapterProgress) ? clamp(chapterProgress) : clamp(-rect.top / travel);
     const stage = Math.min(copy.length - 1, Math.floor(amount * copy.length));
     layers.forEach((layer, index) => layer.classList.toggle('is-revealed', index <= stage));
     if (progress) progress.style.width = `${amount * 100}%`;
