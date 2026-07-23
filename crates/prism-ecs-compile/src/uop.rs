@@ -11,6 +11,7 @@ use prism_ecs_kernel::{
     MetalBackend,
 };
 use prism_spatial_ir::{CapturePlan, FusionStrategy, LoweringTarget, TinyGraph};
+use sha2::Digest;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -722,6 +723,260 @@ where
 pub struct UOpWorkloadMeasurement {
     pub scenario: prism_spatial_ir::WorkloadScenario,
     pub measurements: Vec<prism_spatial_ir::FusionMeasurement>,
+}
+
+/// Provenance for a UOp tuning observation.  The legacy workload measurement
+/// API intentionally remains unchanged; this separate type prevents callers
+/// from accidentally treating an arbitrary timing vector as production
+/// evidence.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum UOpMeasurementSource {
+    CpuReference,
+    Backend(String),
+    SyntheticFallback,
+    Unknown(String),
+}
+
+impl UOpMeasurementSource {
+    pub fn is_real(&self) -> bool {
+        matches!(self, Self::CpuReference | Self::Backend(_))
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Self::CpuReference => "cpu-reference".into(),
+            Self::Backend(name) => format!("backend:{name}"),
+            Self::SyntheticFallback => "synthetic-fallback".into(),
+            Self::Unknown(name) => format!("unknown:{name}"),
+        }
+    }
+}
+
+/// One candidate observation retained by the durable tuning receipt.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct UOpTuningCandidate {
+    pub strategy_id: String,
+    pub capture_digest: String,
+    pub measurement: prism_spatial_ir::FusionMeasurement,
+    pub source: UOpMeasurementSource,
+    pub correctness_verified: bool,
+    pub selected: bool,
+}
+
+/// Selection and tuning evidence for one workload scenario.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct UOpTuningScenario {
+    pub scenario: prism_spatial_ir::WorkloadScenario,
+    pub candidates: Vec<UOpTuningCandidate>,
+    pub selected_strategy: Option<String>,
+}
+
+/// Structured, self-digesting receipt for UOp candidate selection.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct UOpTuningReceipt {
+    pub schema_version: String,
+    pub graph_digest: String,
+    pub target: String,
+    pub source: UOpMeasurementSource,
+    pub correctness_verified: bool,
+    pub production_ready: bool,
+    pub fallback_reason: Option<String>,
+    pub scenarios: Vec<UOpTuningScenario>,
+    pub receipt_digest: String,
+}
+
+impl UOpTuningReceipt {
+    pub fn from_candidates(
+        graph_digest: impl Into<String>,
+        target: prism_spatial_ir::LoweringTarget,
+        candidates: &[(FusionStrategy, CapturePlan, Vec<KernelArtifact>)],
+        evaluations: &[UOpWorkloadMeasurement],
+        source: UOpMeasurementSource,
+        correctness_verified: bool,
+    ) -> Result<Self, String> {
+        if candidates.is_empty() || evaluations.is_empty() {
+            return Err("UOp tuning receipt requires candidates and workload measurements".into());
+        }
+        let strategy_ids = candidates
+            .iter()
+            .map(|(strategy, _, _)| strategy.stable_id().to_string())
+            .collect::<Vec<_>>();
+        if strategy_ids.iter().any(String::is_empty)
+            || strategy_ids.windows(2).any(|window| window[0] == window[1])
+        {
+            return Err("UOp tuning receipt requires unique strategy IDs".into());
+        }
+        let mut scenarios = Vec::with_capacity(evaluations.len());
+        for evaluation in evaluations {
+            evaluation.scenario.validate()?;
+            let (selected_strategy, _) = select_measured_uop_strategy(
+                &candidates
+                    .iter()
+                    .map(|(strategy, _, _)| strategy.clone())
+                    .collect::<Vec<_>>(),
+                &evaluation.measurements,
+            )?;
+            let tuning_candidates = candidates
+                .iter()
+                .enumerate()
+                .map(|(index, (strategy, capture, _))| UOpTuningCandidate {
+                    strategy_id: strategy.stable_id().to_string(),
+                    capture_digest: capture.digest(),
+                    measurement: evaluation.measurements[index],
+                    source: source.clone(),
+                    correctness_verified,
+                    selected: strategy.stable_id() == selected_strategy,
+                })
+                .collect();
+            scenarios.push(UOpTuningScenario {
+                scenario: evaluation.scenario,
+                candidates: tuning_candidates,
+                selected_strategy: Some(selected_strategy),
+            });
+        }
+        let mut receipt = Self {
+            schema_version: "prism-uop-tuning/1".into(),
+            graph_digest: graph_digest.into(),
+            target: format!("{target:?}"),
+            source: source.clone(),
+            correctness_verified,
+            production_ready: source.is_real() && correctness_verified,
+            fallback_reason: (!source.is_real()).then(|| {
+                "selection is retained for fallback diagnostics but is not production evidence"
+                    .into()
+            }),
+            scenarios,
+            receipt_digest: String::new(),
+        };
+        receipt.seal()?;
+        Ok(receipt)
+    }
+
+    pub fn explicit_fallback(
+        graph_digest: impl Into<String>,
+        target: prism_spatial_ir::LoweringTarget,
+        reason: impl Into<String>,
+    ) -> Result<Self, String> {
+        let mut receipt = Self {
+            schema_version: "prism-uop-tuning/1".into(),
+            graph_digest: graph_digest.into(),
+            target: format!("{target:?}"),
+            source: UOpMeasurementSource::SyntheticFallback,
+            correctness_verified: false,
+            production_ready: false,
+            fallback_reason: Some(reason.into()),
+            scenarios: Vec::new(),
+            receipt_digest: String::new(),
+        };
+        receipt.seal()?;
+        Ok(receipt)
+    }
+
+    pub fn seal(&mut self) -> Result<(), String> {
+        self.receipt_digest.clear();
+        let bytes = serde_json::to_vec(self)
+            .map_err(|error| format!("serialize UOp tuning receipt: {error}"))?;
+        let digest = sha2::Sha256::digest(bytes);
+        self.receipt_digest = hex::encode(digest);
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.production_ready && (!self.source.is_real() || !self.correctness_verified) {
+            return Err("UOp tuning receipt promotes non-real or unverified evidence".into());
+        }
+        let mut unsigned = self.clone();
+        let expected = self.receipt_digest.clone();
+        unsigned.receipt_digest.clear();
+        unsigned.seal()?;
+        if expected != unsigned.receipt_digest {
+            return Err("UOp tuning receipt digest mismatch".into());
+        }
+        for scenario in &self.scenarios {
+            if scenario.candidates.is_empty() {
+                return Err("UOp tuning receipt contains an empty candidate set".into());
+            }
+            let best = scenario
+                .candidates
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, candidate)| {
+                    candidate
+                        .measurement
+                        .latency_ns
+                        .saturating_add(candidate.measurement.materialized_bytes / 100)
+                })
+                .map(|(_, candidate)| candidate.strategy_id.as_str());
+            if scenario.selected_strategy.as_deref() != best {
+                return Err(format!(
+                    "UOp tuning receipt selects a non-winning strategy for {:?}",
+                    scenario.scenario
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Benchmark already-compiled candidates through the portable CPU reference
+/// executor. This measures the executable captures that will be published,
+/// rather than a synthetic cost model or a different graph representation.
+pub fn benchmark_uop_strategy_candidates(
+    candidates: &[(FusionStrategy, CapturePlan, Vec<KernelArtifact>)],
+    iterations: usize,
+) -> Result<Vec<prism_spatial_ir::FusionMeasurement>, String> {
+    let Some((_, reference_capture, _)) = candidates.first() else {
+        return Err("cannot benchmark an empty UOp candidate set".into());
+    };
+    let inputs = reference_capture
+        .graph
+        .ops
+        .iter()
+        .filter_map(|op| {
+            let prism_spatial_ir::UOpKind::Input { name } = &op.kind else {
+                return None;
+            };
+            let elements = op.shape.iter().try_fold(1usize, |count, dimension| {
+                count.checked_mul(*dimension as usize)
+            })?;
+            Some((name.clone(), vec![0.0; elements]))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let expected = reference_capture
+        .graph
+        .execute_f32(&inputs)
+        .map_err(|error| format!("CPU reference graph execution failed: {error}"))?;
+    let iterations = iterations.max(1);
+    candidates
+        .iter()
+        .enumerate()
+        .map(|(candidate_index, (_, capture, _))| {
+            let program = UOpCompiledProgram::compile(capture.clone())?;
+            let validation = program
+                .dispatch_cpu(&inputs)
+                .map_err(|error| format!("CPU reference dispatch failed: {error}"))?;
+            if validation.outputs != expected {
+                return Err(format!(
+                    "UOp strategy candidate {candidate_index} disagrees with the reference graph"
+                ));
+            }
+            let mut observed = 0usize;
+            let started = Instant::now();
+            for _ in 0..iterations {
+                let output = program
+                    .dispatch_cpu(&inputs)
+                    .map_err(|error| format!("CPU reference dispatch failed: {error}"))?;
+                observed = observed.wrapping_add(output.outputs.len());
+                std::hint::black_box(observed);
+            }
+            let latency_ns = (started.elapsed().as_nanos() as u64 / iterations as u64).max(1);
+            Ok(prism_spatial_ir::FusionMeasurement {
+                candidate_index,
+                latency_ns,
+                materialized_bytes: capture.memory_plan.slot_count as u64 * 4,
+            })
+        })
+        .collect()
 }
 
 /// The measured execution policy for one concrete workload scenario.
@@ -4109,6 +4364,50 @@ mod tests {
         )
         .unwrap();
         assert_eq!(runner_measurements.len(), strategies.len());
+    }
+
+    #[test]
+    fn tuning_receipt_seals_cpu_reference_selection_and_rejects_synthetic_promotion() {
+        let mut graph = TinyGraph::default();
+        let input = graph.add(UOpKind::Input { name: "x".into() }, vec![], vec![8]);
+        let relu = graph.add(UOpKind::Relu, vec![input], vec![8]);
+        graph.add(UOpKind::Output { name: "y".into() }, vec![relu], vec![8]);
+        let strategies = [
+            FusionStrategy::StandardFused,
+            FusionStrategy::PerOperation,
+        ];
+        let candidates = compile_uop_graph_strategies(&graph, LoweringTarget::Portable, &strategies)
+            .unwrap();
+        let measurements = benchmark_uop_strategy_candidates(&candidates, 2).unwrap();
+        let receipt = UOpTuningReceipt::from_candidates(
+            "graph-digest",
+            LoweringTarget::Portable,
+            &candidates,
+            &[UOpWorkloadMeasurement {
+                scenario: prism_spatial_ir::WorkloadScenario {
+                    realtime: false,
+                    batch_size: 1,
+                    sequence_length: 1,
+                },
+                measurements,
+            }],
+            UOpMeasurementSource::CpuReference,
+            true,
+        )
+        .unwrap();
+        assert!(receipt.production_ready);
+        assert_eq!(receipt.source, UOpMeasurementSource::CpuReference);
+        receipt.validate().unwrap();
+
+        let fallback = UOpTuningReceipt::explicit_fallback(
+            "graph-digest",
+            LoweringTarget::Portable,
+            "reference executor unavailable",
+        )
+        .unwrap();
+        assert!(!fallback.production_ready);
+        assert!(fallback.fallback_reason.is_some());
+        fallback.validate().unwrap();
     }
 
     #[test]

@@ -565,7 +565,7 @@ impl EvaluationStrategy for DefaultSearchEvaluator {
     }
 
     fn name(&self) -> &str {
-        "default-search-evaluator"
+        "synthetic-fallback"
     }
 }
 
@@ -631,6 +631,13 @@ impl SearchCoordinator {
                 heterogeneous_schedule: None,
                 best_joint_tiling: None,
                 evolution_memory: EvolutionaryMemory::default(),
+                selection_receipt: SearchSelectionReceipt::build(
+                    self.trace.search_id.clone(),
+                    "none",
+                    false,
+                    &[],
+                    None,
+                ),
             });
         }
 
@@ -1601,6 +1608,21 @@ impl SearchCoordinator {
         self.trace.trace_digest =
             sha256_digest(&serde_json::to_string(&self.trace).unwrap_or_default());
 
+        let selected_candidate_digest = best_genome.as_ref().and_then(|genome| {
+            let serialized = serde_json::to_string(genome).ok()?;
+            all_candidates
+                .iter()
+                .find(|candidate| candidate.genome == serialized)
+                .map(|candidate| candidate.candidate_digest.clone())
+        });
+        let selection_receipt = SearchSelectionReceipt::build(
+            self.trace.search_id.clone(),
+            evaluator.name(),
+            evaluator.is_measured(),
+            &all_candidates,
+            selected_candidate_digest,
+        );
+
         Ok(SearchResult {
             format_plan,
             trace: self.trace.clone(),
@@ -1610,6 +1632,7 @@ impl SearchCoordinator {
             heterogeneous_schedule,
             best_joint_tiling,
             evolution_memory: self.memory.clone(),
+            selection_receipt,
         })
     }
 
@@ -1685,6 +1708,68 @@ pub struct SearchResult {
     pub heterogeneous_schedule: Option<HeterogeneousScheduleEvidence>,
     pub best_joint_tiling: Option<JointTilingEvidence>,
     pub evolution_memory: EvolutionaryMemory,
+    /// Structured selection provenance. A fallback receipt is still useful
+    /// for diagnostics, but it is explicitly ineligible as production
+    /// evidence when the evaluator was not real.
+    pub selection_receipt: SearchSelectionReceipt,
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SearchSelectionReceipt {
+    pub schema_version: String,
+    pub search_id: String,
+    pub evaluator: String,
+    pub evidence_source: String,
+    pub production_evidence: bool,
+    pub candidates_evaluated: u64,
+    pub measured_candidates: u64,
+    pub selected_candidate_digest: Option<String>,
+    pub fallback_reason: Option<String>,
+    pub receipt_digest: String,
+}
+
+impl SearchSelectionReceipt {
+    fn build(
+        search_id: impl Into<String>,
+        evaluator: impl Into<String>,
+        production_evidence: bool,
+        candidates: &[CandidateRecord],
+        selected_candidate_digest: Option<String>,
+    ) -> Self {
+        let evaluator = evaluator.into();
+        let measured_candidates = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .measurements
+                    .as_ref()
+                    .and_then(|value| value.get("both_backends_measured"))
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+            })
+            .count() as u64;
+        let mut receipt = Self {
+            schema_version: "prism-search-selection/1".into(),
+            search_id: search_id.into(),
+            evaluator,
+            evidence_source: if production_evidence {
+                "measured".into()
+            } else {
+                "synthetic-fallback".into()
+            },
+            production_evidence,
+            candidates_evaluated: candidates.len() as u64,
+            measured_candidates,
+            selected_candidate_digest,
+            fallback_reason: (!production_evidence).then(|| {
+                "search used a non-measured evaluator; scores are diagnostic only".into()
+            }),
+            receipt_digest: String::new(),
+        };
+        let bytes = serde_json::to_vec(&receipt).unwrap_or_default();
+        receipt.receipt_digest = sha256_digest(&String::from_utf8_lossy(&bytes));
+        receipt
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1715,7 +1800,7 @@ pub trait EvaluationStrategy: Send + Sync {
     /// the repository's synthetic naming convention and can be overridden by
     /// an evaluator with a stronger provenance signal.
     fn is_measured(&self) -> bool {
-        !self.name().to_ascii_lowercase().contains("synthetic")
+        false
     }
 
     /// Evaluate one backend for one joint tiling profile. Hardware-aware
@@ -1815,5 +1900,21 @@ mod tests {
         assert!(!receipt.metal_packed.passed);
         assert!(!receipt.ane_static.passed);
         assert!(!receipt.eligible());
+    }
+
+    #[test]
+    fn non_measured_selection_receipt_is_explicitly_diagnostic() {
+        let evaluator = DefaultSearchEvaluator;
+        assert!(!evaluator.is_measured());
+        let receipt = SearchSelectionReceipt::build(
+            "search",
+            evaluator.name(),
+            evaluator.is_measured(),
+            &[],
+            None,
+        );
+        assert!(!receipt.production_evidence);
+        assert_eq!(receipt.evidence_source, "synthetic-fallback");
+        assert!(receipt.fallback_reason.is_some());
     }
 }

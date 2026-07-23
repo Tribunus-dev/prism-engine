@@ -456,6 +456,7 @@ pub fn compile_source(
     // Stage 2: Search (if enabled)
     let mut selected_format_plan: Option<prism_ecs_ir::evolution::compile_plan::FormatPlan> = None;
     let mut search_trace = None;
+    let mut selection_receipt = None;
     let (candidate_count, generations_count) = if compiler.config.enable_search {
         let search_t0 = std::time::Instant::now();
         let search_config = SearchConfig {
@@ -498,6 +499,7 @@ pub fn compile_source(
             )
             .map_err(|e| CompileError::SearchFailed(e.to_string()))?;
         search_trace = Some(search_result.trace.clone());
+        selection_receipt = Some(search_result.selection_receipt.clone());
         selected_format_plan = search_result
             .format_plan
             .as_deref()
@@ -907,6 +909,9 @@ pub fn compile_source(
     if let Some(trace) = search_trace {
         writer.set_search_trace(trace);
     }
+    if let Some(receipt) = selection_receipt.clone() {
+        writer.set_selection_receipt(receipt);
+    }
     let promotion_receipt_path =
         std::env::var_os("PRISM_NATIVE_PROMOTION_EVIDENCE_PATH").map(std::path::PathBuf::from);
     if let Some(receipt_path) = promotion_receipt_path {
@@ -1047,6 +1052,8 @@ pub fn compile_source(
         kernel_manifest_digest: None,
         events_digest: None,
         legalization_mode: None,
+        selection_receipt,
+        uop_tuning_receipt: None,
     };
 
     Ok(CompileResult {
@@ -1397,6 +1404,8 @@ mod tests {
         assert!(result.is_ok());
         let result = result.unwrap();
         assert_eq!(result.status, CompileStatus::Completed);
+        assert!(result.receipt.selection_receipt.is_some());
+        assert!(result.receipt.uop_tuning_receipt.is_some());
         let session = *world.get_resource::<crate::ecs::SessionHandle>().unwrap();
         let search = world
             .component::<crate::ecs::SearchStateComponent>(session.0)

@@ -239,6 +239,10 @@ impl crate::search::EvaluationStrategy for MappedTensorEvaluationStrategy {
     fn name(&self) -> &str {
         "mapped-model-behavioral"
     }
+
+    fn is_measured(&self) -> bool {
+        true
+    }
 }
 
 impl MappedTensorBehavioralProbe {

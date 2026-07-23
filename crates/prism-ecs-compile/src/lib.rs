@@ -78,7 +78,9 @@ pub use qwen3_6_moe::{
 
 pub mod evaluator;
 pub mod search;
-pub use search::{EvaluationStrategy, SearchCoordinator, SearchError, SearchResult};
+pub use search::{
+    EvaluationStrategy, SearchCoordinator, SearchError, SearchResult, SearchSelectionReceipt,
+};
 
 pub mod legalize;
 pub use legalize::{
@@ -111,6 +113,7 @@ pub use compiler::{
 pub use uop::{
     benchmark_uop_graph_strategies, benchmark_uop_graph_strategies_with_runner,
     benchmark_uop_graph_workloads, benchmark_uop_graph_workloads_with_runner,
+    benchmark_uop_strategy_candidates,
     classify_custom_operation, compile_and_validate_uop_capture,
     compile_and_validate_uop_graph_strategies, compile_spatial_graph,
     compile_spatial_graph_strategies, compile_spatial_matmul, compile_spatial_node,
@@ -118,6 +121,7 @@ pub use uop::{
     compile_uop_graph_with_strategy, execute_uop_reference, select_measured_uop_strategy,
     select_measured_uop_workloads, validate_and_classify_custom_operation, CustomOperationClass,
     UOpCompileCache, UOpCompiledProgram, UOpDispatchResult, UOpWorkloadMeasurement,
+    UOpMeasurementSource, UOpTuningCandidate, UOpTuningReceipt, UOpTuningScenario,
     UOpWorkloadSelection, CUSTOM_OPERATION_CANDIDATES, VALIDATED_CUSTOM_OPERATIONS,
 };
 
@@ -468,6 +472,14 @@ pub struct CompileReceipt {
     pub kernel_manifest_digest: Option<String>,
     pub events_digest: Option<String>,
     pub legalization_mode: Option<String>,
+    /// Search selection provenance, including whether the winning score came
+    /// from a real evaluator or an explicit diagnostic fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_receipt: Option<SearchSelectionReceipt>,
+    /// Structured UOp tuning evidence, when executable alternatives were
+    /// benchmarked during ECS kernel generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uop_tuning_receipt: Option<UOpTuningReceipt>,
 }
 
 impl Default for CompileReceipt {
@@ -505,6 +517,8 @@ impl Default for CompileReceipt {
             kernel_manifest_digest: None,
             events_digest: None,
             legalization_mode: None,
+            selection_receipt: None,
+            uop_tuning_receipt: None,
         }
     }
 }

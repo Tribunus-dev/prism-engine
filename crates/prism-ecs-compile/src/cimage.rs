@@ -351,6 +351,14 @@ pub struct CImageHeader {
     /// workload shape.  Optional for compatibility with older CImages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub uop_workload_evidence: Vec<UOpWorkloadEvidence>,
+    /// Structured provenance for UOp tuning. Legacy workload evidence may be
+    /// readable without this field, but it is not production admission
+    /// evidence unless this receipt explicitly says so.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uop_tuning_receipt: Option<crate::uop::UOpTuningReceipt>,
+    /// Search selection provenance, including explicit synthetic fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selection_receipt: Option<crate::search::SearchSelectionReceipt>,
     /// The selected per-tensor representation plan produced by search.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format_plan: Option<String>,
@@ -948,6 +956,33 @@ impl CImageReader {
             .uop_captures
             .get(strategy)
             .and_then(|record| record.search_generation)
+    }
+
+    /// Return the structured UOp tuning receipt after validating its digest
+    /// and capture references. A non-production receipt remains readable for
+    /// diagnostics but must not be used as runtime selection authority.
+    pub fn uop_tuning_receipt(&self) -> Result<Option<&crate::uop::UOpTuningReceipt>, String> {
+        let Some(receipt) = self.header.uop_tuning_receipt.as_ref() else {
+            return Ok(None);
+        };
+        receipt.validate()?;
+        for scenario in &receipt.scenarios {
+            for candidate in &scenario.candidates {
+                let Some(record) = self.header.uop_captures.get(&candidate.strategy_id) else {
+                    return Err(format!(
+                        "UOp tuning receipt references missing strategy {:?}",
+                        candidate.strategy_id
+                    ));
+                };
+                if record.capture_digest != candidate.capture_digest {
+                    return Err(format!(
+                        "UOp tuning receipt capture digest mismatch for {:?}",
+                        candidate.strategy_id
+                    ));
+                }
+            }
+        }
+        Ok(Some(receipt))
     }
 
     /// Return validated workload evidence embedded in the CImage.  The
@@ -2035,6 +2070,14 @@ impl UniversalCImageWriter {
         }
     }
 
+    pub fn set_uop_tuning_receipt(&mut self, receipt: crate::uop::UOpTuningReceipt) {
+        self.writer.header.uop_tuning_receipt = Some(receipt);
+    }
+
+    pub fn set_selection_receipt(&mut self, receipt: crate::search::SearchSelectionReceipt) {
+        self.writer.header.selection_receipt = Some(receipt);
+    }
+
     pub fn add_kernel_artifact(&mut self, artifact: prism_ecs_kernel::KernelArtifact) {
         for payload in artifact.payloads {
             let name = payload.descriptor.name.clone();
@@ -2412,8 +2455,19 @@ mod tests {
                 &strategies,
             )
             .unwrap();
+        writer.set_uop_tuning_receipt(
+            crate::uop::UOpTuningReceipt::explicit_fallback(
+                "graph-digest",
+                prism_spatial_ir::LoweringTarget::Portable,
+                "test fallback; legacy workload timings are diagnostic only",
+            )
+            .unwrap(),
+        );
         writer.finalize().unwrap();
         let mut reader = CImageReader::open(&path).unwrap();
+        let tuning = reader.uop_tuning_receipt().unwrap().unwrap();
+        assert!(!tuning.production_ready);
+        assert_eq!(tuning.source, crate::uop::UOpMeasurementSource::SyntheticFallback);
         let evidence = reader.uop_workload_evidence().unwrap();
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].scenario, scenario);

@@ -219,6 +219,7 @@ pub struct SearchStateComponent {
     /// retained for the later promotion/replay stage rather than silently
     /// reducing hardware measurements to the format plan.
     pub best_joint_tiling: Option<crate::search::JointTilingEvidence>,
+    pub selection_receipt: crate::search::SearchSelectionReceipt,
 }
 
 impl Component for SearchStateComponent {}
@@ -257,6 +258,7 @@ pub struct KernelCollection {
     /// Strategy-specific captures emitted from the same graph for workload
     /// aware runtime selection.
     pub uop_strategy_captures: Vec<(String, prism_spatial_ir::CapturePlan)>,
+    pub uop_tuning_receipt: Option<crate::uop::UOpTuningReceipt>,
 }
 
 impl Component for KernelCollection {}
@@ -503,6 +505,7 @@ pub fn system_run_search(world: &mut World) -> Result<(), CompileError> {
                 generations_completed: result.generations_completed,
                 format_plan: result.format_plan,
                 best_joint_tiling: result.best_joint_tiling,
+                selection_receipt: result.selection_receipt,
             },
         )
         .map_err(|e| CompileError::SearchFailed(e.to_string()))?;
@@ -915,16 +918,57 @@ pub fn system_generate_kernels(world: &mut World) -> Result<(), CompileError> {
                 .unwrap_or(0),
         },
     ];
-    let uop_strategy_captures = if uop_capture_result.is_ok() {
+    let uop_strategy_candidates = if uop_capture_result.is_ok() {
         crate::compile_spatial_graph_strategies(&graph.graph, uop_target, &strategies)
             .map_err(|error| {
                 CompileError::KernelGenFailed(format!("UOp strategy compilation failed: {error}"))
             })?
-            .into_iter()
-            .map(|(strategy, capture, _)| (strategy.stable_id().to_string(), capture))
-            .collect()
     } else {
         Vec::new()
+    };
+    let uop_strategy_captures = uop_strategy_candidates
+        .iter()
+        .map(|(strategy, capture, _)| (strategy.stable_id().to_string(), capture.clone()))
+        .collect();
+    let uop_tuning_receipt = if uop_strategy_candidates.is_empty() {
+        Some(
+            crate::uop::UOpTuningReceipt::explicit_fallback(
+                graph.graph_digest.clone(),
+                uop_target,
+                "no executable UOp strategy candidates were available for reference measurement",
+            )
+            .map_err(CompileError::KernelGenFailed)?,
+        )
+    } else {
+        let scenario = prism_spatial_ir::WorkloadScenario {
+            realtime: false,
+            batch_size: 1,
+            sequence_length: 1,
+        };
+        match crate::benchmark_uop_strategy_candidates(&uop_strategy_candidates, 3)
+            .and_then(|measurements| {
+                crate::uop::UOpTuningReceipt::from_candidates(
+                    graph.graph_digest.clone(),
+                    uop_target,
+                    &uop_strategy_candidates,
+                    &[crate::uop::UOpWorkloadMeasurement {
+                        scenario,
+                        measurements,
+                    }],
+                    crate::uop::UOpMeasurementSource::CpuReference,
+                    true,
+                )
+            }) {
+            Ok(receipt) => Some(receipt),
+            Err(error) => Some(
+                crate::uop::UOpTuningReceipt::explicit_fallback(
+                    graph.graph_digest.clone(),
+                    uop_target,
+                    format!("CPU reference measurement unavailable: {error}"),
+                )
+                .map_err(CompileError::KernelGenFailed)?,
+            ),
+        }
     };
     // Update session status
     if let Ok(status) = world.component_mut::<CompilationSession>(session) {
@@ -940,6 +984,7 @@ pub fn system_generate_kernels(world: &mut World) -> Result<(), CompileError> {
                 lowered_manifests,
                 uop_capture,
                 uop_strategy_captures,
+                uop_tuning_receipt,
             },
         )
         .map_err(|e| CompileError::KernelGenFailed(e.to_string()))?;
@@ -1033,6 +1078,7 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
     // Attach search trace if available.
     if let Ok(search) = world.component::<SearchStateComponent>(session) {
         writer.set_search_trace(search.trace.clone());
+        writer.set_selection_receipt(search.selection_receipt.clone());
         if let Some(evidence) = &search.best_joint_tiling {
             writer.set_joint_tiling_evidence(evidence.clone());
         }
@@ -1045,6 +1091,9 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
 
     // Attach kernel artifacts if available.
     if let Ok(kernels) = world.component::<KernelCollection>(session) {
+        if let Some(receipt) = &kernels.uop_tuning_receipt {
+            writer.set_uop_tuning_receipt(receipt.clone());
+        }
         if let Some(capture) = &kernels.uop_capture {
             writer
                 .add_uop_capture(capture)
@@ -1256,6 +1305,14 @@ pub fn system_build_receipt(world: &mut World) -> Result<(), CompileError> {
         kernel_manifest_digest: None,
         events_digest: Some(String::new()),
         legalization_mode: Some("target_default".into()),
+        selection_receipt: world
+            .component::<SearchStateComponent>(session)
+            .ok()
+            .map(|search| search.selection_receipt.clone()),
+        uop_tuning_receipt: world
+            .component::<KernelCollection>(session)
+            .ok()
+            .and_then(|kernels| kernels.uop_tuning_receipt.clone()),
         error: None,
         status: CompileStatus::Completed,
         finished_at: chrono::Utc::now(),
@@ -1600,6 +1657,16 @@ impl CompilationOrchestrator {
             kernel_manifest_digest: None,
             events_digest: Some(events_digest),
             legalization_mode: Some("target_default".into()),
+            selection_receipt: self
+                .world
+                .component::<SearchStateComponent>(self.session)
+                .ok()
+                .map(|search| search.selection_receipt.clone()),
+            uop_tuning_receipt: self
+                .world
+                .component::<KernelCollection>(self.session)
+                .ok()
+                .and_then(|kernels| kernels.uop_tuning_receipt.clone()),
             error: None,
             status: CompileStatus::Completed,
             finished_at: chrono::Utc::now(),

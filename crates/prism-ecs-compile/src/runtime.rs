@@ -1145,6 +1145,19 @@ impl RuntimeModel {
                 RuntimeError::InvalidCImage(format!("invalid UOp workload evidence: {error}"))
             })?
             .to_vec();
+        let tuning_receipt = reader.uop_tuning_receipt().map_err(|error| {
+            RuntimeError::InvalidCImage(format!("invalid UOp tuning receipt: {error}"))
+        })?;
+        let uop_workload_evidence = if tuning_receipt
+            .is_some_and(|receipt| receipt.production_ready)
+        {
+            uop_workload_evidence
+        } else {
+            // Legacy timing tables and explicitly synthetic receipts remain
+            // inspectable in CImage metadata, but cannot silently become
+            // runtime selection authority.
+            Vec::new()
+        };
         let normalize_plan = |mut plan: ExecutionPlan| {
             for window in &mut plan.residency_windows {
                 // A zero value in compiler output means “the complete
