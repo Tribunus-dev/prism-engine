@@ -1,14 +1,17 @@
 # Prism Engine
 
-Prism Engine is the native compute runtime behind Tribunus. It combines a local
-model runtime and `.cimage` compiler with a transactional compute kernel for
-governing model artifacts, devices, residency, sessions, work, compilation, and
-execution evidence.
+Prism Engine is a native compiler and runtime for inspectable, heterogeneous AI
+inference. It turns model weights and execution graphs into target-aware compute
+images (`.cimage`) and runs them through an ECS-native runtime with explicit
+placement, residency, scheduling, validation, and execution evidence.
 
-The project is optimized first for Apple Silicon. Its production-oriented path
-uses Metal, Accelerate, and optional Core ML integration; a portable CPU path is
-being hardened for Linux. Prism is under active development and its public API,
-model format, and operational contracts may still change.
+Prism targets the machine that is actually available: Apple Silicon and Metal,
+portable CPU execution, AMD ROCm GPUs such as MI300X, and AMD XDNA/XDNA2
+heterogeneous accelerator plans. The compiler can preserve mixed precision,
+progressively quantize or ternarize tensors, search KV-cache layouts, and route
+work across CPU, GPU, and NPU execution islands. Prism is pre-1.0 systems
+software, so APIs, artifact formats, and backend contracts remain subject to
+change.
 
 ## What exists today
 
@@ -16,11 +19,12 @@ model format, and operational contracts may still change.
 |---|---|
 | Local inference | The `prism` CLI can pull, compile, list, and run supported models, including an interactive chat mode and an OpenAI-compatible HTTP endpoint. |
 | Compute images | Prism compiles model inputs into `.cimage`, a versioned artifact format designed to carry weights, layouts, execution plans, and validation evidence. |
-| Apple Silicon execution | Metal dispatch is the primary accelerated path. The compute core also contains ANE/Core ML integration and heterogeneous device planning at differing maturity levels. |
+| Heterogeneous execution | Native runtime paths cover CPU, Metal, ROCm/HIP, and AMD XDNA planning, with backend capabilities and cross-device handoffs represented explicitly. |
+| Progressive representation | Quantization, ternarization, mixed-precision fallback, calibration, and evolutionary search are compiler/runtime concerns rather than a single fixed LUT format. |
 | Constitutional ECS | Artifact ingestion is replay-verified, device discovery is canonical, and model, session, work, compilation, multimodal, distributed, and ingress domains have transactional shadow paths. |
 | Recovery and evidence | The kernel includes durable-before-ack event storage, receipts, replay registration, restart recovery, stale-outcome rejection, and rebuildable projections. |
 | Integration | Rust libraries, a C ABI, a Swift bridge, Node-API bindings, CLI binaries, and HTTP server surfaces live in this workspace. |
-| Cross-platform execution | Linux CPU builds are continuously checked, but the portable runtime is still being completed. AMD ROCm, Intel, NVIDIA, and Tenstorrent support are development surfaces rather than supported production backends. |
+| Hardware validation | Apple Silicon and MI300X validation paths are active. XDNA execution is compile-verified and resource/legalization tested, while Ryzen AI hardware validation remains dependent on access to an XDNA-capable system. |
 
 The important architectural distinction is that a backend result is not, by
 itself, authoritative. Prism’s compute kernel is being built so that state
@@ -32,8 +36,11 @@ or ephemeral.
 
 | Path | Role |
 |---|---|
-| `compute-core/` | The Tribunus compute kernel: ECS authority, compilation, backends, scheduling, evidence, replay, server, and hardware integration. |
-| `src/` | The focused Prism LUT runtime, model graph, tokenizer, CLI, and local server. |
+| `crates/prism-spatial-ir/` | Native spatial/dataflow IR, XDNA/XDNA2 legality, resource planning, and execution plans. |
+| `crates/prism-amd-npu-runtime/` | Native AMD NPU artifacts, tile/FIFO/DMA sequencing, Linux device boundaries, and runtime routing. |
+| `crates/prism-rocm-runtime/` | MI300X ROCm/HIP target support, calibration, ternary execution, and GPU compilation surfaces. |
+| `crates/prism-ecs-*/` | ECS-native compilation, model representation, quantization/search, scheduling, runtime, and evidence domains. |
+| `src/` | Prism CLI, local server, model graph, and compatibility runtime surfaces. |
 | `prism-ffi/` | C-compatible integration surface. |
 | `prism-bridge/` | Swift-facing bridge. |
 | `prism-napi/` | Node-API bindings. |
@@ -106,4 +113,8 @@ authority.
 
 ## License
 
-Prism Engine is licensed under AGPL-3.0-only. See [`LICENSE`](LICENSE).
+Prism Engine is licensed under the GNU Affero General Public License, version 3
+(AGPLv3). See [`LICENSE`](LICENSE). Commercial licenses are available for
+organizations that need an alternative to the AGPLv3 obligations, including
+closed-source distribution or proprietary hosted deployments. To discuss a
+commercial license, email [julian@tribunus.dev](mailto:julian@tribunus.dev).
