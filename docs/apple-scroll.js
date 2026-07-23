@@ -16,6 +16,11 @@
     ticking = false;
     const viewport = Math.max(1, window.innerHeight);
     const scroll = window.scrollY;
+    const storyLength = Math.max((boundaries[boundaries.length - 1] || scroll) + viewport - boundaries[0], 1);
+    const storyProgress = clamp((scroll - boundaries[0]) / storyLength);
+    story.style.setProperty('--story-progress', storyProgress.toFixed(4));
+    story.style.setProperty('--compiler-camera-x', `${((storyProgress - .5) * 18).toFixed(2)}px`);
+    story.style.setProperty('--compiler-camera-y', `${(-storyProgress * 10).toFixed(2)}px`);
     chapters.forEach((chapter, index) => {
       const progress = clamp((scroll - boundaries[index]) / viewport);
       const focus = clamp(1 - Math.abs(progress - 0.5) * 2);
@@ -29,6 +34,11 @@
       chapter.style.setProperty('--chapter-opacity', Math.max(0.42, 0.42 + focus * 0.58).toFixed(4));
       chapter.style.setProperty('--chapter-blur', `${((1 - focus) * 1.5).toFixed(2)}px`);
       chapter.style.setProperty('--chapter-index-progress', index);
+    });
+    const receipts = story.querySelectorAll('#status .status-row:not(.status-head)');
+    receipts.forEach((row, index) => {
+      const receiptProgress = clamp((storyProgress - .72 - index * .045) / .08);
+      row.style.setProperty('--receipt-progress', receiptProgress.toFixed(4));
     });
     const hero = story.querySelector('.hero');
     if (hero) {
