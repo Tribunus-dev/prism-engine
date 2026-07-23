@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Prism Engine is a local-first compiler and runtime for inspectable AI execution on Apple Silicon and beyond.">
+  <title>Prism Engine — Local AI, compiled with evidence</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
+    <nav aria-label="Primary navigation"><a href="#compiler">Compiler Lab</a><a href="#architecture">Architecture</a><a href="#status">Status</a><a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">View on GitHub <span>↗</span></a></nav>
+  </header>
+
+  <main id="top">
+    <section class="hero shell">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="pulse"></span> Local-first AI infrastructure</div>
+        <h1>Compile intelligence<br><span>into something you can inspect.</span></h1>
+        <p class="hero-lede">Prism Engine turns model weights into compact, measurable compute images and runs them close to the hardware. Every placement, artifact, and outcome has a trail.</p>
+        <div class="hero-actions"><a class="button primary" href="https://github.com/Tribunus-dev/prism-engine#quick-start">Get started <span>→</span></a><a class="button quiet" href="#compiler">Explore the Compiler Lab <span>↓</span></a></div>
+        <div class="hero-meta"><span><b>AGPL-3.0-only</b> open source</span><span><b>Apple Silicon</b> primary path</span><span><b>Pre-1.0</b> research software</span></div>
+      </div>
+      <div class="hero-visual" aria-label="Abstract Prism Engine execution diagram">
+        <div class="visual-grid"></div><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="beam beam-a"></div><div class="beam beam-b"></div>
+        <div class="visual-card card-top"><span class="tiny-label">ACTIVE ARTIFACT</span><strong>phi-4-mini.cimage</strong><span class="status-dot">Verified · 1.8 GB</span></div>
+        <div class="visual-card card-bottom"><span class="tiny-label">EXECUTION ROUTE</span><strong>Metal / unified memory</strong><span class="status-dot">Evidence recorded</span></div>
+        <div class="center-label"><span>PRISM</span><b>compile<br>→ execute</b></div>
+      </div>
+    </section>
+
+    <section class="signal-bar"><div class="shell signal-inner"><span>Built for people who need to know what ran.</span><span class="signal-line"></span><span>Models · artifacts · hardware · evidence</span></div></section>
+
+    <section class="section shell" id="compiler">
+      <div class="section-heading"><div><div class="eyebrow">01 / Compiler Lab</div><h2>See the work<br>behind the answer.</h2></div><p>Compilation is not a loading spinner. Prism exposes the path from source weights to an executable artifact, then lets researchers inspect the decisions that shaped it.</p></div>
+      <div class="lab-window">
+        <div class="window-chrome"><span class="window-dots"><i></i><i></i><i></i></span><span>prism / compiler-lab</span><span class="window-live"><i></i> LIVE</span></div>
+        <div class="lab-body">
+          <aside class="lab-sidebar"><span class="tiny-label">PIPELINE</span><div class="lab-step done"><b>01</b><span>Ingest</span><i>✓</i></div><div class="lab-step done"><b>02</b><span>Graph lowering</span><i>✓</i></div><div class="lab-step active"><b>03</b><span>Evolution search</span><i>•</i></div><div class="lab-step"><b>04</b><span>Compile image</span><i>—</i></div><div class="lab-step"><b>05</b><span>Verify & publish</span><i>—</i></div><div class="lab-foot"><span class="tiny-label">ARTIFACT</span><strong>phi-4-mini</strong><span>Target · Apple M-series</span></div></aside>
+          <div class="lab-main"><div class="lab-title"><div><span class="tiny-label">EVOLUTION SEARCH</span><h3>Finding a better execution plan</h3></div><span class="lab-percent">67%</span></div><div class="progress-track"><span></span></div><div class="metrics"><div><span>Generation</span><b>08 <small>/ 12</small></b></div><div><span>Population</span><b>24</b></div><div><span>Best fitness</span><b>0.942</b></div><div><span>Frontier</span><b>06 <small>candidates</small></b></div></div><div class="chart"><span class="chart-y">fitness</span><div class="chart-lines"><i></i><i></i><i></i><svg viewBox="0 0 620 160" preserveAspectRatio="none" aria-label="Fitness convergence chart"><polyline points="0,141 46,130 88,133 130,111 175,119 220,91 265,101 310,76 354,80 400,59 444,66 488,41 530,45 575,27 620,21" /></svg></div><div class="chart-x"><span>01</span><span>04</span><span>08</span><span>12</span></div></div><div class="candidate-title"><span class="tiny-label">CURRENT CANDIDATES</span><span>sorted by measured fitness</span></div><div class="candidates"><div><b>#01</b><span>Int4 · Tile640 · fused</span><strong>0.942</strong></div><div><b>#02</b><span>NF4 · Tile640 · fused</span><strong>0.918</strong></div><div><b>#03</b><span>Int8 · Tile320 · split</span><strong>0.887</strong></div></div></div>
+        </div>
+      </div>
+      <div class="caption-row"><span>Compiler events stream from the local daemon into the native SwiftUI and web surfaces.</span><a href="https://github.com/Tribunus-dev/prism-engine/tree/main/PrismAgent">Read the desktop UI ↗</a></div>
+    </section>
+
+    <section class="section section-dark" id="architecture"><div class="shell"><div class="section-heading light"><div><div class="eyebrow">02 / Architecture</div><h2>One artifact.<br>Explicit planes.</h2></div><p>Prism keeps authority, execution, and projection separate. Hardware-specific work can move quickly without becoming an untraceable source of truth.</p></div><div class="architecture-map"><div class="plane plane-authority"><span class="plane-number">01</span><div><span class="tiny-label">AUTHORITY PLANE</span><h3>Validated state</h3><p>Commands, lifecycle, leases, receipts, replay.</p></div></div><div class="map-arrow">↓</div><div class="plane-row"><div class="plane plane-execution"><span class="plane-number">02</span><div><span class="tiny-label">EXECUTION PLANE</span><h3>Native work</h3><p>Metal, CPU, Core ML, memory, kernels.</p></div></div><div class="plane plane-evidence"><span class="plane-number">03</span><div><span class="tiny-label">EVIDENCE PLANE</span><h3>What happened</h3><p>Digests, metrics, receipts, verification.</p></div></div></div><div class="map-arrow">↓</div><div class="plane plane-projection"><span class="plane-number">04</span><div><span class="tiny-label">PROJECTION PLANE</span><h3>Useful views</h3><p>Dashboards, Compiler Lab, analytics, operator surfaces.</p></div></div></div></div></section>
+
+    <section class="section shell"><div class="section-heading"><div><div class="eyebrow">03 / Product surfaces</div><h2>Designed for<br>two kinds of attention.</h2></div><p>Researchers need the knobs and evidence. Everyone else needs a clear answer to “what is happening?” Prism gives both views without hiding the boundary between them.</p></div><div class="surface-grid"><article class="surface-card surface-main"><div class="surface-icon">✦</div><span class="tiny-label">NATIVE DESKTOP</span><h3>PrismAgent</h3><p>A SwiftUI desktop companion for chat, voice, menu-bar control, local hardware diagnostics, and the full Compiler Lab.</p><a href="https://github.com/Tribunus-dev/prism-engine/tree/main/PrismAgent">Explore PrismAgent <span>→</span></a><div class="surface-lines"><i></i><i></i><i></i></div></article><article class="surface-card"><div class="surface-icon">◫</div><span class="tiny-label">CLI + DAEMON</span><h3>Build locally</h3><p>Pull, compile, inspect, calibrate, search, benchmark, and run models without sending weights to a cloud service.</p><code>prism compile → model.cimage</code></article><article class="surface-card"><div class="surface-icon">◎</div><span class="tiny-label">OPEN INTERFACES</span><h3>Bring your own surface</h3><p>Rust libraries, C ABI, Swift bridge, Node bindings, HTTP server, and structured daemon events.</p><code>/api/compiler-lab/ws</code></article></div></section>
+
+    <section class="section shell status-section" id="status"><div class="section-heading"><div><div class="eyebrow">04 / Current reality</div><h2>Ambitious claims.<br>Precise labels.</h2></div><p>Prism is pre-1.0 systems software. The strongest path today is native Apple Silicon execution; every other claim is scoped to its actual build and evidence.</p></div><div class="status-table"><div class="status-row status-head"><span>Surface</span><span>Reality today</span><span>Signal</span></div><div class="status-row"><span>Metal / Apple Silicon</span><span>Primary accelerated execution path</span><b class="good">● Proven path</b></div><div class="status-row"><span>SwiftUI desktop app</span><span>Connected to local daemon, chat, diagnostics, Compiler Lab</span><b class="good">● Active</b></div><div class="status-row"><span>Evolution search</span><span>Daemon-backed generations, fitness, candidates, frontier work</span><b class="good">● Active</b></div><div class="status-row"><span>ANE / Core ML</span><span>Supported route; placement and qualification remain scoped</span><b class="warn">● Qualifying</b></div><div class="status-row"><span>ANE / SLC telemetry</span><span>Best-effort diagnostics; unavailable when counters are not exposed</span><b class="neutral">● Honest gap</b></div><div class="status-row"><span>Linux CPU</span><span>Continuously checked; portable runtime still hardening</span><b class="warn">● Developing</b></div></div></section>
+
+    <section class="closing shell"><div class="closing-mark"><span class="brand-mark"><i></i><i></i><i></i></span></div><div><div class="eyebrow">Build from the evidence outward.</div><h2>Make local AI<br><span>legible.</span></h2><p>Prism Engine is open systems software for people who want to understand the path from model to machine.</p><div class="hero-actions"><a class="button primary" href="https://github.com/Tribunus-dev/prism-engine">Read the source <span>↗</span></a><a class="button quiet" href="https://github.com/Tribunus-dev/prism-engine#quick-start">Quick start <span>→</span></a></div></div></section>
+  </main>
+  <footer class="site-footer shell"><span>© 2026 Tribunus · Prism Engine</span><span>AGPL-3.0-only · Built in the open</span><a href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a></footer>
+</body>
+</html>
