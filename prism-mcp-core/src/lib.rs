@@ -40,7 +40,8 @@ pub use lease::{ResourceClass, ResourceLease, ResourceLeaseManager, ResourceRequ
 pub use log::init_logging;
 pub use protocol::{
     ConnectionId, DaemonState, McpError, McpHandler, McpRequest, McpResponse, McpStatus,
-    RequestContext, RequestEnvelope, ResponseFrame, ToolRequest, ToolResult,
+    NormalizedToolCall, RequestContext, RequestEnvelope, ResponseFrame,
+    ToolCallNormalizationError, ToolCallNormalizationReceipt, ToolRequest, ToolResult,
 };
 pub use provenance::{
     ProvenanceDomain, ProvenanceEdge, ProvenanceGraphStore, ProvenanceKind, ProvenanceNode,

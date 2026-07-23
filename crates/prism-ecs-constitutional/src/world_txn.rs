@@ -1,4 +1,4 @@
-pub use crate::command::DomainEvent;
+pub use crate::command::{AdvisoryEvent, DomainEvent};
 use crate::schema::SchemaCatalogue;
 use crate::system_desc::ReadDependency;
 pub use crate::types::*;
@@ -148,6 +148,10 @@ pub struct WorldTxn {
     pub(crate) pending_resolutions: HashMap<u64, Vec<PendingOp>>,
     /// Domain events to emit after successful commit
     pub(crate) events: Vec<DomainEvent>,
+    /// Runtime-only observations to expose after successful commit. These are
+    /// deliberately separate from `events` so persistence can only see
+    /// durable domain facts.
+    pub(crate) advisory_events: Vec<AdvisoryEvent>,
     /// Read dependencies for OCC validation
     pub(crate) read_deps: Vec<ReadDependency>,
     /// Expected world epoch at construction time
@@ -232,6 +236,7 @@ impl WorldTxn {
             spawns: Vec::new(),
             pending_resolutions: HashMap::new(),
             events: Vec::new(),
+            advisory_events: Vec::new(),
             read_deps: Vec::new(),
             expected_epoch: world.current_epoch(),
         }
@@ -611,6 +616,14 @@ impl WorldTxn {
         self.events.push(event);
     }
 
+    /// Add an advisory observation to emit after commit.
+    ///
+    /// Advisory events share the transaction commit boundary but are not
+    /// returned by the durable-event accessor and are never replayed.
+    pub fn emit_advisory_event(&mut self, event: AdvisoryEvent) {
+        self.advisory_events.push(event);
+    }
+
     /// Record a read dependency for OCC validation.
     pub fn record_read(&mut self, dep: ReadDependency) {
         self.read_deps.push(dep);
@@ -622,11 +635,68 @@ impl WorldTxn {
     pub fn event_count(&self) -> usize {
         self.events.len()
     }
+
+    pub fn advisory_event_count(&self) -> usize {
+        self.advisory_events.len()
+    }
     pub fn insert_count(&self) -> usize {
         self.inserts.len()
     }
     pub fn remove_count(&self) -> usize {
         self.removes.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WorldTransitExt, WorldTxn};
+    use crate::command::{AdvisoryEvent, ClassifiedEvent, DomainEvent, EventDurability};
+    use crate::types::{EntityKindId, MessageId};
+    use prism_ecs_core::World;
+
+    #[test]
+    fn advisory_events_share_commit_boundary_without_entering_durable_lane() {
+        let mut world = World::new();
+        let mut txn = WorldTxn::new(&world);
+        txn.emit_event(DomainEvent {
+            id: MessageId::compute(b"durable"),
+            kind: "work_created".into(),
+            entity_id: Some(EntityKindId(7)),
+            payload: serde_json::json!({"durable": true}),
+        });
+        txn.emit_advisory_event(AdvisoryEvent::new(
+            "provider_fallback",
+            Some(EntityKindId(7)),
+            serde_json::json!({"requested": "metal", "selected": "cpu"}),
+        ));
+
+        let prepared = world
+            .prepare(txn, None)
+            .expect("transaction should prepare");
+        let receipt = world.apply_prepared(prepared);
+
+        assert_eq!(receipt.event_count, 1);
+        assert_eq!(receipt.advisory_event_count, 1);
+        assert_eq!(world.last_committed_events().len(), 1);
+        assert_eq!(world.last_committed_advisory_events().len(), 1);
+        assert_eq!(
+            world.last_committed_advisory_events()[0].durability(),
+            EventDurability::Advisory
+        );
+        assert_eq!(
+            ClassifiedEvent::Durable(world.last_committed_events()[0].clone()).durability(),
+            EventDurability::Durable
+        );
+        assert_eq!(
+            ClassifiedEvent::Advisory(world.last_committed_advisory_events()[0].clone())
+                .durability(),
+            EventDurability::Advisory
+        );
+
+        assert_eq!(world.drain_committed_events().len(), 1);
+        assert_eq!(world.drain_committed_advisory_events().len(), 1);
+        assert!(world.last_committed_events().is_empty());
+        assert!(world.last_committed_advisory_events().is_empty());
     }
 }
 
@@ -652,6 +722,12 @@ pub trait WorldTransitExt {
 
     /// Drain the committed events vector.
     fn drain_committed_events(&mut self) -> Vec<DomainEvent>;
+
+    /// Return a reference to the last committed advisory events.
+    fn last_committed_advisory_events(&self) -> &[AdvisoryEvent];
+
+    /// Drain the committed advisory events vector.
+    fn drain_committed_advisory_events(&mut self) -> Vec<AdvisoryEvent>;
 
     /// Validate a transaction without mutating the world.
     fn prepare(
@@ -685,6 +761,18 @@ impl WorldTransitExt for World {
 
     fn drain_committed_events(&mut self) -> Vec<DomainEvent> {
         self.get_extension_mut::<Vec<DomainEvent>>()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    fn last_committed_advisory_events(&self) -> &[AdvisoryEvent] {
+        self.get_extension::<Vec<AdvisoryEvent>>()
+            .map(|v| v.as_slice())
+            .unwrap_or_default()
+    }
+
+    fn drain_committed_advisory_events(&mut self) -> Vec<AdvisoryEvent> {
+        self.get_extension_mut::<Vec<AdvisoryEvent>>()
             .map(std::mem::take)
             .unwrap_or_default()
     }
@@ -745,6 +833,7 @@ impl WorldTransitExt for World {
         self.set_epoch(next_epoch);
         self.set_extension(prepared.journal);
         self.set_extension(prepared.events);
+        self.set_extension(prepared.advisory_events);
 
         let journal_len = self
             .get_extension::<Vec<ComponentChange>>()
@@ -758,6 +847,9 @@ impl WorldTransitExt for World {
             committed_epoch: next_epoch,
             journal_length: journal_len,
             event_count,
+            advisory_event_count: self
+                .get_extension::<Vec<AdvisoryEvent>>()
+                .map_or(0, Vec::len),
         }
     }
 }
@@ -768,6 +860,7 @@ pub struct CommitReceipt {
     pub committed_epoch: WorldEpoch,
     pub journal_length: usize,
     pub event_count: usize,
+    pub advisory_event_count: usize,
 }
 
 /// A prepared durable operation with schema-bound journal entry.
@@ -803,6 +896,7 @@ pub struct PreparedWorldTxn {
     pub(crate) spawns: Vec<StagedSpawn>,
     pub(crate) journal: Vec<ComponentChange>,
     pub(crate) events: Vec<DomainEvent>,
+    pub(crate) advisory_events: Vec<AdvisoryEvent>,
 }
 
 impl PreparedWorldTxn {
@@ -819,6 +913,11 @@ impl PreparedWorldTxn {
     /// Number of domain events in this prepared transaction.
     pub fn event_count(&self) -> usize {
         self.events.len()
+    }
+
+    /// Number of advisory observations prepared alongside the transaction.
+    pub fn advisory_event_count(&self) -> usize {
+        self.advisory_events.len()
     }
 }
 
@@ -1036,6 +1135,7 @@ impl WorldTxn {
             spawns: self.spawns,
             journal,
             events: self.events,
+            advisory_events: self.advisory_events,
         })
     }
 }

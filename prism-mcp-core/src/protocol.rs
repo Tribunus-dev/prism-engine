@@ -54,6 +54,94 @@ pub struct McpRequest {
     pub params: serde_json::Value,
 }
 
+/// A normalized MCP `tools/call` payload. The daemon can use this shape at
+/// its transport boundary while existing handlers continue to receive the
+/// established `ToolRequest` view.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NormalizedToolCall {
+    pub request_id: serde_json::Value,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub receipt: ToolCallNormalizationReceipt,
+}
+
+/// Evidence about compatibility normalization performed on a tool call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolCallNormalizationReceipt {
+    pub used_legacy_args: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolCallNormalizationError {
+    ParamsNotObject,
+    MissingName,
+    ArgumentsNotObject,
+    ConflictingArguments,
+}
+
+impl std::fmt::Display for ToolCallNormalizationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let message = match self {
+            Self::ParamsNotObject => "tools/call params must be an object",
+            Self::MissingName => "tools/call requires a non-empty string name",
+            Self::ArgumentsNotObject => "tools/call arguments must be an object",
+            Self::ConflictingArguments => {
+                "tools/call supplied conflicting arguments and args values"
+            }
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for ToolCallNormalizationError {}
+
+impl McpRequest {
+    /// Normalize the current MCP shape and the older `{name, args}` shape
+    /// into one structured call. This is a protocol helper, not a dispatch
+    /// authority; handlers still execute through the daemon's registered map.
+    pub fn normalize_tool_call(&self) -> Result<NormalizedToolCall, ToolCallNormalizationError> {
+        let params = self
+            .params
+            .as_object()
+            .ok_or(ToolCallNormalizationError::ParamsNotObject)?;
+        let name = params
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.trim().is_empty())
+            .ok_or(ToolCallNormalizationError::MissingName)?
+            .to_string();
+
+        let arguments = params.get("arguments");
+        let legacy_args = params.get("args");
+        if let (Some(arguments), Some(legacy_args)) = (arguments, legacy_args) {
+            if arguments != legacy_args {
+                return Err(ToolCallNormalizationError::ConflictingArguments);
+            }
+        }
+        let (arguments, used_legacy_args) = match (arguments, legacy_args) {
+            (Some(arguments), _) => (arguments.clone(), false),
+            (None, Some(args)) => (args.clone(), true),
+            (None, None) => (serde_json::json!({}), false),
+        };
+        if !arguments.is_object() {
+            return Err(ToolCallNormalizationError::ArgumentsNotObject);
+        }
+
+        Ok(NormalizedToolCall {
+            request_id: self.id.clone(),
+            name,
+            arguments,
+            receipt: ToolCallNormalizationReceipt {
+                used_legacy_args,
+                reason: used_legacy_args.then(|| {
+                    "legacy args field normalized to the canonical arguments field".to_string()
+                }),
+            },
+        })
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct McpResponse {
     #[serde(rename = "jsonrpc")]
@@ -343,4 +431,47 @@ pub trait McpHandler: Send + Sync {
         context: &RequestContext,
         state: &DaemonState,
     ) -> anyhow::Result<ToolResult>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{McpRequest, ToolCallNormalizationError};
+
+    fn request(params: serde_json::Value) -> McpRequest {
+        serde_json::from_value(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 41,
+            "method": "tools/call",
+            "params": params,
+        }))
+        .expect("valid MCP request")
+    }
+
+    #[test]
+    fn normalizes_legacy_args_with_a_compatibility_receipt() {
+        let normalized = request(serde_json::json!({
+            "name": "inspect_model",
+            "args": {"source": "model.gguf"}
+        }))
+        .normalize_tool_call()
+        .expect("legacy tool call should normalize");
+
+        assert_eq!(normalized.name, "inspect_model");
+        assert_eq!(normalized.arguments["source"], "model.gguf");
+        assert!(normalized.receipt.used_legacy_args);
+        assert!(normalized.receipt.reason.is_some());
+    }
+
+    #[test]
+    fn rejects_conflicting_tool_argument_shapes() {
+        let error = request(serde_json::json!({
+            "name": "inspect_model",
+            "arguments": {"source": "a.gguf"},
+            "args": {"source": "b.gguf"}
+        }))
+        .normalize_tool_call()
+        .expect_err("conflicting aliases must not be guessed");
+
+        assert_eq!(error, ToolCallNormalizationError::ConflictingArguments);
+    }
 }

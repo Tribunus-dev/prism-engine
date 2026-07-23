@@ -161,6 +161,188 @@ pub trait WorkDispatcher: Send + Sync {
     fn cancel(&self, handle: &DispatchHandle) -> Result<(), DispatchError>;
 }
 
+// ── Provider selection ─────────────────────────────────────────────────────
+
+/// A provider exposed by the runtime composition root. `backend` is kept as
+/// a neutral string because `WorkDispatcher` and remote adapters may use
+/// backend names that are not represented by one Rust enum.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderDescriptor {
+    pub id: String,
+    pub backend: String,
+    pub priority: u32,
+    pub available: bool,
+}
+
+impl ProviderDescriptor {
+    pub fn new(id: impl Into<String>, backend: impl Into<String>, priority: u32) -> Self {
+        Self {
+            id: id.into(),
+            backend: backend.into(),
+            priority,
+            available: true,
+        }
+    }
+
+    pub fn unavailable(mut self) -> Self {
+        self.available = false;
+        self
+    }
+}
+
+/// Why a requested provider was not used.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackReason {
+    RequestedProviderUnavailable { provider: String },
+    CandidateProviderUnavailable { provider: String },
+    RequestedProviderNotSpecified,
+    NoAvailableProvider,
+}
+
+/// A structured provider-selection request owned by the runtime kernel.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderSelectionRequest {
+    pub operation: String,
+    pub requested_provider: Option<String>,
+    pub fallback_providers: Vec<String>,
+}
+
+/// Evidence for a provider decision. The receipt is returned to callers and
+/// included in tick receipts; persistence remains the responsibility of the
+/// existing receipt/evidence adapters.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ProviderSelectionReceipt {
+    pub request_id: uuid::Uuid,
+    pub operation: String,
+    pub requested_provider: Option<String>,
+    pub selected_provider: Option<String>,
+    pub selected_backend: Option<String>,
+    pub attempted_providers: Vec<String>,
+    pub fallback_reason: Option<FallbackReason>,
+}
+
+impl ProviderSelectionReceipt {
+    pub fn selected_backend(&self) -> Option<&str> {
+        self.selected_backend.as_deref()
+    }
+
+    pub fn fell_back(&self) -> bool {
+        self.fallback_reason.is_some()
+    }
+}
+
+/// Provider selection authority. Implementations may inspect hardware or
+/// remote health, but the decision is always requested through `KernelHandle`.
+pub trait ProviderSelector: Send + Sync {
+    fn select(&self, request: &ProviderSelectionRequest) -> ProviderSelectionReceipt;
+}
+
+/// Deterministic selector used by the default kernel and by focused tests.
+/// Production composition roots can supply a selector backed by their
+/// existing backend-health adapters.
+#[derive(Debug, Clone)]
+pub struct StaticProviderSelector {
+    providers: Vec<ProviderDescriptor>,
+}
+
+impl StaticProviderSelector {
+    pub fn new(mut providers: Vec<ProviderDescriptor>) -> Self {
+        providers.sort_by_key(|provider| (provider.priority, provider.id.clone()));
+        Self { providers }
+    }
+
+    pub fn providers(&self) -> &[ProviderDescriptor] {
+        &self.providers
+    }
+}
+
+impl Default for StaticProviderSelector {
+    fn default() -> Self {
+        Self::new(vec![ProviderDescriptor::new("cpu", "cpu", u32::MAX)])
+    }
+}
+
+impl ProviderSelector for StaticProviderSelector {
+    fn select(&self, request: &ProviderSelectionRequest) -> ProviderSelectionReceipt {
+        let requested = request
+            .requested_provider
+            .as_deref()
+            .filter(|provider| !provider.is_empty() && *provider != "auto");
+        let mut attempted = Vec::new();
+        let mut fallback_reason = None;
+        let mut unavailable_candidate = None;
+
+        let mut candidates = Vec::new();
+        if let Some(provider) = requested {
+            candidates.push(provider.to_string());
+        }
+        candidates.extend(request.fallback_providers.iter().cloned());
+        if candidates.is_empty() {
+            candidates.extend(self.providers.iter().map(|provider| provider.id.clone()));
+        }
+
+        let mut selected = None;
+        for candidate in candidates {
+            if attempted
+                .iter()
+                .any(|attempt: &String| attempt == &candidate)
+            {
+                continue;
+            }
+            attempted.push(candidate.clone());
+            if let Some(provider) = self
+                .providers
+                .iter()
+                .find(|provider| provider.id == candidate)
+            {
+                if provider.available {
+                    selected = Some((provider.id.clone(), provider.backend.clone()));
+                    if requested.is_some_and(|requested| requested != candidate) {
+                        fallback_reason = Some(FallbackReason::RequestedProviderUnavailable {
+                            provider: requested.unwrap_or_default().to_string(),
+                        });
+                    }
+                    break;
+                }
+                unavailable_candidate = Some(candidate.clone());
+            } else {
+                unavailable_candidate = Some(candidate.clone());
+            }
+            if requested == Some(candidate.as_str()) {
+                fallback_reason = Some(FallbackReason::RequestedProviderUnavailable {
+                    provider: candidate,
+                });
+            }
+        }
+
+        if selected.is_none() {
+            if fallback_reason.is_none() {
+                fallback_reason = Some(FallbackReason::NoAvailableProvider);
+            }
+        } else if fallback_reason.is_none() {
+            fallback_reason = unavailable_candidate
+                .map(|provider| FallbackReason::CandidateProviderUnavailable { provider })
+                .or_else(|| {
+                    request
+                        .requested_provider
+                        .is_none()
+                        .then_some(FallbackReason::RequestedProviderNotSpecified)
+                });
+        }
+
+        ProviderSelectionReceipt {
+            request_id: uuid::Uuid::new_v4(),
+            operation: request.operation.clone(),
+            requested_provider: request.requested_provider.clone(),
+            selected_provider: selected.as_ref().map(|(provider, _)| provider.clone()),
+            selected_backend: selected.map(|(_, backend)| backend),
+            attempted_providers: attempted,
+            fallback_reason,
+        }
+    }
+}
+
 /// A no-op test dispatcher that immediately completes.
 #[allow(dead_code)]
 pub struct NoopDispatcher;

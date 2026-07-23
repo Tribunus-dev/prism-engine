@@ -16,9 +16,10 @@ pub use kernel::{
 pub use ports::{
     Admission, AdmittedCommand, AuthorityJournal, CommandStore, CommandWatermarks,
     CompletedCommand, DispatchError, DispatchHandle, DispatchRequest, DispatchStatus, EvidenceSink,
-    HardwareDispatcher, KernelClock, LeaseCoordinator, NoopDispatcher, RecoveredCommand,
-    RecoveryReport, ResultPayload, RuntimeError, SnapshotPayload, SnapshotStore, TickReceiptStore,
-    WorkDispatcher, WorldSnapshot,
+    FallbackReason, HardwareDispatcher, KernelClock, LeaseCoordinator, NoopDispatcher,
+    ProviderDescriptor, ProviderSelectionReceipt, ProviderSelectionRequest, ProviderSelector,
+    RecoveredCommand, RecoveryReport, ResultPayload, RuntimeError, SnapshotPayload, SnapshotStore,
+    StaticProviderSelector, TickReceiptStore, WorkDispatcher, WorldSnapshot,
 };
 pub use schedule::{
     Access, AdmitSystem, CleanupSystem, CollectSystem, CommandBuffer, CommandEmitter,
@@ -178,5 +179,37 @@ mod tests {
             ),
             "idempotent result should match original variant"
         );
+    }
+
+    #[test]
+    fn kernel_provider_selection_returns_fallback_receipt() {
+        use crate::{
+            ProviderDescriptor, ProviderSelectionRequest, RuntimeKernel, StaticProviderSelector,
+        };
+        use std::sync::Arc;
+
+        let kernel = RuntimeKernel::with_ports_and_provider_selector(
+            Box::new(crate::InMemoryCommandStore::new()),
+            Box::new(crate::InMemorySnapshotStore::new()),
+            Box::new(crate::InMemoryTickReceiptStore::new()),
+            Box::new(crate::InMemoryLeaseCoordinator::new()),
+            Box::new(crate::DeterministicClock::new(1000)),
+            Arc::new(StaticProviderSelector::new(vec![
+                ProviderDescriptor::new("cpu", "cpu", 10),
+                ProviderDescriptor::new("metal", "metal", 1).unavailable(),
+            ])),
+        );
+
+        let receipt = kernel.handle().select_provider(&ProviderSelectionRequest {
+            operation: "compile".into(),
+            requested_provider: Some("metal".into()),
+            fallback_providers: vec!["cpu".into()],
+        });
+
+        assert_eq!(receipt.selected_provider.as_deref(), Some("cpu"));
+        assert_eq!(receipt.selected_backend(), Some("cpu"));
+        assert!(receipt.fell_back());
+        assert_eq!(receipt.attempted_providers, vec!["metal", "cpu"]);
+        assert!(receipt.fallback_reason.is_some());
     }
 }

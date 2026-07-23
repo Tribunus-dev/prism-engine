@@ -7,7 +7,10 @@ use crate::kernel::{
     AdmittedMarker, Command, CommandEnvelope, KernelHandle, PlannedMarker, PublishedMarker,
 };
 use crate::ports::RuntimeError;
-use crate::ports::{DispatchHandle, DispatchRequest, DispatchStatus, WorkDispatcher};
+use crate::ports::{
+    DispatchHandle, DispatchRequest, DispatchStatus, ProviderSelectionReceipt,
+    ProviderSelectionRequest, WorkDispatcher,
+};
 use prism_ecs_constitutional::lifecycle_command::{
     AcquireWorkLeaseCommand, AdmitWorkCommand, LifecycleCommand, MarkObservedCommand,
     RecordDispatchIntentCommand, RecordWorkPlanCommand,
@@ -63,10 +66,14 @@ pub struct SystemContext<'w> {
     pub admission_capacity: usize,
     pub command_buffer: CommandBuffer,
     pub world_view: &'w crate::world_view::WorldViewImpl<'w>,
+    /// The single runtime authority for commands and provider decisions.
+    pub kernel: &'w KernelHandle,
     /// Optional dispatcher for invoking external work.
     pub dispatcher: Option<&'w dyn WorkDispatcher>,
     /// Active dispatch handles to poll.
     pub active_dispatches: &'w std::sync::Mutex<Vec<DispatchHandle>>,
+    /// Selection receipts produced during this tick.
+    pub provider_receipts: &'w std::sync::Mutex<Vec<ProviderSelectionReceipt>>,
 }
 
 /// Per-system command buffer that feeds into a shared submission channel.
@@ -130,6 +137,7 @@ pub struct TickReceipt {
     pub emitted_commands: Vec<Vec<EmittedCommand>>,
     pub duration_ms: u64,
     pub failure: Option<String>,
+    pub provider_selections: Vec<ProviderSelectionReceipt>,
 }
 
 // ── RuntimeSchedule ────────────────────────────────────────────────────────
@@ -157,6 +165,8 @@ pub struct RuntimeSchedule {
     pub dispatcher: Option<std::sync::Arc<dyn WorkDispatcher>>,
     /// Active dispatch handles.
     pub active_dispatches: std::sync::Mutex<Vec<DispatchHandle>>,
+    /// Provider-selection receipts accumulated during a tick.
+    pub provider_receipts: std::sync::Mutex<Vec<ProviderSelectionReceipt>>,
 }
 
 #[derive(Debug)]
@@ -193,6 +203,7 @@ impl RuntimeSchedule {
             kernel: None,
             dispatcher: None,
             active_dispatches: std::sync::Mutex::new(vec![]),
+            provider_receipts: std::sync::Mutex::new(vec![]),
         }
     }
 
@@ -445,6 +456,7 @@ impl RuntimeSchedule {
     pub fn run_tick(&self) -> Result<TickReceipt, RuntimeError> {
         let start = std::time::Instant::now();
         let tick_number = self.tick_count.fetch_add(1, Ordering::SeqCst);
+        self.provider_receipts.lock().unwrap().clear();
         let kernel = self
             .kernel
             .as_ref()
@@ -475,8 +487,10 @@ impl RuntimeSchedule {
                             admission_capacity: self.admission_capacity,
                             command_buffer: buffer.clone(),
                             world_view: &world_view,
+                            kernel,
                             dispatcher: self.dispatcher.as_deref(),
                             active_dispatches: &self.active_dispatches,
+                            provider_receipts: &self.provider_receipts,
                         };
                         if let Err(e) = system.run(&ctx) {
                             return Err(RuntimeError::Entity(format!(
@@ -526,6 +540,7 @@ impl RuntimeSchedule {
             }
         }
         let duration_ms = start.elapsed().as_millis() as u64;
+        let provider_selections = self.provider_receipts.lock().unwrap().clone();
         Ok(TickReceipt {
             tick_number,
             schedule_hash: self.schedule_hash,
@@ -533,6 +548,7 @@ impl RuntimeSchedule {
             emitted_commands,
             duration_ms,
             failure: None,
+            provider_selections,
         })
     }
 }
@@ -813,22 +829,49 @@ impl System for DispatchSystem {
             .map(|(entity, _)| entity)
             .collect();
         for entity in &leased {
+            let selection = ctx.kernel.select_provider(&ProviderSelectionRequest {
+                operation: "work_dispatch".to_string(),
+                requested_provider: Some("auto".to_string()),
+                fallback_providers: vec!["metal".to_string(), "cpu".to_string()],
+            });
+            if let Ok(mut receipts) = ctx.provider_receipts.lock() {
+                receipts.push(selection.clone());
+            }
+
+            let Some(backend) = selection.selected_backend().map(str::to_owned) else {
+                ctx.command_buffer
+                    .emit(CommandEnvelope::new(Command::Lifecycle(
+                        LifecycleCommand::FailWork(
+                            prism_ecs_constitutional::lifecycle_command::FailWorkCommand {
+                                work_entity: entity.id(),
+                                error: format!(
+                                    "provider selection failed: {:?}",
+                                    selection.fallback_reason
+                                ),
+                                lease_generation: 1,
+                                retryable: true,
+                            },
+                        ),
+                    )));
+                continue;
+            };
+
+            let deadline_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+                + 30000;
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::RecordDispatchIntent(RecordDispatchIntentCommand {
                         work_entity: entity.id(),
-                        backend: "auto".to_string(),
-                        config: "{}".to_string(),
-                        deadline_ms: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as u64
-                            + 30000,
+                        backend: backend.clone(),
+                        config: serde_json::to_string(&selection).unwrap_or_else(|_| "{}".into()),
+                        deadline_ms,
                     }),
                 )));
-        }
-        if let Some(dispatcher) = ctx.dispatcher {
-            for entity in &leased {
+
+            if let Some(dispatcher) = ctx.dispatcher {
                 let output_path = ctx
                     .world_view
                     .get::<WorkOutputPath>(*entity)
@@ -844,13 +887,9 @@ impl System for DispatchSystem {
                     attempt: 1,
                     plan_generation: 0,
                     lease_token: format!("work-lease:{}", entity.id()),
-                    deadline_ms: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64
-                        + 30000,
-                    backend: "auto".to_string(),
-                    config: "{}".to_string(),
+                    deadline_ms,
+                    backend,
+                    config: serde_json::to_string(&selection).unwrap_or_else(|_| "{}".into()),
                     input_path,
                     output_path,
                 };
@@ -1883,6 +1922,7 @@ mod tests {
         let mut complete_work_seen = false;
         let mut publish_result_seen = false;
         let mut cleanup_seen = false;
+        let mut provider_selection_seen = false;
 
         let max_ticks: usize = 20;
         for i in 0..max_ticks {
@@ -1930,6 +1970,10 @@ mod tests {
                     }
                 }
             }
+            if !tick.provider_selections.is_empty() {
+                provider_selection_seen = true;
+                assert_eq!(tick.provider_selections[0].selected_backend(), Some("cpu"));
+            }
 
             if publish_result_seen {
                 break;
@@ -1957,6 +2001,10 @@ mod tests {
             "PublishSystem should emit PublishResult with Published status"
         );
         assert!(cleanup_seen, "CleanupSystem should emit cleanup commands");
+        assert!(
+            provider_selection_seen,
+            "DispatchSystem should publish a provider-selection receipt"
+        );
 
         // ── 6. Verify file digest via blake3 hash ──
         let meta = std::fs::metadata(&output_path).expect("output file should exist");

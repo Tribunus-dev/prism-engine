@@ -4,8 +4,9 @@ use std::sync::Arc;
 use prism_ecs_core::{Entity, EntityKind, World, WorldEpoch};
 
 use crate::ports::{
-    Admission, CommandStore, KernelClock, LeaseCoordinator, RecoveryReport, RuntimeError,
-    SnapshotPayload, SnapshotStore, TickReceiptStore, WorldSnapshot,
+    Admission, CommandStore, KernelClock, LeaseCoordinator, ProviderSelectionReceipt,
+    ProviderSelectionRequest, ProviderSelector, RecoveryReport, RuntimeError, SnapshotPayload,
+    SnapshotStore, StaticProviderSelector, TickReceiptStore, WorldSnapshot,
 };
 use crate::schedule::{RuntimeSchedule, TickReceipt};
 
@@ -149,6 +150,7 @@ struct RuntimeKernelInner {
     tick_receipt_store: Box<dyn TickReceiptStore>,
     lease_coordinator: Box<dyn LeaseCoordinator>,
     _clock: Box<dyn KernelClock>,
+    provider_selector: Arc<dyn ProviderSelector>,
     sequence: AtomicU64,
 }
 
@@ -159,6 +161,13 @@ pub struct KernelHandle {
 }
 
 impl KernelHandle {
+    /// Select the provider for an operation through the kernel-owned
+    /// provider authority. The returned receipt records every attempted
+    /// provider and the reason a fallback was used.
+    pub fn select_provider(&self, request: &ProviderSelectionRequest) -> ProviderSelectionReceipt {
+        self.inner.provider_selector.select(request)
+    }
+
     /// Submit a typed command for execution with atomic epoch fencing.
     pub fn submit(&self, envelope: CommandEnvelope) -> Result<CommitOutcome, RuntimeError> {
         // Serialize envelope for admission
@@ -579,7 +588,27 @@ impl RuntimeKernel {
         snapshot_store: Box<dyn SnapshotStore>,
         tick_receipt_store: Box<dyn TickReceiptStore>,
         lease_coordinator: Box<dyn LeaseCoordinator>,
-        _clock: Box<dyn KernelClock>,
+        clock: Box<dyn KernelClock>,
+    ) -> Self {
+        Self::with_ports_and_provider_selector(
+            command_store,
+            snapshot_store,
+            tick_receipt_store,
+            lease_coordinator,
+            clock,
+            Arc::new(StaticProviderSelector::default()),
+        )
+    }
+
+    /// Create a kernel with explicit provider selection authority while
+    /// retaining all existing persistence and lease ports.
+    pub fn with_ports_and_provider_selector(
+        command_store: Box<dyn CommandStore>,
+        snapshot_store: Box<dyn SnapshotStore>,
+        tick_receipt_store: Box<dyn TickReceiptStore>,
+        lease_coordinator: Box<dyn LeaseCoordinator>,
+        clock: Box<dyn KernelClock>,
+        provider_selector: Arc<dyn ProviderSelector>,
     ) -> Self {
         Self {
             inner: Arc::new(RuntimeKernelInner {
@@ -588,7 +617,8 @@ impl RuntimeKernel {
                 snapshot_store,
                 tick_receipt_store,
                 lease_coordinator,
-                _clock,
+                _clock: clock,
+                provider_selector,
                 sequence: AtomicU64::new(0),
             }),
             schedule: parking_lot::Mutex::new(None),
@@ -617,7 +647,29 @@ impl RuntimeKernel {
         snapshot_store: Box<dyn SnapshotStore>,
         tick_receipt_store: Box<dyn TickReceiptStore>,
         lease_coordinator: Box<dyn LeaseCoordinator>,
-        _clock: Box<dyn KernelClock>,
+        clock: Box<dyn KernelClock>,
+    ) -> Self {
+        Self::with_existing_world_and_ports_and_provider_selector(
+            world,
+            command_store,
+            snapshot_store,
+            tick_receipt_store,
+            lease_coordinator,
+            clock,
+            Arc::new(StaticProviderSelector::default()),
+        )
+    }
+
+    /// Create a kernel over an existing authoritative world with explicit
+    /// provider selection authority.
+    pub fn with_existing_world_and_ports_and_provider_selector(
+        world: std::sync::Arc<std::sync::RwLock<prism_ecs_core::World>>,
+        command_store: Box<dyn CommandStore>,
+        snapshot_store: Box<dyn SnapshotStore>,
+        tick_receipt_store: Box<dyn TickReceiptStore>,
+        lease_coordinator: Box<dyn LeaseCoordinator>,
+        clock: Box<dyn KernelClock>,
+        provider_selector: Arc<dyn ProviderSelector>,
     ) -> Self {
         Self {
             inner: Arc::new(RuntimeKernelInner {
@@ -626,7 +678,8 @@ impl RuntimeKernel {
                 snapshot_store,
                 tick_receipt_store,
                 lease_coordinator,
-                _clock,
+                _clock: clock,
+                provider_selector,
                 sequence: AtomicU64::new(0),
             }),
             schedule: parking_lot::Mutex::new(None),

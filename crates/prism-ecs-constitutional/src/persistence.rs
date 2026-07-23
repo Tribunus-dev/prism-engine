@@ -6,6 +6,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// A single entry in the durable event log.
+///
+/// This type intentionally contains [`DomainEvent`] rather than the broader
+/// `ClassifiedEvent` enum. Advisory observations therefore cannot be passed to
+/// an `EventStore` without an explicit, invalid conversion.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventLogEntry {
     pub epoch: WorldEpoch,
@@ -33,7 +37,10 @@ pub struct ProjectionCheckpoint {
 
 /// Trait for the durable event store.
 pub trait EventStore: Send + Sync {
-    /// Append events atomically at the given epoch.
+    /// Append durable events atomically at the given epoch.
+    ///
+    /// Advisory events belong to the transaction's runtime observation lane
+    /// and must not be converted into `EventLogEntry` values.
     fn append_events(&mut self, epoch: WorldEpoch, events: &[EventLogEntry]) -> Result<(), String>;
     /// Get all events from a starting epoch.
     fn get_events_from(&self, from_epoch: WorldEpoch) -> Vec<EventLogEntry>;
