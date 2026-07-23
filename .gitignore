@@ -24,3 +24,35 @@ AMD-Dev-Cloud-Key
 /Local AI models destroyed by further Distillation.en.vtt
 /mlx-rs-fork/examples/mnist/data/train-images.idx3-ubyte
 /mlx-rs-fork/examples/mnist/data/t10k-images.idx3-ubyte
+ local/
+ .DS_Store
+ *.metallib
+ *.air
+
+ # Local model checkpoints and data
+ models/bitnet-b1.58-2B-4T/
+bonsai-27b/
+bonsai-image-mlx/
+artifacts/
+ bonsai-image-mlx/
+ qwen3-tts-model/
+ vision_bank/**/*.bin
+
+ # Generated review artifacts
+ /prism-engine-full-packet.zip
+ /prism-engine-semantic-packet.zip
+ /tribunus-source-review/
+ /semantic-packet/
+ /inventory.json
+ /test_cfg
+ /Local AI models destroyed by further Distillation.en.vtt
+ /mlx-rs-fork/examples/mnist/data/
+
+ # Other untracked
+ _insert_soc.py
+ AMD-Dev-Cloud-Key
+
+# Vendored MLX dependencies and local research workspaces
+/Packages/SwiftLM/mlx-swift/
+/Packages/SwiftLM/mlx-swift-lm/
+/research/
