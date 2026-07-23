@@ -29,6 +29,7 @@
 use std::path::PathBuf;
 
 use sha2::Digest;
+use crate::compilation_systems::sync_compilation_entity;
 
 use prism_ecs_core::component::Component;
 use prism_ecs_core::entity::{Entity, EntityKind};
@@ -277,6 +278,14 @@ pub struct CImageArtifact {
 
 impl Component for CImageArtifact {}
 
+/// The final forensic receipt owned by the session entity. Keeping it as a
+/// component makes receipt consumers observe the same state that produced the
+/// CImage instead of reconstructing it from side effects.
+#[derive(Debug, Clone)]
+pub struct CompilationReceipt(pub CompileReceipt);
+
+impl Component for CompilationReceipt {}
+
 // ===========================================================================
 // Pipeline Systems
 // ===========================================================================
@@ -516,6 +525,21 @@ pub fn system_legalize(world: &mut World) -> Result<(), CompileError> {
         .component::<SpatialGraphComponent>(session)
         .map_err(|e| CompileError::LegalizationFailed(e.to_string()))?;
 
+    let config = read_session_config(world, session)?;
+    if config.enable_search {
+        let search = world
+            .component::<SearchStateComponent>(session)
+            .map_err(|e| CompileError::LegalizationFailed(format!("search state missing: {e}")))?;
+        if let Some(plan) = search.format_plan.as_deref() {
+            serde_json::from_str::<prism_ecs_ir::evolution::compile_plan::FormatPlan>(plan)
+                .map_err(|e| CompileError::LegalizationFailed(format!("invalid selected format plan: {e}")))?;
+        } else if config.production_mode {
+            return Err(CompileError::LegalizationFailed(
+                "production legalization requires a selected format plan".into(),
+            ));
+        }
+    }
+
     let target = world
         .get_resource::<TargetCapabilities>()
         .cloned()
@@ -653,6 +677,14 @@ pub fn system_generate_kernels(world: &mut World) -> Result<(), CompileError> {
         .component::<SpatialGraphComponent>(session)
         .map_err(|e| CompileError::KernelGenFailed(e.to_string()))?
         .clone();
+    let legalized = world
+        .component::<LegalizedPlan>(session)
+        .map_err(|e| CompileError::KernelGenFailed(format!("legalized plan missing: {e}")))?;
+    if !legalized.is_valid {
+        return Err(CompileError::KernelGenFailed(
+            "cannot generate kernels from an invalid legalized plan".into(),
+        ));
+    }
 
     let format_plan = world
         .component::<SearchStateComponent>(session)
@@ -942,6 +974,23 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
     let session = session_entity(world)?;
     let config = read_session_config(world, session)?;
 
+    let legal = world
+        .component::<LegalizedPlan>(session)
+        .map_err(|e| CompileError::CImageEmitFailed(format!("legalized plan missing: {e}")))?;
+    if !legal.is_valid {
+        return Err(CompileError::CImageEmitFailed(
+            "cannot emit CImage from an invalid legalized plan".into(),
+        ));
+    }
+    world
+        .component::<KernelCollection>(session)
+        .map_err(|e| CompileError::CImageEmitFailed(format!("kernel collection missing: {e}")))?;
+    if config.enable_search {
+        world
+            .component::<SearchStateComponent>(session)
+            .map_err(|e| CompileError::CImageEmitFailed(format!("search state missing: {e}")))?;
+    }
+
     // Collect required inputs for the writer.
     let source = world
         .get_extension::<CurrentSource>()
@@ -956,11 +1005,29 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
     let mut writer = UniversalCImageWriter::new(output_path);
     writer.set_source(&source.0);
 
-    // Attach tensor payloads if graph is available.
-    if let Ok(graph_component) = world.component::<SpatialGraphComponent>(session) {
-        // In a full pipeline, tensor payloads would be streamed from the
-        // TensorDataProvider. For now, we rely on the sparse metadata.
-        let _ = &graph_component.graph;
+    // Payload completeness is part of artifact admission. A CImage that only
+    // contains sparse tensor metadata cannot be replayed independently of the
+    // original source, so stream every catalog entry through the provider.
+    let provider = source.0.provider.as_ref().ok_or_else(|| {
+        CompileError::CImageEmitFailed("source has no tensor data provider".into())
+    })?;
+    for tensor in source.0.catalog.iter() {
+        let payload = provider
+            .read_tensor(tensor)
+            .map_err(|error| CompileError::CImageEmitFailed(format!("read tensor {}: {error}", tensor.name)))?;
+        let dim_m = tensor.shape.first().copied().unwrap_or(0) as u32;
+        let dim_n = tensor.shape.get(1).copied().unwrap_or(0) as u32;
+        writer
+            .add_tensor_payload(crate::cimage::TensorPayloadEntry {
+                name: tensor.name.clone(),
+                payload,
+                representation: tensor.original_dtype.clone(),
+                effective_bpp: (tensor.element_size * 8) as f32,
+                dim_m,
+                dim_n,
+                tensor_type: crate::cimage::TensorType::Blob,
+            })
+            .map_err(CompileError::CImageEmitFailed)?;
     }
 
     // Attach search trace if available.
@@ -1014,6 +1081,10 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
     let _digest = writer
         .finalize()
         .map_err(|e| CompileError::CImageEmitFailed(e.to_string()))?;
+    let artifact_digest = hex::encode(sha2::Sha256::digest(
+        std::fs::read(&output_path)
+            .map_err(|e| CompileError::CImageEmitFailed(format!("read emitted CImage: {e}")))?,
+    ));
 
     // Update session status
     if let Ok(status) = world.component_mut::<CompilationSession>(session) {
@@ -1025,7 +1096,7 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
             session,
             CImageArtifact {
                 output_path: output_path.clone(),
-                digest: String::new(),
+                digest: artifact_digest,
                 schema_version: "1.0".into(),
             },
         )
@@ -1044,6 +1115,49 @@ pub fn system_certify(world: &mut World) -> Result<(), CompileError> {
         .map_err(|e| CompileError::CompilationFailed(e.to_string()))?;
     let model = RuntimeModel::load(&artifact.output_path)
         .map_err(|e| CompileError::CompilationFailed(format!("certification load failed: {e}")))?;
+    let reader = crate::cimage::CImageReader::open(&artifact.output_path)
+        .map_err(|e| CompileError::CompilationFailed(format!("read CImage header failed: {e}")))?;
+    let actual_digest = hex::encode(sha2::Sha256::digest(
+        std::fs::read(&artifact.output_path)
+            .map_err(|e| CompileError::CompilationFailed(format!("read CImage failed: {e}")))?,
+    ));
+    if actual_digest != artifact.digest {
+        return Err(CompileError::CompilationFailed(
+            "CImage artifact digest does not match emitted bytes".into(),
+        ));
+    }
+    let source = world
+        .get_extension::<CurrentSource>()
+        .ok_or_else(|| CompileError::CompilationFailed("source missing during certification".into()))?;
+    if reader.header.source_identity.as_ref() != Some(&source.0.identity)
+        || reader.header.source_catalog.as_ref() != Some(&source.0.catalog)
+    {
+        return Err(CompileError::CompilationFailed(
+            "CImage source provenance does not match the session source".into(),
+        ));
+    }
+    let expected_names = source.0.catalog.tensors.iter().map(|tensor| tensor.name.as_str());
+    if expected_names.clone().any(|name| !model.tensors.contains_key(name)) {
+        return Err(CompileError::CompilationFailed(
+            "CImage is missing a catalog tensor payload".into(),
+        ));
+    }
+    let search = world.component::<SearchStateComponent>(session).ok();
+    if let Some(search) = search {
+        let Some(serialized) = reader.header.search_trace.as_deref() else {
+            return Err(CompileError::CompilationFailed(
+                "CImage is missing the search trace".into(),
+            ));
+        };
+        let sealed: SearchTrace = serde_json::from_str(serialized).map_err(|e| {
+            CompileError::CompilationFailed(format!("invalid sealed search trace: {e}"))
+        })?;
+        if sealed.trace_digest != search.trace.trace_digest {
+            return Err(CompileError::CompilationFailed(
+                "sealed search trace differs from session state".into(),
+            ));
+        }
+    }
     if let Some(plan) = &model.execution_plan {
         plan.validate().map_err(|e| {
             CompileError::CompilationFailed(format!("certification plan failed: {e}"))
@@ -1066,6 +1180,17 @@ pub fn system_certify(world: &mut World) -> Result<(), CompileError> {
 /// session entity's `CompilationSession` status.
 pub fn system_build_receipt(world: &mut World) -> Result<(), CompileError> {
     let session = session_entity(world)?;
+    let session_state = world
+        .component::<CompilationSession>(session)
+        .map_err(|e| CompileError::CompilationFailed(e.to_string()))?;
+    if !matches!(session_state.status, SessionStatus::Certified | SessionStatus::Complete) {
+        return Err(CompileError::CompilationFailed(
+            "receipt build requires a certified CImage artifact".into(),
+        ));
+    }
+    world
+        .component::<CImageArtifact>(session)
+        .map_err(|e| CompileError::CompilationFailed(format!("artifact missing: {e}")))?;
     let events: Vec<CompilationEvent> = world
         .get_resource::<VecEventSink>()
         .map(|s| s.events())
@@ -1138,10 +1263,15 @@ pub fn system_build_receipt(world: &mut World) -> Result<(), CompileError> {
         schema_version: "1.0".into(),
     };
 
-    // Build forensic receipt digest.
+    // Build and retain the forensic receipt on the session entity.
     if !events.is_empty() {
-        let _ = build_forensic_receipt(&events);
+        let bytes = build_forensic_receipt(&events);
+        receipt.events_digest = Some(hex::encode(sha2::Sha256::digest(&bytes)));
     }
+
+    world
+        .insert_component(session, CompilationReceipt(receipt))
+        .map_err(|e| CompileError::CompilationFailed(e.to_string()))?;
 
     // Update session status to Complete.
     if let Ok(status) = world.component_mut::<CompilationSession>(session) {
@@ -1270,6 +1400,9 @@ impl CompilationOrchestrator {
         let all_ok = stage_results.iter().all(|r| r.success);
 
         let (status, _maybe_error) = if all_ok {
+            if let Ok(session) = self.world.component_mut::<CompilationSession>(self.session) {
+                session.status = SessionStatus::Complete;
+            }
             (CompileStatus::Completed, None)
         } else if stage_results.iter().any(|r| r.success) {
             (CompileStatus::Partial(stage_results.clone()), None)
@@ -1288,6 +1421,17 @@ impl CompilationOrchestrator {
                 )),
             )
         };
+        if !all_ok {
+            if let Ok(session) = self.world.component_mut::<CompilationSession>(self.session) {
+                session.status = SessionStatus::Failed(
+                    stage_results
+                        .last()
+                        .and_then(|stage| stage.error.clone())
+                    .unwrap_or_else(|| "pipeline failed".into()),
+                );
+            }
+            let _ = sync_compilation_entity(&mut self.world);
+        }
 
         let output_path = self
             .world
@@ -1334,7 +1478,7 @@ impl CompilationOrchestrator {
     ///
     /// Dispatches to the appropriate system function.
     pub fn run_stage(&mut self, stage: CompilationStage) -> Result<(), CompileError> {
-        match stage {
+        let result = match stage {
             CompilationStage::SourceDetection => system_detect_source(&mut self.world),
             CompilationStage::SourceIngestion => {
                 // Source ingestion is folded into source detection in this
@@ -1356,7 +1500,11 @@ impl CompilationOrchestrator {
             CompilationStage::CImageEmission => system_emit_cimage(&mut self.world),
             CompilationStage::Certification | CompilationStage::Certify => system_certify(&mut self.world),
             CompilationStage::ReceiptBuild => system_build_receipt(&mut self.world),
+        };
+        if result.is_ok() {
+            sync_compilation_entity(&mut self.world)?;
         }
+        result
     }
 
     // ── internal helpers ──────────────────────────────────────────────────
@@ -1814,14 +1962,14 @@ mod tests {
         // Kernel generation requires the legalized SpatialIR graph.
         assert!(orch.run_stage(CompilationStage::KernelGeneration).is_err());
 
-        // Receipt build can succeed with minimal state.
-        assert!(orch.run_stage(CompilationStage::ReceiptBuild).is_ok());
+        // Receipt build cannot bypass certification.
+        assert!(orch.run_stage(CompilationStage::ReceiptBuild).is_err());
 
-        // After receipt, session should be Complete.
+        // The session remains initialized because no certified artifact exists.
         let session = orch
             .world
             .component::<CompilationSession>(orch.session)
             .expect("session component");
-        assert!(matches!(session.status, SessionStatus::Complete));
+        assert!(matches!(session.status, SessionStatus::Initialized));
     }
 }

@@ -134,7 +134,7 @@ pub use forensic::{build_forensic_receipt, create_event, load_events_from_file, 
 
 pub mod ecs;
 pub use ecs::{
-    CImageArtifact, CompilationOrchestrator, CompilationSession, KernelCollection, LegalizedPlan,
+    CImageArtifact, CompilationOrchestrator, CompilationReceipt, CompilationSession, KernelCollection, LegalizedPlan,
     SearchStateComponent, SessionStatus, SourceModel, SpatialGraphComponent, TensorCollection,
 };
 
@@ -309,6 +309,7 @@ impl Default for CompilationPolicy {
                 CompilationStage::Legalization,
                 CompilationStage::KernelGeneration,
                 CompilationStage::CImageEmission,
+                CompilationStage::Certification,
                 CompilationStage::ReceiptBuild,
             ],
         }

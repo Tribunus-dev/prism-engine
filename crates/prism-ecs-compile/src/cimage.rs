@@ -307,6 +307,19 @@ pub struct UOpWorkloadEvidence {
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct CImageHeader {
     pub tensors: HashMap<String, TensorRecord>,
+    /// Canonical source identity and catalog used to produce this artifact.
+    /// Keeping these in the sealed header makes payload completeness auditable
+    /// without reopening the original model source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_identity: Option<prism_ecs_source::SourceIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_catalog: Option<prism_ecs_source::TensorCatalog>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legalization_report: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compilation_events: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_trace: Option<String>,
     /// Model-neutral identity/configuration. The legacy Qwen field below is
     /// retained so existing artifacts remain readable during migration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1605,6 +1618,9 @@ pub struct TensorPayloadEntry {
     pub payload: Vec<u8>,
     pub representation: String,
     pub effective_bpp: f32,
+    pub dim_m: u32,
+    pub dim_n: u32,
+    pub tensor_type: TensorType,
 }
 
 /// High-level CImage writer that wraps CImageWriter with compilation metadata.
@@ -1620,7 +1636,10 @@ impl UniversalCImageWriter {
         }
     }
 
-    pub fn set_source(&mut self, _source: &prism_ecs_source::CanonicalSource) {}
+    pub fn set_source(&mut self, source: &prism_ecs_source::CanonicalSource) {
+        self.writer.header.source_identity = Some(source.identity.clone());
+        self.writer.header.source_catalog = Some(source.catalog.clone());
+    }
 
     pub fn set_model_capabilities<I, S>(&mut self, capabilities: I)
     where
@@ -1959,10 +1978,9 @@ impl UniversalCImageWriter {
         self.writer.header.joint_tiling_evidence = Some(evidence);
     }
 
-    pub fn add_tensor_payload(&mut self, entry: TensorPayloadEntry) {
+    pub fn add_tensor_payload(&mut self, entry: TensorPayloadEntry) -> Result<(), String> {
         self.writer
-            .append(&entry.name, &entry.payload, 0, 0, TensorType::Blob)
-            .ok();
+            .append(&entry.name, &entry.payload, entry.dim_m, entry.dim_n, entry.tensor_type)
     }
 
     pub fn add_native_ternary_payload(
@@ -1999,11 +2017,23 @@ impl UniversalCImageWriter {
         )
     }
 
-    pub fn set_legalization_report(&mut self, _report: crate::legalize::LegalizationReport) {}
+    pub fn set_legalization_report(&mut self, report: crate::legalize::LegalizationReport) {
+        if let Ok(json) = serde_json::to_string(&report) {
+            self.writer.header.legalization_report = Some(json);
+        }
+    }
 
-    pub fn set_events(&mut self, _events: Vec<crate::CompilationEvent>) {}
+    pub fn set_events(&mut self, events: Vec<crate::CompilationEvent>) {
+        if let Ok(json) = serde_json::to_string(&events) {
+            self.writer.header.compilation_events = Some(json);
+        }
+    }
 
-    pub fn set_search_trace(&mut self, _trace: crate::SearchTrace) {}
+    pub fn set_search_trace(&mut self, trace: crate::SearchTrace) {
+        if let Ok(json) = serde_json::to_string(&trace) {
+            self.writer.header.search_trace = Some(json);
+        }
+    }
 
     pub fn add_kernel_artifact(&mut self, artifact: prism_ecs_kernel::KernelArtifact) {
         for payload in artifact.payloads {

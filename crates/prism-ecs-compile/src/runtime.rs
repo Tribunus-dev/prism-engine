@@ -95,6 +95,12 @@ pub enum ExecutionMode {
 pub struct RuntimeModel {
     /// Path to the `.cimage` file.
     pub cimage_path: PathBuf,
+    /// Sealed compiler provenance consumed by runtime admission and replay.
+    pub source_identity: Option<prism_ecs_source::SourceIdentity>,
+    pub source_catalog: Option<prism_ecs_source::TensorCatalog>,
+    pub search_trace: Option<crate::SearchTrace>,
+    pub legalization_report: Option<crate::legalize::LegalizationReport>,
+    pub compilation_events: Option<Vec<crate::CompilationEvent>>,
     /// Parsed manifest metadata.
     pub manifest: CImageManifest,
     /// Loaded tensor payloads indexed by tensor name.
@@ -156,6 +162,8 @@ pub struct RuntimeModel {
 #[derive(Debug, Clone)]
 pub struct CImageInspection {
     pub path: PathBuf,
+    pub source_identity: Option<prism_ecs_source::SourceIdentity>,
+    pub source_catalog: Option<prism_ecs_source::TensorCatalog>,
     pub file_bytes: u64,
     pub tensor_bytes: u64,
     pub kernel_bytes: u64,
@@ -174,6 +182,9 @@ pub struct CImageInspection {
     pub native_ternary_promotion: Option<NativeTernaryPromotionEvidence>,
     pub joint_tiling_evidence: Option<crate::search::JointTilingEvidence>,
     pub kv_compression_policy: Option<String>,
+    pub has_search_trace: bool,
+    pub has_legalization_report: bool,
+    pub has_compilation_events: bool,
 }
 
 /// Resolves AOT tensor bindings against the loaded CImage tensor table.
@@ -934,6 +945,28 @@ impl RuntimeModel {
             .map_err(|e| RuntimeError::FileNotFound(e.to_string()))?
             .len();
         let tensor_bytes = reader.header.tensors.values().map(|r| r.size).sum();
+        if let Some(catalog) = reader.header.source_catalog.as_ref() {
+            if catalog.tensors.iter().any(|tensor| !reader.header.tensors.contains_key(&tensor.name)) {
+                return Err(RuntimeError::InvalidCImage(
+                    "source catalog references a tensor without an embedded payload".into(),
+                ));
+            }
+        }
+        if let Some(trace) = reader.header.search_trace.as_deref() {
+            serde_json::from_str::<crate::SearchTrace>(trace).map_err(|error| {
+                RuntimeError::InvalidCImage(format!("invalid sealed search trace: {error}"))
+            })?;
+        }
+        if let Some(report) = reader.header.legalization_report.as_deref() {
+            serde_json::from_str::<crate::legalize::LegalizationReport>(report).map_err(|error| {
+                RuntimeError::InvalidCImage(format!("invalid legalization report: {error}"))
+            })?;
+        }
+        if let Some(events) = reader.header.compilation_events.as_deref() {
+            serde_json::from_str::<Vec<crate::CompilationEvent>>(events).map_err(|error| {
+                RuntimeError::InvalidCImage(format!("invalid compilation events: {error}"))
+            })?;
+        }
         let kernel_bytes = reader.header.kernels.values().map(|r| r.size).sum();
         let ane_program_bytes = reader.header.ane_programs.values().map(|r| r.size).sum();
         let xdna_artifact_bytes = reader.header.xdna_artifacts.values().map(|r| r.size).sum();
@@ -956,6 +989,8 @@ impl RuntimeModel {
             .unwrap_or((false, false));
         Ok(CImageInspection {
             path: path.to_path_buf(),
+            source_identity: reader.header.source_identity.clone(),
+            source_catalog: reader.header.source_catalog.clone(),
             file_bytes,
             tensor_bytes,
             kernel_bytes,
@@ -972,6 +1007,9 @@ impl RuntimeModel {
             native_ternary_promotion: reader.header.native_ternary_promotion.clone(),
             joint_tiling_evidence: reader.header.joint_tiling_evidence.clone(),
             kv_compression_policy: reader.header.kv_compression_policy.clone(),
+            has_search_trace: reader.header.search_trace.is_some(),
+            has_legalization_report: reader.header.legalization_report.is_some(),
+            has_compilation_events: reader.header.compilation_events.is_some(),
         })
     }
 
@@ -1166,6 +1204,29 @@ impl RuntimeModel {
         }
         Ok(Self {
             cimage_path: path.to_path_buf(),
+            source_identity: reader.header.source_identity,
+            source_catalog: reader.header.source_catalog,
+            search_trace: reader
+                .header
+                .search_trace
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|e| RuntimeError::InvalidCImage(format!("invalid search trace: {e}")))?,
+            legalization_report: reader
+                .header
+                .legalization_report
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|e| RuntimeError::InvalidCImage(format!("invalid legalization report: {e}")))?,
+            compilation_events: reader
+                .header
+                .compilation_events
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|e| RuntimeError::InvalidCImage(format!("invalid compilation events: {e}")))?,
             manifest: CImageManifest {
                 schema_version: "TRB_CIMG/1".into(),
                 source_digest: String::new(),
@@ -2913,6 +2974,11 @@ mod tests {
         let manifest = CImageManifest::default();
         let model = RuntimeModel {
             cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
             manifest,
             tensors: HashMap::new(),
             tensor_records: HashMap::new(),
@@ -2976,6 +3042,11 @@ mod tests {
         tensors.insert("weights".into(), vec![1, 2, 3, 4]);
         let model = RuntimeModel {
             cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
             manifest: CImageManifest::default(),
             tensors,
             tensor_records: HashMap::new(),
@@ -3088,6 +3159,11 @@ mod tests {
         }]);
         let model = RuntimeModel {
             cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
             manifest: CImageManifest::default(),
             tensors: HashMap::new(),
             tensor_records: HashMap::new(),
@@ -3244,6 +3320,11 @@ mod tests {
         let manifest = CImageManifest::default();
         let model = RuntimeModel {
             cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
             manifest,
             tensors: HashMap::new(),
             tensor_records: HashMap::new(),
@@ -3384,6 +3465,11 @@ mod tests {
         };
         let model = RuntimeModel {
             cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
             manifest: CImageManifest::default(),
             tensors: HashMap::new(),
             tensor_records: HashMap::new(),
@@ -3422,6 +3508,11 @@ mod tests {
         let manifest = CImageManifest::default();
         let model = RuntimeModel {
             cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
             manifest,
             tensors: HashMap::new(),
             tensor_records: HashMap::new(),

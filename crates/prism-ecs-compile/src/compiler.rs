@@ -8,7 +8,7 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use prism_ecs_core::identity::TensorProvider;
-use prism_ecs_core::identity::{CompilerIdentity, SourceFormat};
+use prism_ecs_core::identity::CompilerIdentity;
 use prism_ecs_core::world::World;
 use prism_ecs_core::Entity;
 use prism_ecs_ir::evolution::EvolutionRuntime;
@@ -16,18 +16,21 @@ use prism_ecs_ir::evolution::EvolutionRuntime;
 use prism_ecs_kernel::BackendKind;
 #[cfg(test)]
 use prism_ecs_source::TensorDataProvider;
-use prism_ecs_source::{CanonicalSource, CanonicalSourceAdapter, SourceError, SourceIdentity};
+use prism_ecs_source::{CanonicalSource, CanonicalSourceAdapter, SourceError};
+#[cfg(test)]
+use prism_ecs_source::SourceIdentity;
 
 use crate::cimage::{
-    MoeTensorDescriptor, TensorPayloadEntry, UniversalCImageWriter, VisionTensorDescriptor,
+    MoeTensorDescriptor, TensorPayloadEntry, TensorType, UniversalCImageWriter,
+    VisionTensorDescriptor,
 };
 use crate::compilation_entity::CompilationEntity;
 use crate::compilation_systems::*;
 use crate::ecs::{
     system_build_graph, system_build_receipt, system_detect_source, system_emit_cimage,
-    system_generate_kernels, system_legalize, system_run_search, CImageArtifact,
-    CompilationSession, CurrentSource, SearchStateComponent, SessionHandle, SessionStatus,
-    SourceAdapterList, SourceModel,
+    system_certify, system_generate_kernels, system_legalize, system_run_search,
+    CompilationReceipt, CompilationSession, CurrentSource, SessionHandle, SessionStatus,
+    SourceAdapterList,
 };
 use crate::forensic::FileEventSink;
 use crate::graph::CanonicalGraphBuilder;
@@ -452,6 +455,7 @@ pub fn compile_source(
 
     // Stage 2: Search (if enabled)
     let mut selected_format_plan: Option<prism_ecs_ir::evolution::compile_plan::FormatPlan> = None;
+    let mut search_trace = None;
     let (candidate_count, generations_count) = if compiler.config.enable_search {
         let search_t0 = std::time::Instant::now();
         let search_config = SearchConfig {
@@ -493,6 +497,7 @@ pub fn compile_source(
                 compiler.config.production_mode,
             )
             .map_err(|e| CompileError::SearchFailed(e.to_string()))?;
+        search_trace = Some(search_result.trace.clone());
         selected_format_plan = search_result
             .format_plan
             .as_deref()
@@ -788,7 +793,10 @@ pub fn compile_source(
                 payload,
                 representation: tensor.original_dtype.clone(),
                 effective_bpp: 16.0,
-            });
+                dim_m: tensor.shape.first().copied().unwrap_or(0) as u32,
+                dim_n: tensor.shape.get(1).copied().unwrap_or(0) as u32,
+                tensor_type: TensorType::Blob,
+            }).map_err(CompileError::CImageEmitFailed)?;
             annotate_tensor_for_model(&mut writer, compiler.qwen36_config.as_ref(), &tensor.name)
                 .map_err(CompileError::CImageEmitFailed)?;
         } }
@@ -896,6 +904,9 @@ pub fn compile_source(
     }
     writer.set_legalization_report(legalize_result);
     writer.set_events(events.clone());
+    if let Some(trace) = search_trace {
+        writer.set_search_trace(trace);
+    }
     let promotion_receipt_path =
         std::env::var_os("PRISM_NATIVE_PROMOTION_EVIDENCE_PATH").map(std::path::PathBuf::from);
     if let Some(receipt_path) = promotion_receipt_path {
@@ -1148,106 +1159,36 @@ pub fn compile_source_ecs(
 
     // 6. CImage emission
     system_emit_cimage(world)?;
+    // 7. Reopen and certify the artifact before any receipt can claim
+    // completion. This keeps the direct ECS entry point aligned with the
+    // orchestrator path.
+    system_certify(world)?;
     system_transition_emit_to_complete(world)?;
 
-    // 7. Receipt building
+    // 8. Receipt building
     system_build_receipt(world)?;
 
     // Extract the final result
     let session_status = world.component::<CompilationSession>(session_entity)?;
-    let receipt = match &session_status.status {
+    match &session_status.status {
         SessionStatus::Complete => {
-            // Build the receipt from the completed session
-            let _events: Vec<CompilationEvent> = world
-                .get_resource::<VecEventSink>()
-                .map(|s| s.events())
-                .unwrap_or_default();
-
-            let receipt = CompileReceipt {
-                receipt_id: uuid::Uuid::new_v4().to_string(),
-                request_id: uuid::Uuid::new_v4(),
-                compiler_identity: CompilerIdentity {
-                    name: "ecs-compiler".into(),
-                    version: env!("CARGO_PKG_VERSION").into(),
-                    build_hash: None,
-                    build_timestamp: None,
-                },
-                source_identity: world
-                    .component::<SourceModel>(session_entity)
-                    .ok()
-                    .map(|m| m.identity.clone())
-                    .unwrap_or_else(|| SourceIdentity {
-                        format: SourceFormat::Raw,
-                        source_digest: String::new(),
-                        architecture: String::new(),
-                        model_family: String::new(),
-                    }),
-                started_at: chrono::Utc::now(),
-                completed_at: chrono::Utc::now(),
-                duration_ms: 0,
-                stages: Vec::new(),
-                candidate_count: world
-                    .component::<SearchStateComponent>(session_entity)
-                    .ok()
-                    .map(|s| s.candidates_evaluated as u32)
-                    .unwrap_or(0),
-                generations: world
-                    .component::<SearchStateComponent>(session_entity)
-                    .ok()
-                    .map(|s| s.generations_completed as u32)
-                    .unwrap_or(0),
-                output_digest: world
-                    .component::<CImageArtifact>(session_entity)
-                    .ok()
-                    .map(|a| a.digest.clone())
-                    .unwrap_or_default(),
-                output_path: world
-                    .component::<CImageArtifact>(session_entity)
-                    .ok()
-                    .map(|a| a.output_path.clone())
-                    .unwrap_or_default(),
-                schema_version: world
-                    .component::<CImageArtifact>(session_entity)
-                    .ok()
-                    .map(|a| a.schema_version.clone())
-                    .unwrap_or_default(),
+            let receipt = world
+                .component::<CompilationReceipt>(session_entity)
+                .map_err(|e| CompileError::CompilationFailed(format!("receipt component missing: {e}")))?
+                .0
+                .clone();
+            Ok(CompileResult {
                 status: CompileStatus::Completed,
-                error: None,
-                finished_at: chrono::Utc::now(),
-                source_digest: None,
-                graph_digest: None,
-                search_trace_digest: None,
-                kernel_manifest_digest: None,
-                events_digest: None,
-                legalization_mode: None,
-            };
-
-            receipt
+                request_id: receipt.request_id,
+                events: world.get_resource::<VecEventSink>().map(|s| s.events()).unwrap_or_default(),
+                output_digest: receipt.output_digest.clone(),
+                output_path: receipt.output_path.clone(),
+                receipt,
+            })
         }
-        SessionStatus::Failed(error) => {
-            return Err(CompileError::CompilationFailed(error.clone()));
-        }
-        _ => {
-            return Err(CompileError::CompilationFailed(
-                "pipeline did not complete".into(),
-            ))
-        }
-    };
-
-    let result = CompileResult {
-        receipt,
-        status: match &session_status.status {
-            SessionStatus::Complete => CompileStatus::Completed,
-            SessionStatus::Failed(error) => CompileStatus::Failed(error.clone()),
-            _ => CompileStatus::InProgress,
-        },
-        request_id: uuid::Uuid::new_v4(),
-        events: Vec::new(),
-        output_digest: String::new(),
-        output_path: std::path::PathBuf::new(),
-    };
-
-    Ok(result)
+        SessionStatus::Failed(error) => Err(CompileError::CompilationFailed(error.clone())),
+        _ => Err(CompileError::CompilationFailed("pipeline did not complete".into())),
+    }
 }
 
 fn compute_file_digest_sha256(path: &Path) -> String {

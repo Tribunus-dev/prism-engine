@@ -661,6 +661,9 @@ impl SearchCoordinator {
             }
             None => return Err(SearchError::ProductionModeRequiresEvaluator),
         };
+        if production_mode && !evaluator.is_measured() {
+            return Err(SearchError::ProductionModeRequiresEvaluator);
+        }
 
         let runtime_session = self
             .runtime
@@ -1507,10 +1510,17 @@ impl SearchCoordinator {
             self.search_tensor_overrides(genome, &tensor_keys, evaluator, context_bytes)
         });
         let format_plan = best_genome.as_ref().map(|genome| {
-            let plan = FormatPlan::from_best_genome(
-                genome,
-                &tensor_keys,
-            );
+            let mut plan = FormatPlan::from_best_genome(genome, &tensor_keys);
+            // The global winner is only the seed for the tensor-wise search.
+            // Promote each measured tensor override into the authoritative
+            // plan consumed by lowering and CImage emission.
+            if let Some(overrides) = per_tensor_overrides.as_ref() {
+                for tensors in overrides.values() {
+                    for (tensor, assignment) in tensors {
+                        plan.per_tensor.insert(tensor.clone(), assignment.format);
+                    }
+                }
+            }
             let plan = best_joint_tiling
                 .as_ref()
                 .and_then(|evidence| evidence.selected_configuration)
