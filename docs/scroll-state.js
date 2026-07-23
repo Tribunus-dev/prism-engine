@@ -6,7 +6,10 @@
     ['04', 'EXECUTION', 'The target hardware shapes routes, residency, and runtime work.'],
     ['05', 'RECEIPTS', 'Quality, legality, and evidence gate the result.']
   ];
-  const sources = ['.hero', '#working-path', '#compiler', '#architecture', '#status'];
+  // The rail follows the five pinned scenes, with the ComputeImage itself as
+  // the persistent object between them. The working-path copy remains part of
+  // the birth scene instead of becoming a competing chapter.
+  const sources = ['.hero', '#computeimage-anatomy', '#compiler', '#architecture', '#status'];
   const sections = sources.map(selector => document.querySelector(selector)).filter(Boolean);
   if (!sections.length) return;
 

@@ -8,9 +8,9 @@
   .scroll-chapter .section-heading>p{padding-top:10px}
   .scroll-chapter .working-path-grid{margin-top:0;flex:0 0 auto}
   .scroll-chapter .working-path-note{margin-top:14px}
-  .scroll-chapter#compiler .lab-window{max-height:57svh;overflow:hidden;flex:0 0 auto}
+  .scroll-chapter#compiler .lab-window{max-height:57svh;overflow:visible;flex:0 0 auto}
   .scroll-chapter#compiler .lab-body{min-height:0;height:39svh}
-  .scroll-chapter .journey-frame,.scroll-chapter .signature-track,.scroll-chapter .reality-bands{flex:0 0 auto;overflow:hidden}
+  .scroll-chapter .journey-frame,.scroll-chapter .signature-track,.scroll-chapter .reality-bands{flex:0 0 auto;overflow:visible}
   .scroll-chapter#compiler .caption-row{margin-top:12px}
   .scroll-chapter#architecture{background:var(--deep);isolation:isolate}
   .scroll-chapter#status{background:var(--paper);isolation:isolate}
