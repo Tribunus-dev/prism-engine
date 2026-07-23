@@ -16,9 +16,11 @@
   const description = rail.querySelector('.scroll-state-description');
   const sources = ['.hero', '#working-path', '#compiler', '.tensor-journey', '#architecture', '#status'];
   const sections = sources.map(selector => document.querySelector(selector)).filter(Boolean);
+  sections.forEach((section, index) => { section.classList.add('scroll-chapter'); section.style.setProperty('--chapter-index', index); });
   const setState = index => {
     const safe = Math.max(0, Math.min(index, stages.length - 1));
     document.documentElement.dataset.compilerState = stages[safe][1].toLowerCase();
+    sections.forEach((section, i) => section.classList.toggle('is-chapter-active', i === safe));
     items.forEach((item, i) => { item.classList.toggle('is-active', i === safe); item.classList.toggle('is-complete', i < safe); item.setAttribute('aria-current', i === safe ? 'step' : 'false'); });
     description.textContent = stages[safe][2];
   };

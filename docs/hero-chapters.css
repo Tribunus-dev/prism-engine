@@ -1,0 +1,11 @@
+@media(min-width:801px){
+  body{overflow-x:hidden}.scroll-chapter{position:sticky;top:0;z-index:calc(2 + var(--chapter-index));min-height:100vh;height:100vh;display:flex;flex-direction:column;justify-content:center;overflow:hidden;scroll-margin-top:0;padding-top:clamp(70px,9vh,110px);padding-bottom:clamp(60px,8vh,100px)}
+  .scroll-chapter>.shell,.scroll-chapter>.section-heading,.scroll-chapter>.working-path-grid,.scroll-chapter>.working-path-note,.scroll-chapter>.lab-window,.scroll-chapter>.caption-row,.scroll-chapter>.journey-frame,.scroll-chapter>.signature-track,.scroll-chapter>.figure-link,.scroll-chapter>.reality-bands{width:min(1160px,calc(100% - 48px));margin-left:auto;margin-right:auto}
+  .scroll-chapter .section-heading{width:min(1160px,calc(100% - 48px));margin-bottom:clamp(24px,4vh,48px)}
+  .scroll-chapter .section-heading h2{font-size:clamp(34px,4.5vw,62px)}
+  .scroll-chapter .working-path-grid{margin-top:0}.scroll-chapter .journey-frame{max-height:64vh}.scroll-chapter .journey-svg{min-height:0;max-height:38vh}.scroll-chapter#compiler .lab-window{max-height:58vh}.scroll-chapter#compiler .lab-body{min-height:0;height:42vh}.scroll-chapter#status .reality-bands{max-height:45vh}.scroll-chapter#status{background:var(--paper)}
+  .scroll-chapter.is-chapter-active .section-heading,.scroll-chapter.is-chapter-active .working-path-grid,.scroll-chapter.is-chapter-active .lab-window,.scroll-chapter.is-chapter-active .journey-frame,.scroll-chapter.is-chapter-active .signature-track,.scroll-chapter.is-chapter-active .reality-bands{animation:chapter-arrive .65s cubic-bezier(.22,1,.36,1) both}
+  @keyframes chapter-arrive{from{opacity:.35;transform:translateY(22px) scale(.985)}to{opacity:1;transform:none}}
+}
+@media(max-width:800px){.scroll-chapter{position:relative;min-height:0;height:auto;overflow:visible}}
+@media(prefers-reduced-motion:reduce){.scroll-chapter.is-chapter-active>*{animation:none}}
