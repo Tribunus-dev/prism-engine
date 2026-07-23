@@ -782,7 +782,7 @@ pub fn compile_source(
                 }
             }
         }
-        if let Ok(payload) = source.provider.read_tensor(tensor) {
+        if let Some(provider) = source.provider.as_ref() { if let Ok(payload) = provider.read_tensor(tensor) {
             writer.add_tensor_payload(TensorPayloadEntry {
                 name: tensor.name.clone(),
                 payload,
@@ -791,7 +791,7 @@ pub fn compile_source(
             });
             annotate_tensor_for_model(&mut writer, compiler.qwen36_config.as_ref(), &tensor.name)
                 .map_err(CompileError::CImageEmitFailed)?;
-        }
+        } }
     }
 
     // Materialize stateless ANE programs for admitted Tile640 candidates in
@@ -1313,7 +1313,7 @@ mod tests {
         let tensors = vec![
             TensorDescriptor {
                 name: "model.embed_tokens.weight".into(),
-                shape: vec![32000, 4096],
+                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1322,7 +1322,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "lm_head.weight".into(),
-                shape: vec![32000, 4096],
+                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1331,7 +1331,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.q_proj.weight".into(),
-                shape: vec![4096, 4096],
+                shape: vec![4096, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 4096 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1340,7 +1340,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.k_proj.weight".into(),
-                shape: vec![1024, 4096],
+                shape: vec![1024, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 1024 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1349,7 +1349,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.v_proj.weight".into(),
-                shape: vec![1024, 4096],
+                shape: vec![1024, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 1024 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1358,7 +1358,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.o_proj.weight".into(),
-                shape: vec![4096, 4096],
+                shape: vec![4096, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 4096 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1367,7 +1367,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.mlp.gate_proj.weight".into(),
-                shape: vec![11008, 4096],
+                shape: vec![11008, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 11008 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1376,7 +1376,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.mlp.up_proj.weight".into(),
-                shape: vec![11008, 4096],
+                shape: vec![11008, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 11008 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1385,7 +1385,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.mlp.down_proj.weight".into(),
-                shape: vec![4096, 11008],
+                shape: vec![4096, 11008], dtype: "f16".into(), byte_offset: 0, byte_length: 4096 * 11008 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1401,11 +1401,11 @@ mod tests {
                 model_family: "llama".into(),
             },
             catalog: TensorCatalog::new(tensors),
-            provider: Box::new(EmptyProvider),
+            provider: Some(std::sync::Arc::new(EmptyProvider)),
             capabilities: SourceCapabilities {
                 supports_streaming: false,
                 supports_random_access: false,
-                supports_dequantize: false,
+                supports_dequantize: false, random_access: false, mmap: false, writable: false,
             },
         }
     }

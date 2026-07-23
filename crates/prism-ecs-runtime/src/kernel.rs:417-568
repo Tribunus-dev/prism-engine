@@ -1,0 +1,159 @@
+    /// Replay a command that was already committed — no journal, no
+    /// idempotency checking, no receipt.  Just apply the world mutation.
+    fn apply_recovered_command(
+        &self,
+        completed: &crate::ports::CompletedCommand,
+    ) -> Result<(), RuntimeError> {
+        // Parse the envelope to extract the command
+        let envelope: crate::kernel::CommandEnvelope =
+            serde_json::from_str(&completed.envelope_json)
+                .map_err(|e| RuntimeError::Journal(format!("replay: bad envelope: {e}")))?;
+
+        // Deserialize the stored result for verification
+        let stored_result: CommandResult = serde_json::from_str(&completed.result_json)
+            .map_err(|e| RuntimeError::Journal(format!("replay: bad result: {e}")))?;
+
+        let mut world = self.inner.world.lock();
+
+        match envelope.command {
+            Command::SpawnAgent {
+                parent_id,
+                task,
+                max_steps,
+            } => {
+                let entity_id = execute_spawn(&mut *world, parent_id, &task, max_steps)?;
+                if let CommandResult::Spawned {
+                    entity_id: expected,
+                } = &stored_result
+                {
+                    if entity_id != *expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay entity ID mismatch: generated {} but stored result has {}",
+                            entity_id, expected
+                        )));
+                    }
+                }
+            }
+            Command::CancelAgent { agent_id } => {
+                execute_cancel_txn(&mut *world, agent_id)?;
+            }
+            Command::RegisterModel {
+                name,
+                source_path,
+                format,
+            } => {
+                let entity_id =
+                    execute_register_model(&mut *world, &name, &source_path, &format)?;
+                if let CommandResult::Registered {
+                    entity_id: expected,
+                } = &stored_result
+                {
+                    if entity_id != *expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay register entity ID mismatch: generated {} but stored result has {}",
+                            entity_id, expected
+                        )));
+                    }
+                }
+            }
+            Command::SubmitWork {
+                kind,
+                target_entity,
+                resource_claim,
+            } => {
+                let work_id =
+                    execute_submit_work(&mut *world, &kind, target_entity, &resource_claim)?;
+                if let CommandResult::Submitted {
+                    work_id: expected,
+                } = &stored_result
+                {
+                    if work_id != *expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay submit work ID mismatch: generated {} but stored result has {}",
+                            work_id, expected
+                        )));
+                    }
+                }
+            }
+            Command::TransitionLifecycle {
+                entity,
+                target_state,
+            } => {
+                let state = execute_transition(&mut *world, entity, &target_state)?;
+                if let CommandResult::Transitioned {
+                    new_state: expected,
+                    ..
+                } = &stored_result
+                {
+                    if state != *expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay transition state mismatch: got {} but stored result has {}",
+                            state, expected
+                        )));
+                    }
+                }
+            }
+            Command::AttachEvidence {
+                entity,
+                evidence_type,
+                payload,
+            } => {
+                let receipt_id =
+                    execute_attach_evidence(&mut *world, entity, &evidence_type, &payload)?;
+                if let CommandResult::EvidenceAttached {
+                    receipt_id: expected,
+                } = &stored_result
+                {
+                    if receipt_id != *expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay evidence receipt mismatch: generated {} but stored result has {}",
+                            receipt_id, expected
+                        )));
+                    }
+                }
+            }
+            Command::DispatchHardware {
+                target_entity,
+                backend,
+                payload,
+            } => {
+                let dispatch_id =
+                    execute_dispatch(&mut *world, target_entity, &backend, &payload)?;
+                if let CommandResult::Dispatched {
+                    dispatch_id: expected,
+                } = &stored_result
+                {
+                    if dispatch_id != *expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay dispatch ID mismatch: generated {} but stored result has {}",
+                            dispatch_id, expected
+                        )));
+                    }
+                }
+            }
+            Command::PublishResult {
+                entity,
+                result_type,
+                result,
+            } => {
+                let receipt_id =
+                    execute_publish_result(&mut *world, entity, &result_type, &result)?;
+                if let CommandResult::Published {
+                    receipt_id: expected,
+                } = &stored_result
+                {
+                    if receipt_id != *expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay publish receipt mismatch: generated {} but stored result has {}",
+                            receipt_id, expected
+                        )));
+                    }
+                }
+            }
+            // Leases are non-mutating during replay — no-op
+            Command::AcquireLease { .. } | Command::ReleaseLease { .. } => {}
+        }
+
+        drop(world);
+        Ok(())
+    }

@@ -210,7 +210,10 @@ pub fn pack_nf4_tile_with_group_size(
                 max_abs = v;
             }
         }
-        let scale = if max_abs > 1e-12 { max_abs } else { 1.0 };
+        let codebook_aligned = values[base..base + group_size].iter().all(|&v| {
+            v.abs() <= 1e-12 || NF4_CODEBOOK.iter().any(|&q| (v - q).abs() <= 1e-6)
+        });
+        let scale = if codebook_aligned { 1.0 } else if max_abs > 1e-12 { max_abs } else { 1.0 };
         let bias = 0.0f32;
         scales[g] = scale;
         biases[g] = bias;
@@ -322,7 +325,7 @@ pub fn unpack_nf4_weights(
 
         for g in 0..GROUPS_PER_TILE {
             let scale = scales[meta_base + g];
-            let bias = biases[meta_base + g];
+            let bias = biases.get(meta_base + g).copied().unwrap_or(0.0);
             let group_code_base = code_base + g * PACKED_BYTES_PER_GROUP;
             let out_base = r * tile_cols + tc * TILE_ELEMENTS + g * GROUP_SIZE;
 
@@ -339,9 +342,10 @@ pub fn unpack_nf4_weights(
     }
 
     if tile_cols > cols {
-        result.truncate(rows * cols);
-    }
-    result
+        let mut compact = Vec::with_capacity(rows * cols);
+        for row in result.chunks_exact(tile_cols) { compact.extend_from_slice(&row[..cols]); }
+        compact
+    } else { result }
 }
 
 /// Unpack NF4 weights with configurable group size.
@@ -373,7 +377,7 @@ pub fn unpack_nf4_weights_with_group_size(
 
         for g in 0..groups_per_tile {
             let scale = scales[meta_base + g];
-            let bias = biases[meta_base + g];
+            let bias = biases.get(meta_base + g).copied().unwrap_or(0.0);
             let gcode = code_base + g * bytes_per_group;
             let out_base = r * tile_cols + tc * TILE_ELEMENTS + g * group_size;
 
@@ -388,9 +392,10 @@ pub fn unpack_nf4_weights_with_group_size(
     }
 
     if tile_cols > cols {
-        result.truncate(rows * cols);
-    }
-    result
+        let mut compact = Vec::with_capacity(rows * cols);
+        for row in result.chunks_exact(tile_cols) { compact.extend_from_slice(&row[..cols]); }
+        compact
+    } else { result }
 }
 
 /// Unpack NF4 weights with configurable group size and codebook.
@@ -420,7 +425,7 @@ pub fn unpack_nf4_weights_with_group_size_and_codebook(
 
         for g in 0..groups_per_tile {
             let scale = scales[meta_base + g];
-            let bias = biases[meta_base + g];
+            let bias = biases.get(meta_base + g).copied().unwrap_or(0.0);
             let gcode = code_base + g * bytes_per_group;
             let out_base = r * tile_cols + tc * TILE_ELEMENTS + g * group_size;
 
@@ -435,9 +440,10 @@ pub fn unpack_nf4_weights_with_group_size_and_codebook(
     }
 
     if tile_cols > cols {
-        result.truncate(rows * cols);
-    }
-    result
+        let mut compact = Vec::with_capacity(rows * cols);
+        for row in result.chunks_exact(tile_cols) { compact.extend_from_slice(&row[..cols]); }
+        compact
+    } else { result }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

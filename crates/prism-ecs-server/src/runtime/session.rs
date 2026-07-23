@@ -47,6 +47,9 @@ pub struct SessionManager {
 }
 
 impl SessionManager {
+    pub fn get_receipt(&self, session_id: &SessionId) -> Option<InferenceAdmissionReceipt> {
+        self.sessions.lock().ok()?.get(session_id)?.receipt.clone()
+    }
     /// Create a new empty `SessionManager` with normal memory pressure.
     pub fn new() -> Self {
         Self {

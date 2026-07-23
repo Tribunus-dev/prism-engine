@@ -337,6 +337,7 @@ impl McpHandler for RunExperiment {
                 Ok(tr) => {
                     let txt = match &tr {
                         ToolResult::Text(t) => t.clone(),
+                        ToolResult::Json(v) => v.to_string(),
                     };
                     let rv: Value =
                         serde_json::from_str(&txt).unwrap_or(Value::String(txt.clone()));

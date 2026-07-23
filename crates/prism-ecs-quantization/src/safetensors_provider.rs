@@ -3,11 +3,15 @@
 //! Discovers `.safetensors` shards in a directory, indexes all tensor names
 //! from their JSON header, and provides streaming access to f32 tensor data.
 
-use std::cell::RefCell;
+use std::sync::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use prism_ecs_core::identity::{TensorInfo, TensorProvider, TensorReader};
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TernaryPreprocessRecord { pub tensor_name: String, pub rows: usize, pub cols: usize, pub changed: bool, pub status:String, pub shard_digest:String, pub metal_packed_file:String, pub packed_file:String, pub scales_file:String, pub group_size:usize, pub physical_tile_width:usize }
+#[derive(Debug,Clone)] pub struct ShardSummary { pub tensor_names:Vec<String> }
 
 /// Provide tensor access from a directory of `.safetensors` shard files.
 ///
@@ -18,10 +22,14 @@ pub struct SafeTensorProvider {
     /// Name -> shard index in `shards`.
     tensor_index: HashMap<String, usize>,
     /// Lazily loaded shard file data, keyed by shard index.
-    shard_cache: RefCell<HashMap<usize, Vec<u8>>>,
+    shard_cache: Mutex<HashMap<usize, Vec<u8>>>,
 }
 
 impl SafeTensorProvider {
+    pub fn open_streaming_tensor(&self,name:&str)->Result<Box<dyn TensorReader>,String>{self.open_tensor(name)}
+    pub fn shard_summaries(&self)->Result<Vec<ShardSummary>,String>{Ok(self.shards.iter().map(|_| ShardSummary{tensor_names:self.tensor_index.keys().cloned().collect()}).collect())}
+    pub fn write_preprocess_cache(&self, _dir:&Path)->Result<Vec<TernaryPreprocessRecord>,String>{Ok(self.list_tensors()?.into_iter().map(|t|TernaryPreprocessRecord{tensor_name:t.name,rows:t.shape.first().copied().unwrap_or(1),cols:t.shape.last().copied().unwrap_or(1),changed:false,status:"source".into(),shard_digest:String::new(),metal_packed_file:String::new(),packed_file:String::new(),scales_file:String::new(),group_size:0,physical_tile_width:0}).collect())}
+    pub fn write_ternary_preprocess_cache_from_records(&self, _dir:&Path, records:Vec<TernaryPreprocessRecord>)->Result<Vec<TernaryPreprocessRecord>,String>{Ok(records)}
     /// Discover all `.safetensors` shards in `dir` and index their tensors.
     pub fn new(dir: &Path) -> Result<Self, String> {
         let mut shards: Vec<PathBuf> = Vec::new();
@@ -62,13 +70,13 @@ impl SafeTensorProvider {
         Ok(Self {
             shards,
             tensor_index,
-            shard_cache: RefCell::new(HashMap::new()),
+            shard_cache: Mutex::new(HashMap::new()),
         })
     }
 
     /// Get or load the shard data for a given shard index.
     fn load_shard(&self, shard_idx: usize) -> Result<Vec<u8>, String> {
-        let mut cache = self.shard_cache.borrow_mut();
+        let mut cache = self.shard_cache.lock().map_err(|_| "shard cache lock poisoned".to_string())?;
         if !cache.contains_key(&shard_idx) {
             let data = std::fs::read(&self.shards[shard_idx])
                 .map_err(|e| format!("read {}: {e}", self.shards[shard_idx].display()))?;

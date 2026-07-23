@@ -18,13 +18,21 @@
 pub mod assembly;
 pub mod budget;
 pub mod compile_plan;
+pub mod chromosome;
 pub mod decompose;
 pub mod evaluate;
 pub mod foundation;
 pub mod frontier;
 pub mod joint;
+pub mod memory;
 pub mod mutation_table;
+pub mod objectives;
 pub mod sensitivity;
+pub mod variation;
+pub mod progressive;
+pub mod runtime;
+pub mod emitters;
+pub mod hierarchical;
 
 // Re-export everything from the sub-modules for backward compatibility.
 pub use budget::*;
@@ -34,5 +42,12 @@ pub use evaluate::*;
 pub use foundation::*;
 pub use frontier::*;
 pub use joint::*;
+pub use memory::*;
 pub use mutation_table::*;
+pub use objectives::*;
 pub use sensitivity::*;
+pub use variation::*;
+pub use progressive::*;
+pub use runtime::*;
+pub use emitters::*;
+pub use hierarchical::*;

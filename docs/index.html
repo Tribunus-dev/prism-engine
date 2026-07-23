@@ -19,11 +19,13 @@
   <link rel="stylesheet" href="scroll-reveal.css">
   <link rel="stylesheet" href="hero-chapters.css?v=537fc9e8">
   <link rel="stylesheet" href="apple-scroll.css?v=537fc9e8">
+  <link rel="stylesheet" href="computeimage-anatomy.css">
   <script src="signature-inspector.js" defer></script>
   <script src="tensor-journey.js" defer></script>
   <script src="scroll-state.js" defer></script>
   <script src="scroll-reveal.js" defer></script>
   <script src="apple-scroll.js?v=537fc9e8" defer></script>
+  <script src="computeimage-anatomy.js" defer></script>
 </head>
 <body class="apple-story">
   <header class="site-header">
@@ -57,6 +59,26 @@
       <div class="section-heading"><div><div class="eyebrow">01 / One working path</div><h2 id="working-path-title">From model<br><span>to receipt.</span></h2></div><p>Start with the smallest complete story: compile a local model, inspect the artifact, run it on the validated path, and keep the result attached to the work.</p></div>
       <div class="working-path-grid"><div class="path-stage"><span>01</span><b>Source</b><code>model.gguf</code></div><i aria-hidden="true">→</i><div class="path-stage"><span>02</span><b>Compile</b><code>prism compile</code></div><i aria-hidden="true">→</i><div class="path-stage"><span>03</span><b>Inspect</b><code>model.cimage</code></div><i aria-hidden="true">→</i><div class="path-stage"><span>04</span><b>Run</b><code>prism run</code></div><i aria-hidden="true">→</i><div class="path-stage path-stage-proof"><span>05</span><b>Receipt</b><code>evidence.json</code></div></div>
       <div class="working-path-note"><span class="tiny-label">DEMO BOUNDARY</span><p>Use the executable Apple Silicon demo for measured timings and receipts. This page does not present invented benchmark numbers.</p><a class="link" href="field-guide.html">Read the setup path ↗</a></div>
+    </section>
+
+    <section class="computeimage-anatomy" id="computeimage-anatomy" aria-labelledby="computeimage-anatomy-title">
+      <div class="computeimage-sticky shell">
+        <div class="section-heading"><div><div class="eyebrow">02 / ComputeImage anatomy</div><h2 id="computeimage-anatomy-title">The artifact<br><span>keeps the why.</span></h2></div><p>Scroll through the sealed object from identity to payload. The fields are illustrative; the contract is the point.</p></div>
+        <div class="computeimage-frame" role="img" aria-label="Illustrative ComputeImage anatomy: metadata, logical tensors, execution views, receipts, and payload progressively appear as the compiler seals the artifact.">
+          <div class="computeimage-chrome"><span><i></i><i></i><i></i></span><b>model.cimage</b><em>ILLUSTRATIVE ARTIFACT</em></div>
+          <div class="computeimage-body">
+            <div class="computeimage-spine" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="computeimage-layer layer-metadata" data-anatomy-layer="0"><span class="layer-index">01</span><div><b>Metadata</b><small>identity · schema · target contract</small></div><code>illustrative</code></div>
+            <div class="computeimage-layer layer-tensors" data-anatomy-layer="1"><span class="layer-index">02</span><div><b>Logical tensors</b><small>meaning · shape · precision policy</small></div><code>tensor map</code></div>
+            <div class="computeimage-layer layer-views" data-anatomy-layer="2"><span class="layer-index">03</span><div><b>Execution views</b><small>kernels · queues · residency</small></div><code>target views</code></div>
+            <div class="computeimage-layer layer-receipts" data-anatomy-layer="3"><span class="layer-index">04</span><div><b>Receipts</b><small>quality · legality · replay boundary</small></div><code>evidence</code></div>
+            <div class="computeimage-layer layer-payload" data-anatomy-layer="4"><span class="layer-index">05</span><div><b>Payload</b><small>tiles · metadata · packed bytes</small></div><code>.cimage</code></div>
+          </div>
+          <div class="computeimage-callout"><span class="tiny-label">CURRENT LAYER</span><strong data-anatomy-label>Metadata</strong><p data-anatomy-description>Identity and target contract are admitted first.</p></div>
+        </div>
+        <div class="computeimage-progress" aria-hidden="true"><span data-anatomy-progress></span></div>
+        <p class="computeimage-caption">No measured size, latency, or quality value is implied by this illustration.</p>
+      </div>
     </section>
 
     <section class="section shell" id="compiler" aria-labelledby="compiler-title">

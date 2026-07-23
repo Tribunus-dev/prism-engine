@@ -1140,7 +1140,7 @@ pub fn system_build_receipt(world: &mut World) -> Result<(), CompileError> {
 
     // Build forensic receipt digest.
     if !events.is_empty() {
-        let _ = build_forensic_receipt(&events, &mut receipt);
+        let _ = build_forensic_receipt(&events);
     }
 
     // Update session status to Complete.
@@ -1354,7 +1354,7 @@ impl CompilationOrchestrator {
             }
             CompilationStage::KernelGeneration => system_generate_kernels(&mut self.world),
             CompilationStage::CImageEmission => system_emit_cimage(&mut self.world),
-            CompilationStage::Certification => system_certify(&mut self.world),
+            CompilationStage::Certification | CompilationStage::Certify => system_certify(&mut self.world),
             CompilationStage::ReceiptBuild => system_build_receipt(&mut self.world),
         }
     }
@@ -1675,7 +1675,7 @@ mod tests {
         let tensors = vec![
             TensorDescriptor {
                 name: "embed_tokens.weight".into(),
-                shape: vec![32000, 4096],
+                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "float16".into(),
                 data_offset: Some(0),
@@ -1684,7 +1684,7 @@ mod tests {
             },
             TensorDescriptor {
                 name: "lm_head.weight".into(),
-                shape: vec![32000, 4096],
+                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 262_144_000, byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "float16".into(),
                 data_offset: Some(262_144_000),

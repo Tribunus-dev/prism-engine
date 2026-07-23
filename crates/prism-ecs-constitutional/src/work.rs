@@ -103,6 +103,11 @@ pub enum WorkState {
     Cancelled,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)] pub struct WorkInputPath(pub String);
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)] pub struct WorkOutputPath(pub String);
+impl Component for WorkInputPath {}
+impl Component for WorkOutputPath {}
+
 impl WorkState {
     /// Returns true if this is a terminal state (no further transitions allowed).
     pub fn is_terminal(&self) -> bool {

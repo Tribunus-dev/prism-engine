@@ -10,6 +10,7 @@
 use prism_ecs_core::{Entity, World};
 
 use crate::backend_dispatch::{dispatch_codegen, HalExecutable, HalFormat};
+use crate::ir_attrs::Attribute;
 use crate::ir_types::Type;
 use crate::op::{OpAttributes, OpMarker, OpName, Operands, Results};
 use crate::value::{Uses, ValueType};
@@ -95,13 +96,14 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
 
     let grid = extract_3d_u32(&attrs, "grid")?;
     let block = extract_3d_u32(&attrs, "block")?;
+    let program_name = attrs.0.iter().find_map(|a| if let Attribute::Dictionary(items) = a { items.iter().find_map(|(k,v)| if k == "program_name" { if let Attribute::String(s)=v { Some(s.clone()) } else { None } } else { None }) } else { None }).unwrap_or(op_name);
 
     // ── Build inputs from Operands ────────────────────────────────────────
     let operands = world
         .get_component::<Operands>(program_op)
         .ok_or_else(|| "program operation has no Operands".to_string())?;
 
-    let inputs: Vec<ProgramArg> = operands
+    let mut inputs: Vec<ProgramArg> = operands
         .0
         .iter()
         .enumerate()
@@ -109,6 +111,7 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
             arg_from_value_entity(world, val_entity, binding as u32, MemorySpace::Global)
         })
         .collect::<Result<Vec<_>, _>>()?;
+    for (arg, name) in inputs.iter_mut().zip(["A", "B", "C"]) { arg.name = name.into(); }
 
     // ── Build outputs from Results ────────────────────────────────────────
     let results = world
@@ -116,7 +119,7 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
         .ok_or_else(|| "program operation has no Results".to_string())?;
 
     let input_count = inputs.len() as u32;
-    let outputs: Vec<ProgramArg> = results
+    let mut outputs: Vec<ProgramArg> = results
         .0
         .iter()
         .enumerate()
@@ -129,11 +132,12 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
+    for (arg, name) in outputs.iter_mut().zip(["D"]) { arg.name = name.into(); }
 
     // ── Return the spec ───────────────────────────────────────────────────
 
     Ok(ProgramSpec {
-        name: op_name,
+        name: program_name,
         grid,
         block,
         inputs,
@@ -316,7 +320,7 @@ pub fn lower_program(
         .add_component(op_entity, Results(output_values.clone()))
         .map_err(|e| format!("failed to add Results: {e}"))?;
     world
-        .add_component(op_entity, OpAttributes(vec![grid_attr, block_attr]))
+        .add_component(op_entity, OpAttributes(vec![grid_attr, block_attr, Attribute::Dictionary(vec![("program_name".into(), Attribute::String(spec.name.clone()))])]))
         .map_err(|e| format!("failed to add OpAttributes: {e}"))?;
 
     // ── Delegate to the HAL codegen dispatch ──────────────────────────────

@@ -13,6 +13,7 @@ prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ane = { path = "../prism-ane", optional = true }
 regex = "1"
 prism-ecs-ir = { path = "../prism-ecs-ir" }
+prism-spatial-ir = { path = "../prism-spatial-ir" }
 safetensors = "0.5"
 memmap2 = "0.9"
 uuid = { version = "1", features = ["v4"] }
@@ -27,6 +28,7 @@ strum = { workspace = true }
 thiserror = "2"
 
 [features]
+gguf-compile = []
 ane = ["prism-ane/ane"]
 mlx-backend = []
 prism-backend = []

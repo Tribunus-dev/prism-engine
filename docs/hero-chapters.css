@@ -1,7 +1,7 @@
 /* Desktop chapters share one viewport stage. Mobile deliberately returns to flow. */
 @media (min-width:801px){
   body{overflow-x:hidden}
-  .scroll-chapter{position:sticky!important;top:0!important;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;max-height:100svh;display:flex;flex-direction:column;justify-content:center;overflow:hidden!important;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px)}
+  .scroll-chapter{position:sticky!important;top:0!important;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;max-height:100svh;display:flex;flex-direction:column;justify-content:center;overflow:visible!important;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px)}
   .scroll-chapter>.shell,.scroll-chapter>.section-heading,.scroll-chapter>.working-path-grid,.scroll-chapter>.working-path-note,.scroll-chapter>.lab-window,.scroll-chapter>.caption-row,.scroll-chapter>.journey-frame,.scroll-chapter>.signature-track,.scroll-chapter>.figure-link,.scroll-chapter>.reality-bands{width:min(1160px,calc(100% - 48px));margin-left:auto;margin-right:auto}
   .scroll-chapter .section-heading{width:min(1160px,calc(100% - 48px));margin-bottom:clamp(18px,3vh,34px)}
   .scroll-chapter .section-heading h2{font-size:clamp(32px,4.1vw,58px)}
@@ -14,8 +14,6 @@
   .scroll-chapter#compiler .caption-row{margin-top:12px}
   .scroll-chapter#architecture{background:var(--deep);isolation:isolate}
   .scroll-chapter#status{background:var(--paper);isolation:isolate}
-  .scroll-chapter.is-chapter-active .section-heading,.scroll-chapter.is-chapter-active .working-path-grid,.scroll-chapter.is-chapter-active .working-path-note,.scroll-chapter.is-chapter-active .lab-window,.scroll-chapter.is-chapter-active .caption-row,.scroll-chapter.is-chapter-active .signature-track,.scroll-chapter.is-chapter-active .figure-link,.scroll-chapter.is-chapter-active .reality-bands{animation:chapter-arrive .65s cubic-bezier(.22,1,.36,1) both}
-  @keyframes chapter-arrive{from{opacity:.35;transform:translateY(18px) scale(.99)}to{opacity:1;transform:none}}
 }
 @media(max-width:800px){.scroll-chapter{position:relative;top:auto;z-index:auto;min-height:0;height:auto;display:block;overflow:visible;padding-top:80px;padding-bottom:80px}}
 @media(prefers-reduced-motion:reduce){.scroll-chapter.is-chapter-active>*{animation:none!important}}

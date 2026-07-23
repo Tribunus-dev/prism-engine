@@ -1,6 +1,7 @@
 //! prism-mcp-core: shared framework for the prism-mcpd multi-tool MCP daemon.
 
 pub mod artifact;
+pub mod db;
 pub mod coordination;
 pub mod evidence;
 pub mod file_lock;
@@ -19,6 +20,7 @@ pub mod subprocess;
 pub mod work_journal;
 
 pub use artifact::{ArtifactId, ArtifactKind, ArtifactRecord};
+pub use db::DbManager;
 pub use coordination::{
     ClaimResult, CoordinationEvent, CoordinationSession, CoordinationStore, LockResult, PathLock,
     WorkItem,

@@ -14,6 +14,8 @@ fxhash = "0.2"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 rand = { workspace = true }
+sha2 = "0.10"
 
 [features]
 default = []
+gguf-compile = []

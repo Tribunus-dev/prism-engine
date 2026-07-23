@@ -43,6 +43,9 @@ pub struct LaneRouter {
     receipts: Mutex<HashMap<DispatchId, LaneExecutionReceipt>>,
 }
 
+pub struct LaneCapabilities { pub coreml_ane: bool, pub metal: bool, pub accelerate: bool }
+impl LaneCapabilities { pub fn host() -> Self { Self { coreml_ane: false, metal: false, accelerate: true } } }
+
 impl LaneRouter {
     /// Create a new, empty lane router with no cached receipts.
     pub fn new() -> Self {

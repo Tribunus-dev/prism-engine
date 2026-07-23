@@ -76,6 +76,7 @@ impl MeasuredEvaluator {
             RepresentationAxis::Nf8 => "NF8",
             RepresentationAxis::Ternary158 => "Ternary158",
             RepresentationAxis::Binary1 => "Binary1",
+            RepresentationAxis::TernaryTile640 => "TernaryTile640",
         }
     }
 

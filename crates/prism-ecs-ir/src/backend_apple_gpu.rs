@@ -9,7 +9,7 @@
 use prism_ecs_core::{Entity, World};
 
 use crate::backend_dispatch::HalFormat;
-use crate::evolution::{get_assigned_format, resolve_matmul_tile, TensorFormat};
+use crate::evolution::{get_assigned_format, resolve_matmul_tile, TensorFormat, CompilePlanRef, FormatAssignment};
 use crate::ir_types::{FloatKind, Signedness, TensorType, Type};
 use crate::op::{op_name, operands};
 use crate::value::ValueType;
@@ -101,7 +101,7 @@ fn emit_matmul_kernel(
     tile_k: u64,
     metal_type: &str,
 ) -> String {
-    let has_tiles = tile_m != m || tile_n != n || tile_k != k;
+    let has_tiles = (tile_m, tile_n, tile_k) != (64, 64, 32);
     let kernel_name = if has_tiles {
         format!("matmul_{}x{}_tile_{}x{}x{}", m, n, tile_m, tile_k, tile_n)
     } else {
@@ -143,7 +143,7 @@ fn emit_batch_matmul_kernel(
     tile_k: u64,
     metal_type: &str,
 ) -> String {
-    let has_tiles = tile_m != m || tile_n != n || tile_k != k;
+    let has_tiles = (tile_m, tile_n, tile_k) != (64, 64, 32);
     let kernel_name = if has_tiles {
         format!("batch_matmul_{}x{}x{}_tile_{}x{}x{}", m, n, batch, tile_m, tile_k, tile_n)
     } else {
@@ -190,7 +190,7 @@ fn emit_ternary_matmul_kernel(
     tile_n: u64,
     tile_k: u64,
 ) -> String {
-    let has_tiles = tile_m != m || tile_n != n || tile_k != k;
+    let has_tiles = (tile_m, tile_n, tile_k) != (64, 64, 32);
     let kernel_name = if has_tiles {
         format!("ternary_matmul_{}x{}_tile_{}x{}x{}", m, n, tile_m, tile_k, tile_n)
     } else {
@@ -238,7 +238,7 @@ fn emit_binary_matmul_kernel(
     tile_n: u64,
     tile_k: u64,
 ) -> String {
-    let has_tiles = tile_m != m || tile_n != n || tile_k != k;
+    let has_tiles = (tile_m, tile_n, tile_k) != (64, 64, 32);
     let kernel_name = if has_tiles {
         format!("binary_matmul_{}x{}_tile_{}x{}x{}", m, n, tile_m, tile_k, tile_n)
     } else {
@@ -347,7 +347,10 @@ pub fn lower_matmul_to_metal(world: &World, matmul_op: Entity) -> Result<String,
     let assigned_b = get_assigned_format(world, b);
 
     // Prefer the weight operand (B) for format selection; fall back to A.
-    let fmt = assigned_b.or(assigned_a).map(|(fmt, _op)| fmt);
+    let fmt = assigned_b.or(assigned_a).map(|(fmt, _op)| fmt).or_else(|| {
+        world.get_component::<CompilePlanRef>(matmul_op)
+            .and_then(|r| world.get_component::<FormatAssignment>(r.0).map(|f| f.0))
+    });
 
     let (tile_m, tile_n, tile_k) =
         resolve_matmul_tile(world, matmul_op, m as u32, n as u32, k_a as u32);

@@ -149,7 +149,7 @@ fn validate_manifest_hardware(manifest: &MultiModelManifest, model_id: &str) -> 
     for model in manifest.models.values() {
         model
             .requirements
-            .validate_against(available)
+            .validate_against(available.clone())
             .map_err(|error| format!("model {model_id}/{}: {error}", model.id))?;
     }
     Ok(())

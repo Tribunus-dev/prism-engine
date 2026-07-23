@@ -76,6 +76,7 @@ impl EvaluationStrategy for SyntheticEvaluator {
             crate::evolution::foundation::RepresentationAxis::Nf4 => 4.0,
             crate::evolution::foundation::RepresentationAxis::Nf8 => 8.0,
             crate::evolution::foundation::RepresentationAxis::Ternary158 => 2.0,
+            crate::evolution::foundation::RepresentationAxis::TernaryTile640 => 2.0,
             crate::evolution::foundation::RepresentationAxis::Binary1 => 1.0,
         };
 

@@ -37,13 +37,5 @@ full-compiler = ["dep:prism-ecs-compile"]
 server-integration = ["prism-ecs-server/server"]
 trifecta = []
 
-[[test]]
-name = "component_event_test"
-path = "tests/component_event_test.rs"
-
-[[test]]
-name = "runtime_unification_test"
-path = "tests/runtime_unification_test.rs"
-
 [lib]
 name = "prism_ecs_daemon"

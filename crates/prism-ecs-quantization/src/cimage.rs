@@ -30,8 +30,11 @@ const MAGIC: &[u8; 8] = b"TRB_CIMG";
 
 // ── Header types ────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum TensorType {
+    Bf16,
+    Int8,
+    Nf8,
     StandardFP16,
     Palettized4Bit,
     Blob,
@@ -43,6 +46,7 @@ pub enum TensorType {
     NF4,
     /// Int4 — symmetric 4-bit quantization with per-group scale.
     Int4,
+    TernaryTile640,
     /// FP8 — 8-bit floating point.
     FP8,
 }
@@ -60,6 +64,14 @@ pub struct TensorRecord {
     pub dim_n: u32,
 }
 
+impl TensorRecord {
+    pub fn ternary_tile640_layout(&self) -> Result<(usize, usize, usize, usize), String> {
+        let elements = (self.dim_m as usize).checked_mul(self.dim_n as usize).ok_or("tensor dimensions overflow")?;
+        let pages = elements.div_ceil(640);
+        Ok((elements.div_ceil(4), pages * 2, elements.div_ceil(16) * 2, pages))
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default)]
 pub struct CImageHeader {
     pub tensors: HashMap<String, TensorRecord>,
@@ -67,6 +79,8 @@ pub struct CImageHeader {
     /// Contains per-layer OperationRoute assignments and ANE fused islands.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_plan: Option<String>,
+    #[serde(default)]
+    pub kernels: HashMap<String, TensorRecord>,
 }
 
 // ── Writer ──────────────────────────────────────────────────────────────
@@ -243,6 +257,7 @@ pub struct CImageReader {
 }
 
 impl CImageReader {
+    pub fn load_kernel(&self, _name: &str) -> Result<Vec<u8>, String> { Err("embedded kernels are not present in this cimage format".into()) }
     /// Open a .cimage file and parse the header.
     pub fn open(path: &Path) -> Result<Self, String> {
         use std::io::Read;
