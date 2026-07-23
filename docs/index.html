@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Prism Engine is a local-first compiler and runtime for inspectable AI execution on Apple Silicon and beyond.">
+  <meta name="description" content="Prism Engine is an ECS-native compiler and runtime for inspectable, heterogeneous AI execution across CPU, GPU, and NPU targets.">
   <title>Prism Engine — Local AI, compiled with evidence</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="dark-mode.css">
@@ -15,7 +15,8 @@
 <body>
   <header class="site-header">
     <a class="brand" href="#top" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
-    <nav aria-label="Primary navigation"><a href="#compiler">Compiler Lab</a><a href="#compilation-process">Process</a><a href="#architecture">Architecture</a><a href="architecture.html">Architecture Guide</a><a href="heterogeneous.html">Heterogeneous</a><a href="general-compute.html">General Compute</a><a href="prism-ml.html">Prism ML</a><a href="roadmap.html">Roadmap</a><a href="#status">Status</a><a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">View on GitHub <span>↗</span></a></nav>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span class="menu-label">Menu</span></button>
+    <nav id="primary-navigation" aria-label="Primary navigation"><a href="#how-it-works">How it works</a><a href="#compiler">Compiler Lab</a><a href="#compilation-process">Process</a><a href="#architecture">Architecture</a><a href="architecture.html">Architecture Guide</a><a href="heterogeneous.html">Heterogeneous</a><a href="general-compute.html">General Compute</a><a href="prism-ml.html">Prism ML</a><a href="roadmap.html">Roadmap</a><a href="#status">Status</a><a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">View on GitHub <span>↗</span></a></nav>
   </header>
 
   <main id="top">
@@ -23,29 +24,60 @@
       <div class="hero-copy">
         <div class="eyebrow"><span class="pulse"></span> Local-first AI infrastructure</div>
         <h1>Compile intelligence<br><span>into something you can inspect.</span></h1>
-        <p class="hero-lede">Prism Engine turns model weights into compact, measurable compute images and runs them close to the hardware. Every placement, artifact, and outcome has a trail.</p>
+        <p class="hero-lede">Prism Engine turns model weights into compact, measurable CImages and routes them across heterogeneous CPU, GPU, and NPU resources. Every representation, placement, artifact, and outcome has a trail.</p>
         <div class="hero-actions"><a class="button primary" href="https://github.com/Tribunus-dev/prism-engine#quick-start">Get started <span>→</span></a><a class="button quiet" href="#compiler">Explore the Compiler Lab <span>↓</span></a></div>
-        <div class="hero-meta"><span><b>AGPLv3</b> open source</span><span><b>Heterogeneous</b> by design</span><span><b>Pre-1.0</b> systems software</span></div>
+      <div class="hero-meta"><span><b>AGPLv3</b> open source</span><span><b>Heterogeneous</b> by design</span><span><b>Pre-1.0</b> systems software</span></div>
       </div>
-      <div class="hero-visual" aria-label="Abstract Prism Engine execution diagram">
+      <div class="hero-visual" role="img" aria-label="Abstract Prism Engine execution diagram: an ECS-native compiler searches representations and routes work across CPU, GPU, and NPU targets into a validated CImage.">
         <div class="visual-grid"></div><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="beam beam-a"></div><div class="beam beam-b"></div>
         <div class="visual-card card-top"><span class="tiny-label">ACTIVE ARTIFACT</span><strong>phi-4-mini.cimage</strong><span class="status-dot">Verified · 1.8 GB</span></div>
-        <div class="visual-card card-bottom"><span class="tiny-label">EXECUTION ROUTE</span><strong>Metal / unified memory</strong><span class="status-dot">Evidence recorded</span></div>
-        <div class="center-label"><span>PRISM</span><b>compile<br>→ execute</b></div>
+        <div class="visual-card card-bottom"><span class="tiny-label">EXECUTION ROUTE</span><strong>CPU · GPU · NPU</strong><span class="status-dot">Evidence recorded</span></div>
+        <div class="center-label"><span>PRISM / ECS</span><b>compile<br>→ route → prove</b></div>
       </div>
     </section>
 
     <section class="signal-bar"><div class="shell signal-inner"><span>Built for people who need to know what ran.</span><span class="signal-line"></span><span>Models · artifacts · hardware · evidence</span></div></section>
 
+    <section class="section explainer-section shell" id="how-it-works" aria-labelledby="how-it-works-title">
+      <div class="section-heading"><div><div class="eyebrow">01 / How it works</div><h2 id="how-it-works-title">From model<br><span>to proof.</span></h2></div><p>Start with the shortest useful path. Prism turns a model into a target-aware artifact, runs it locally, and keeps the evidence attached to each decision.</p></div>
+      <div class="explainer-track" role="list">
+        <article class="explainer-step" role="listitem"><div class="explainer-index">01</div><div class="explainer-icon">↓</div><span class="tiny-label">SOURCE</span><h3>Bring a model</h3><p>Load weights and tokenizer metadata without sending them to a cloud service.</p><span class="explainer-output">model + identity</span></article>
+        <div class="explainer-connector" aria-hidden="true">→</div>
+        <article class="explainer-step" role="listitem"><div class="explainer-index">02</div><div class="explainer-icon">◌</div><span class="tiny-label">REPRESENT</span><h3>Find a fit</h3><p>Search progressive quantization, ternarization, mixed precision, layout, and memory candidates against quality constraints.</p><span class="explainer-output">candidate frontier</span></article>
+        <div class="explainer-connector" aria-hidden="true">→</div>
+        <article class="explainer-step" role="listitem"><div class="explainer-index">03</div><div class="explainer-icon">▣</div><span class="tiny-label">REALIZE</span><h3>Seal the artifact</h3><p>Freeze mixed-precision tensors, ternary candidates, kernel routes, KV policy, and runtime state into a CImage.</p><span class="explainer-output">validated CImage</span></article>
+        <div class="explainer-connector" aria-hidden="true">→</div>
+        <article class="explainer-step" role="listitem"><div class="explainer-index">04</div><div class="explainer-icon">✓</div><span class="tiny-label">RUN</span><h3>Route and prove</h3><p>Schedule CPU, GPU, and NPU work, search or compress KV cache, then inspect receipts and honest validation boundaries.</p><span class="explainer-output">evidence trail</span></article>
+      </div>
+      <div class="explainer-cta"><span>New here? Read the path first.</span><a class="link" href="architecture.html">Open the architecture guide ↗</a></div>
+    </section>
+
+    <section class="section shell journey-guide" id="start-here" aria-labelledby="journey-guide-title">
+      <div class="section-heading"><div><div class="eyebrow">00 / Start here</div><h2 id="journey-guide-title">Choose the route<br><span>that fits your question.</span></h2></div><p>The site serves three different jobs. Start with the outcome you want, then follow the shortest path to the right level of detail.</p></div>
+      <div class="journey-guide-grid">
+        <a class="journey-guide-card journey-guide-card-primary" href="#compiler">
+          <span class="journey-guide-number">01</span><span class="tiny-label">I WANT TO SEE IT WORK</span><h3>Explore the Compiler Lab</h3><p>Watch a model move from source weights to a measurable execution artifact.</p><span class="journey-guide-path">Home → Compiler Lab <b>↗</b></span>
+        </a>
+        <a class="journey-guide-card" href="architecture.html">
+          <span class="journey-guide-number">02</span><span class="tiny-label">I NEED THE MODEL</span><h3>Read the Architecture Guide</h3><p>Understand the compiler, ComputeImage, runtime, evidence, and current boundary.</p><span class="journey-guide-path">Home → Architecture <b>↗</b></span>
+        </a>
+        <a class="journey-guide-card" href="heterogeneous.html">
+          <span class="journey-guide-number">03</span><span class="tiny-label">I AM EVALUATING TARGETS</span><h3>Open Heterogeneous First</h3><p>Trace how one workload becomes different physical plans across machines.</p><span class="journey-guide-path">Home → Heterogeneous <b>↗</b></span>
+        </a>
+      </div>
+      <div class="journey-guide-footer"><span class="tiny-label">SHARED DESTINATION</span><strong>Every route ends at an inspectable, evidence-bearing deployment.</strong><a href="roadmap.html">See what is real today <b>↗</b></a></div>
+    </section>
+
     <section class="section shell" id="compiler">
       <div class="section-heading"><div><div class="eyebrow">01 / Compiler Lab</div><h2>See the work<br>behind the answer.</h2></div><p>Compilation is not a loading spinner. Prism exposes the path from source weights to an executable artifact, then lets researchers inspect the decisions that shaped it.</p></div>
-      <div class="lab-window">
+      <div class="lab-window" aria-describedby="compiler-lab-summary">
         <div class="window-chrome"><span class="window-dots"><i></i><i></i><i></i></span><span>prism / compiler-lab</span><span class="window-live"><i></i> LIVE</span></div>
         <div class="lab-body">
           <aside class="lab-sidebar"><span class="tiny-label">PIPELINE</span><div class="lab-step done"><b>01</b><span>Ingest</span><i>✓</i></div><div class="lab-step done"><b>02</b><span>Graph lowering</span><i>✓</i></div><div class="lab-step active"><b>03</b><span>Evolution search</span><i>•</i></div><div class="lab-step"><b>04</b><span>Compile image</span><i>—</i></div><div class="lab-step"><b>05</b><span>Verify & publish</span><i>—</i></div><div class="lab-foot"><span class="tiny-label">ARTIFACT</span><strong>phi-4-mini</strong><span>Target · Apple M-series</span></div></aside>
           <div class="lab-main"><div class="lab-title"><div><span class="tiny-label">EVOLUTION SEARCH</span><h3>Finding a better execution plan</h3></div><span class="lab-percent">67%</span></div><div class="progress-track"><span></span></div><div class="metrics"><div><span>Generation</span><b>08 <small>/ 12</small></b></div><div><span>Population</span><b>24</b></div><div><span>Best fitness</span><b>0.942</b></div><div><span>Frontier</span><b>06 <small>candidates</small></b></div></div><div class="chart"><span class="chart-y">fitness</span><div class="chart-lines"><i></i><i></i><i></i><svg viewBox="0 0 620 160" preserveAspectRatio="none" aria-label="Fitness convergence chart"><polyline points="0,141 46,130 88,133 130,111 175,119 220,91 265,101 310,76 354,80 400,59 444,66 488,41 530,45 575,27 620,21" /></svg></div><div class="chart-x"><span>01</span><span>04</span><span>08</span><span>12</span></div></div><div class="candidate-title"><span class="tiny-label">CURRENT CANDIDATES</span><span>sorted by measured fitness</span></div><div class="candidates"><div><b>#01</b><span>Int4 · Tile640 · fused</span><strong>0.942</strong></div><div><b>#02</b><span>NF4 · Tile640 · fused</span><strong>0.918</strong></div><div><b>#03</b><span>Int8 · Tile320 · split</span><strong>0.887</strong></div></div></div>
         </div>
       </div>
+      <p id="compiler-lab-summary" class="visually-hidden">Illustrated compiler status: an ECS-native compile plan is at 67 percent of progressive representation search, with generation 8 of 12 complete, 24 candidates, best fitness 0.942, and six frontier candidates. Candidates include mixed precision and ternary representations; the selected CImage is still gated by backend and runtime validation.</p>
       <div class="caption-row"><span>Compiler events stream from the local daemon into the native SwiftUI and web surfaces.</span><a href="https://github.com/Tribunus-dev/prism-engine/tree/main/PrismAgent">Read the desktop UI ↗</a></div>
     </section>
 
@@ -65,7 +97,7 @@
       </div>
     </section>
     <section class="compilation-process shell" id="compilation-process" aria-labelledby="compilation-title">
-      <div class="section-heading process-heading"><div><div class="eyebrow">05 / Compilation process</div><h2 id="compilation-title">Every decision<br><span>earns its place.</span></h2></div><p>Prism compiles a model as a sequence of measured decisions. At every stage, evolutionary search generates candidates, scores them against the reference, and promotes only the survivors.</p></div>
+      <div class="section-heading process-heading"><div><div class="eyebrow">06 / Compilation process</div><h2 id="compilation-title">Every decision<br><span>earns its place.</span></h2></div><p>Prism compiles a model as a sequence of measured decisions. At every stage, evolutionary search generates candidates, scores them against the reference, and promotes only the survivors.</p></div>
       <div class="process-track" role="list">
         <article class="process-step" role="listitem"><div class="step-index">01</div><div class="step-copy"><span class="tiny-label">INGEST</span><h3>Understand the source</h3><p>Weights, tokenizer, graph, and quality contract become an inspectable model identity.</p></div><div class="evolution-field" aria-label="Ingest candidate search"><i></i><i></i><i></i><b>identity</b><span>→</span><strong>admitted</strong></div></article>
         <article class="process-step" role="listitem"><div class="step-index">02</div><div class="step-copy"><span class="tiny-label">LOWER</span><h3>Expose the work</h3><p>Operators become target-neutral execution plans with explicit shapes, dependencies, and boundaries.</p></div><div class="evolution-field" aria-label="Lowering candidate search"><i></i><i></i><i></i><b>graph</b><span>→</span><strong>plan</strong></div></article>
@@ -76,6 +108,6 @@
       </div>
     </section>
   </main>
-  <footer class="site-footer shell"><span>© 2026 Tribunus · Prism Engine</span><span>AGPLv3 or <a href="mailto:julian@tribunus.dev">commercial license</a></span><a href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a></footer>
+  <footer class="site-footer shell"><span>© 2026 Tribunus · Prism Engine</span><span>AGPLv3 · commercial dual licensing</span><a href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a></footer>
 </body>
 </html>
