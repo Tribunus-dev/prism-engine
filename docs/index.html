@@ -23,8 +23,8 @@
     <section class="hero shell">
       <div class="hero-copy">
         <div class="eyebrow"><span class="pulse"></span> Local-first AI infrastructure</div>
-        <h1>Compile intelligence<br><span>into something you can inspect.</span></h1>
-        <p class="hero-lede">Prism Engine turns model weights into compact, measurable CImages and routes them across heterogeneous CPU, GPU, and NPU resources. Every representation, placement, artifact, and outcome has a trail.</p>
+        <h1>Compiler-first<br><span>deployment for local AI.</span></h1>
+        <p class="hero-lede">Prism Engine compiles GGUF and SafeTensors into executable CImages optimized for heterogeneous CPU, GPU, and NPU hardware. It is different because every representation, placement, artifact, and outcome remains inspectable.</p>
         <div class="hero-actions"><a class="button primary" href="https://github.com/Tribunus-dev/prism-engine#quick-start">Get started <span>→</span></a><a class="button quiet" href="#compiler">Explore the Compiler Lab <span>↓</span></a></div>
       <div class="hero-meta"><span><b>AGPLv3</b> + commercial dual license</span><span><b>CPU · GPU · NPU</b> heterogeneous by design</span><span><b>Pre-1.0</b> systems software</span></div>
       </div>
@@ -33,6 +33,15 @@
         <div class="visual-card card-top"><span class="tiny-label">ACTIVE ARTIFACT</span><strong>phi-4-mini.cimage</strong><span class="status-dot">Verified · 1.8 GB</span></div>
         <div class="visual-card card-bottom"><span class="tiny-label">EXECUTION ROUTE</span><strong>CPU · GPU · NPU</strong><span class="status-dot">Evidence recorded</span></div>
         <div class="center-label"><span>PRISM / ECS</span><b>compile<br>→ route → prove</b></div>
+        <div class="hero-flow" aria-label="Prism deployment flow: GGUF or SafeTensors becomes a compiled artifact and runs through the runtime.">
+          <span class="hero-flow-node">GGUF<br><small>or SafeTensors</small></span>
+          <span class="hero-flow-arrow" aria-hidden="true">↓</span>
+          <span class="hero-flow-node">Compiler</span>
+          <span class="hero-flow-arrow" aria-hidden="true">↓</span>
+          <span class="hero-flow-node hero-flow-accent">ComputeImage</span>
+          <span class="hero-flow-arrow" aria-hidden="true">↓</span>
+          <span class="hero-flow-node">Runtime</span>
+        </div>
       </div>
     </section>
 

@@ -3,11 +3,66 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=architecture.html">
-  <link rel="canonical" href="https://prism-engine.tribunus.dev/architecture.html">
-  <title>Prism Engine · Field Guide</title>
+  <meta name="description" content="Prism Engine documentation onboarding: compiler-first deployment for local, heterogeneous AI.">
+  <title>Prism Engine · Start Here</title>
+  <link rel="stylesheet" href="site.css">
+  <link rel="stylesheet" href="field-guide.css">
 </head>
 <body>
-  <p>Opening the <a href="architecture.html">Prism Engine Field Guide</a>…</p>
+  <header class="nav">
+    <a href="index.html" class="wordmark"><b>◢</b> PRISM ENGINE</a>
+    <nav aria-label="Primary navigation">
+      <a href="index.html">Home</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="heterogeneous.html">Heterogeneous first</a>
+      <a href="prism-ml.html">Prism ML</a>
+      <a href="roadmap.html">Roadmap</a>
+      <a href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="guide-hero">
+      <div>
+        <p class="kicker">DOCUMENTATION / START HERE</p>
+        <h1>Understand the system<br><em>before the details.</em></h1>
+        <p class="lede">Prism is an ECS-native compiler and runtime for local, heterogeneous AI deployment. This reading path moves from motivation to architecture, artifact contracts, intermediate representation, and source.</p>
+      </div>
+      <div class="guide-flow" aria-label="Prism deployment path">
+        <div><span>01</span><b>MODEL</b><small>GGUF / SafeTensors</small></div>
+        <i aria-hidden="true">↓</i>
+        <div><span>02</span><b>COMPILER</b><small>search · plan · validate</small></div>
+        <i aria-hidden="true">↓</i>
+        <div><span>03</span><b>COMPUTEIMAGE</b><small>weights · views · evidence</small></div>
+        <i aria-hidden="true">↓</i>
+        <div><span>04</span><b>RUNTIME</b><small>CPU · GPU · NPU</small></div>
+      </div>
+    </section>
+
+    <section class="guide-section" aria-labelledby="start-here-title">
+      <div class="section-label"><span>01</span><span>THE READING PATH</span></div>
+      <div>
+        <h2 id="start-here-title">Start here.</h2>
+        <p class="section-intro">Choose the shortest route to the context you need. The documents use the same vocabulary: compile-time architecture, numerical admission, target-aware planning, and inspectable deployment artifacts.</p>
+        <div class="reading-grid">
+          <a class="reading-card featured" href="prism-bonsai-technical-brief.md"><span class="card-index">01 / 15 MIN</span><h3>Technical Brief</h3><p>Why Prism exists, how it complements Bonsai, and the compiler/runtime boundary in one narrative.</p><strong>Read the brief ↗</strong></a>
+          <a class="reading-card" href="architecture.html"><span class="card-index">02 / 10 MIN</span><h3>Architecture Overview</h3><p>Follow one tensor from logical identity through representation search, physical planning, ComputeImage sealing, and runtime execution.</p><strong>Open the architecture ↗</strong></a>
+          <a class="reading-card" href="cimage-layout-abi-v1.md"><span class="card-index">03 / CONTRACT</span><h3>ComputeImage ABI</h3><p>Inspect the artifact boundary: logical tensors, physical tile layouts, execution views, payloads, plans, and receipts.</p><strong>Read the ABI ↗</strong></a>
+          <a class="reading-card" href="prism-bonsai-technical-brief.md#execution-semantics-before-physical-backend-lowering"><span class="card-index">04 / COMPILER IR</span><h3>PrismIR</h3><p>See how semantic execution intent stays separate from target-specific lowering and heterogeneous physical planning.</p><strong>Read about PrismIR ↗</strong></a>
+          <a class="reading-card" href="https://github.com/Tribunus-dev/prism-engine"><span class="card-index">05 / SOURCE</span><h3>Repository</h3><p>Explore the Rust ECS compiler/runtime, target backends, validation paths, tests, and current implementation boundary.</p><strong>Open GitHub ↗</strong></a>
+        </div>
+      </div>
+    </section>
+
+    <section class="guide-section guide-next" aria-labelledby="next-title">
+      <div class="section-label"><span>02</span><span>AFTER THE FIRST PASS</span></div>
+      <div>
+        <h2 id="next-title">Then inspect the edges.</h2>
+        <div class="next-links"><a href="heterogeneous.html"><b>Heterogeneous targets</b><span>CPU, Metal, ROCm/HIP, and XDNA/XDNA2 planning ↗</span></a><a href="prism-ml.html"><b>Prism ML</b><span>Model-facing workflows and numerical quality ↗</span></a><a href="roadmap.html"><b>Roadmap and boundary</b><span>What is validated, compile-verified, and still gated ↗</span></a></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><span>PRISM ENGINE / DOCUMENTATION</span><span>AGPLv3 or commercial license · <a href="mailto:julian@tribunus.dev">julian@tribunus.dev</a></span></footer>
 </body>
 </html>
