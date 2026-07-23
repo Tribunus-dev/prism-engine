@@ -9,3 +9,6 @@
 .computeimage-callout{position:absolute;right:5%;top:28%;width:25%;padding:20px;border-left:1px solid #86bd73;background:#16251d}.computeimage-callout .tiny-label{color:#9eb9a9}.computeimage-callout strong{display:block;margin:10px 0 7px;color:#dff7d0;font-size:19px}.computeimage-callout p{margin:0;color:#a8bbb0;font-size:12px;line-height:1.65}.computeimage-progress{height:3px;background:#2b4536;margin-top:15px}.computeimage-progress span{display:block;width:0;height:100%;background:var(--lime);transform-origin:left}.computeimage-caption{margin:12px 0 0;color:#8fa699;font:10px var(--mono)}
 @media(max-width:800px){.computeimage-anatomy{min-height:190vh}.computeimage-sticky{padding-top:65px}.computeimage-frame{min-height:510px}.computeimage-body{padding:23px 18px 23px 10%;}.computeimage-callout{position:relative;right:auto;top:auto;width:auto;margin:0 18px 20px}.computeimage-chrome em{display:none}}
 @media(prefers-reduced-motion:reduce){.computeimage-anatomy{min-height:0}.computeimage-sticky{position:relative}.computeimage-layer{opacity:1;transform:none;transition:none}.computeimage-progress span{width:100%}}
+
+/* Scroll advances the artifact state in place; layers do not travel. */
+.computeimage-layer{transform:none!important}
