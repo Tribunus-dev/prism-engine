@@ -1,15 +1,16 @@
 /* Desktop chapters share one viewport stage. Mobile deliberately returns to flow. */
 @media (min-width:801px){
   body{overflow-x:hidden}
-  .scroll-chapter{position:sticky;top:0;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;display:flex;flex-direction:column;justify-content:center;overflow:visible;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px)}
+  .scroll-chapter{position:sticky!important;top:0!important;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;max-height:100svh;display:flex;flex-direction:column;justify-content:center;overflow:hidden!important;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px)}
   .scroll-chapter>.shell,.scroll-chapter>.section-heading,.scroll-chapter>.working-path-grid,.scroll-chapter>.working-path-note,.scroll-chapter>.lab-window,.scroll-chapter>.caption-row,.scroll-chapter>.journey-frame,.scroll-chapter>.signature-track,.scroll-chapter>.figure-link,.scroll-chapter>.reality-bands{width:min(1160px,calc(100% - 48px));margin-left:auto;margin-right:auto}
   .scroll-chapter .section-heading{width:min(1160px,calc(100% - 48px));margin-bottom:clamp(18px,3vh,34px)}
   .scroll-chapter .section-heading h2{font-size:clamp(32px,4.1vw,58px)}
   .scroll-chapter .section-heading>p{padding-top:10px}
-  .scroll-chapter .working-path-grid{margin-top:0}
+  .scroll-chapter .working-path-grid{margin-top:0;flex:0 0 auto}
   .scroll-chapter .working-path-note{margin-top:14px}
-  .scroll-chapter#compiler .lab-window{max-height:57svh}
+  .scroll-chapter#compiler .lab-window{max-height:57svh;overflow:hidden;flex:0 0 auto}
   .scroll-chapter#compiler .lab-body{min-height:0;height:39svh}
+  .scroll-chapter .journey-frame,.scroll-chapter .signature-track,.scroll-chapter .reality-bands{flex:0 0 auto;overflow:hidden}
   .scroll-chapter#compiler .caption-row{margin-top:12px}
   .scroll-chapter#architecture{background:var(--deep);isolation:isolate}
   .scroll-chapter#status{background:var(--paper);isolation:isolate}
