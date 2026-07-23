@@ -1,6 +1,8 @@
 (() => {
   const svg = document.querySelector('.journey-svg');
   if (!svg) return;
+  svg.setAttribute('role', 'group');
+  svg.setAttribute('aria-roledescription', 'interactive tensor journey');
   const token = svg.querySelector('.tensor-token');
   const stations = [...svg.querySelectorAll('.journey-station')];
   const stage = document.querySelector('#journey-stage');

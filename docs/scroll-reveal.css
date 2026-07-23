@@ -1,1 +1,47 @@
-[data-scroll-reveal]{opacity:0;transform:translateY(28px);transition:opacity .7s ease,transform .7s cubic-bezier(.22,1,.36,1);transition-delay:var(--reveal-delay,0ms)}[data-scroll-reveal].is-visible{opacity:1;transform:none}.working-path-grid>i[data-scroll-reveal],.signature-track>i[data-scroll-reveal]{transform:scaleX(0);transform-origin:left}.working-path-grid>i[data-scroll-reveal].is-visible,.signature-track>i[data-scroll-reveal].is-visible{transform:scaleX(1)}.journey-frame[data-scroll-reveal]{transform:translateY(34px) scale(.985)}.journey-frame[data-scroll-reveal].is-visible{transform:none}.compiler-graph[data-scroll-reveal]{transform:translateY(24px) scale(.98)}.compiler-graph[data-scroll-reveal].is-visible{transform:none}.scroll-state-rail{opacity:0;transition:opacity .4s ease}.scroll-state-rail.is-visible{opacity:1}@media(prefers-reduced-motion:reduce){[data-scroll-reveal],.working-path-grid>i[data-scroll-reveal],.signature-track>i[data-scroll-reveal],.journey-frame[data-scroll-reveal],.compiler-graph[data-scroll-reveal],.scroll-state-rail{opacity:1;transform:none;transition:none}}
+/* Scroll choreography is driven by --chapter-progress in scroll-reveal.js. */
+[data-scroll-chapter] {
+  --chapter-progress: 0;
+  --chapter-state: 0;
+}
+
+[data-scroll-chapter] [data-scroll-reveal] {
+  --element-progress: 0;
+  opacity: var(--element-progress);
+  transform: translate3d(0, calc((1 - var(--element-progress)) * 28px), 0);
+  will-change: opacity, transform;
+}
+
+[data-scroll-chapter] [data-scroll-reveal="connector"] {
+  transform: scaleX(var(--element-progress));
+  transform-origin: left center;
+}
+
+[data-scroll-chapter] [data-scroll-reveal="node"] {
+  transform: translate3d(0, calc((1 - var(--element-progress)) * 20px), 0) scale(calc(.94 + (var(--element-progress) * .06)));
+}
+
+[data-scroll-chapter] [data-scroll-reveal].is-scroll-active {
+  color: var(--scroll-active-color, inherit);
+}
+
+[data-scroll-chapter] [data-scroll-reveal].is-scroll-active::after {
+  opacity: 1;
+}
+
+.scroll-state-rail {
+  opacity: var(--rail-progress, 0);
+  transform: translate3d(calc((1 - var(--rail-progress, 0)) * 12px), 0, 0);
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-scroll-chapter] [data-scroll-reveal],
+  [data-scroll-chapter] [data-scroll-reveal="connector"],
+  [data-scroll-chapter] [data-scroll-reveal="node"],
+  .scroll-state-rail {
+    opacity: 1;
+    transform: none;
+    transition: none;
+    will-change: auto;
+  }
+}
