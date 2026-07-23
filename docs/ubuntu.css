@@ -41,6 +41,17 @@ body { font-family: var(--sans); }
   .path-stage, .signature-inspector, .working-path-note, .figure-link,
   .machine, .instrument-card, .pipeline-node, .receipt-diagram > div,
   .memory-segment { background: #17231d; color: #eef7f0; border-color: #3a5047; }
+  .surface-card, .reality-bands article, .journey-guide-card,
+  .path-stage, .signature-inspector, .working-path-note, .figure-link,
+  .instrument-card, .pipeline-node, .receipt-diagram > div,
+  .candidate-row, .memory-stack { background-color: #17231d !important; color: #eef7f0; border-color: #3a5047; }
+  .surface-card:hover, .journey-guide-card:hover, .journey-guide-card:focus-visible { background: #20352a !important; }
+  .pipeline-node.is-current { background: #294332 !important; border-color: #83c29a; }
+  .instrument-tabs, .instrument-main, .instrument-side { background: #17231d !important; color: #eef7f0; }
+  .instrument-tab { color: #b4c4bc; }
+  .instrument-tab.is-active { background: #294332; color: #eef7f0; }
+  .candidate-list, .candidate-row, .candidate-footer { border-color: #3a5047; color: #b4c4bc; }
+  .candidate-footer b, .candidate-row strong { color: #eef7f0; }
   .surface-main, .journey-guide-card-primary { background: #294332; color: #eef7f0; border-color: #5a8065; }
   .surface-card p, .reality-bands p, .journey-guide-card p,
   .surface-card code, .path-stage code { color: #b4c4bc; }
