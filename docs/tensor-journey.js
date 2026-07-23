@@ -11,16 +11,16 @@
   const stages = [
     ['01 / INGEST', 'Read the source tensor and preserve its identity in the ECS world.'],
     ['02 / GRAPH', 'Attach the tensor to semantic operators, shapes, and dependencies.'],
-    ['03 / REPRESENT', 'Search progressive quantization, ternarization, and mixed-precision candidates.'],
+    ['03 / REPRESENT', 'Walk upward from ternary through INT4/NF4 and INT8 until the first effective BF16 match is admitted.'],
     ['04 / LOWER', 'Turn the selected graph region into explicit uops and kernel work.'],
     ['05 / PLACE', 'Choose CPU, GPU, or NPU lanes, spatial regions, memory, and queues.'],
-    ['06 / KV + VERIFY', 'Search KV-cache policy, check legality, quality, resources, and replay evidence.'],
+    ['06 / KV + VERIFY', 'Canary-check ternary fitness, descend quantization levels when it fails, then validate KV policy.'],
     ['07 / CIMAGE', 'Seal the tensor view into the target-aware executable CImage.']
   ];
   const tensorStates = [
     ['Logical identity', 'attention.q_proj.weight', 'shape [4096, 4096] · BF16 · projection weight', 'Source bytes are named and attributed before any physical choice.', 'SOURCE / MODEL'],
     ['Graph semantics', 'attention.q_proj.weight', 'role projection · axes [out, in] · dependency attention.q', 'The tensor is attached to ECS graph edges and shape contracts.', 'ECS / GRAPH'],
-    ['Representation frontier', 'attention.q_proj.weight', 'BF16 → INT8 → ternary candidates · loss gate pending', 'Candidate formats are compared against the reference; no choice is implied by the animation.', 'SEARCH / Q + T'],
+    ['Representation frontier', 'attention.q_proj.weight', 'ternary → INT4/NF4 → INT8 → BF16 · first effective match', 'The search begins at the lowest-bit candidate and walks upward until the canary accepts the lowest representation that effectively matches BF16.', 'SEARCH / UPWARD ADMISSION'],
     ['Lowered work', 'attention.q_proj.weight', 'matmul uops · tile-independent kernel contract', 'Logical work becomes explicit operations without choosing a vendor kernel yet.', 'LOWER / UOPS'],
     ['Target execution view', 'attention.q_proj.weight', 'MI300X ROCm/HIP · 32×32 tiles · GPU-local residency', 'The target profile adds tile, kernel, queue, and fallback requirements.', 'TARGET / MI300X'],
     ['KV + evidence gate', 'attention.q_proj.weight', 'KV policy: compressed candidate · numerical proof pending', 'State policy and validation gates are recorded before publication.', 'PROVE / KV + LOSS'],
@@ -32,10 +32,10 @@
     xdna: ['XDNA2 / SPATIAL PLAN', 'tiles · FIFOs · DMA · legality boundary']
   };
   const candidates = [
-    ['BF16 reference', 'baseline', 'reference'],
-    ['INT8 per-channel', 'lower memory', 'admitted'],
-    ['Ternary + BF16 fallback', 'aggressive compression', 'frontier'],
-    ['Mixed precision + target tiles', 'best fit', 'selected']
+    ['Ternary candidate', 'lowest-bit first', 'canary gate'],
+    ['INT4 / NF4', 'next upward level', 'if ternary fails'],
+    ['INT8', 'next upward level', 'if INT4 fails'],
+    ['BF16 canary', 'effective-match reference', 'admission bound']
   ];
   let target = 'mi300x';
   let current = 0;
@@ -54,7 +54,7 @@
   frame.append(inspector);
   const explorer = document.createElement('div');
   explorer.className = 'tensor-search-explorer';
-  explorer.innerHTML = '<div class="search-explorer-toolbar"><label>TARGET DEPLOYMENT <select aria-label="Target deployment"><option value="mi300x">MI300X / ROCm-HIP</option><option value="apple">Apple Silicon / Metal</option><option value="xdna">XDNA2 / spatial plan</option></select></label><span class="search-generation">GENERATION 01 / 04</span></div><div class="compiler-graph" role="img" aria-label="Compiler graph from tensor source through representation candidates to target execution and proof"><div class="graph-node graph-source"><b>TENSOR</b><span>q_proj.weight</span></div><div class="graph-edge edge-source"></div><div class="graph-candidates"><div class="graph-node graph-candidate" data-candidate="0"><b>BF16</b><span>reference</span></div><div class="graph-node graph-candidate" data-candidate="1"><b>INT8</b><span>per-channel</span></div><div class="graph-node graph-candidate" data-candidate="2"><b>TERNARY</b><span>+ fallback</span></div><div class="graph-node graph-candidate" data-candidate="3"><b>MIXED</b><span>best fit</span></div></div><div class="graph-edge edge-target"></div><div class="graph-node graph-target"><b class="graph-target-name">MI300X</b><span class="graph-target-detail">ROCm/HIP · tiles</span></div><div class="graph-edge edge-proof"></div><div class="graph-node graph-proof"><b>PROOF</b><span>receipt gate</span></div></div><div class="candidate-frontier" role="list" aria-label="Evolutionary representation candidates"></div><p class="search-explorer-note"></p>';
+  explorer.innerHTML = '<div class="search-explorer-toolbar"><label>TARGET DEPLOYMENT <select aria-label="Target deployment"><option value="mi300x">MI300X / ROCm-HIP</option><option value="apple">Apple Silicon / Metal</option><option value="xdna">XDNA2 / spatial plan</option></select></label><span class="search-generation">GENERATION 01 / 04</span></div><div class="compiler-graph" role="img" aria-label="Compiler graph walking upward from ternary through higher bit representations until the first effective BF16 match"><div class="graph-node graph-source"><b>BF16 CANARY</b><span>source reference</span></div><div class="graph-edge edge-source"></div><div class="graph-candidates"><div class="graph-node graph-candidate" data-candidate="0"><b>TERNARY</b><span>lowest-bit first</span></div><div class="graph-node graph-candidate" data-candidate="1"><b>INT4 / NF4</b><span>walk upward</span></div><div class="graph-node graph-candidate" data-candidate="2"><b>INT8</b><span>walk upward</span></div><div class="graph-node graph-candidate" data-candidate="3"><b>BF16</b><span>effective match</span></div></div><div class="graph-edge edge-target"></div><div class="graph-node graph-target"><b class="graph-target-name">MI300X</b><span class="graph-target-detail">ROCm/HIP · tiles</span></div><div class="graph-edge edge-proof"></div><div class="graph-node graph-proof"><b>CANARY PROOF</b><span>first effective match</span></div></div><div class="candidate-frontier" role="list" aria-label="Progressive quantization candidates"></div><p class="search-explorer-note"></p>';
   frame.append(explorer);
   const frontier = explorer.querySelector('.candidate-frontier');
   const note = explorer.querySelector('.search-explorer-note');
@@ -72,7 +72,7 @@
     explorer.querySelectorAll('.graph-candidate').forEach(node => node.classList.toggle('graph-active', Number(node.dataset.candidate) === Math.min(current, 3)));
     graphTargetName.textContent = targets[target][0].split(' / ')[0];
     graphTargetDetail.textContent = targets[target][1];
-    note.textContent = `Generation ${String(Math.min(current + 1, 4)).padStart(2, '0')} compares representations against ${targets[target][0]} using ${targets[target][1]}.`;
+    note.textContent = `Generation ${String(Math.min(current + 1, 4)).padStart(2, '0')} walks upward from the lowest-bit candidate against the BF16 canary for ${targets[target][0]}; mixed precision keeps each tensor at its admitted level.`;
   };
   targetSelect.addEventListener('change', () => { target = targetSelect.value; renderFrontier(); });
   const next = document.createElement('button');
