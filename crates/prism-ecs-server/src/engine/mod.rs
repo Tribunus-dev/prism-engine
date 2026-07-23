@@ -7,6 +7,7 @@
 
 pub mod bpe_tokenizer;
 pub mod cpu;
+pub mod cpu_executor;
 pub mod engine;
 pub mod inference;
 pub mod measured;
@@ -15,6 +16,9 @@ pub mod multimodal;
 pub mod safetensors;
 pub mod sampling;
 pub mod streaming;
+
+pub use cpu as cpu_executor_legacy;
+pub mod ecs_engine { pub use super::engine::*; }
 
 #[cfg(feature = "metal-dispatch")]
 pub mod metal;

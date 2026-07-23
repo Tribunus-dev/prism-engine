@@ -1,0 +1,2 @@
+//! Reconstructed SpatialIR module.
+

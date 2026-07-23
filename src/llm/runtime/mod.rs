@@ -20,6 +20,7 @@ pub mod cancel;
 pub mod kv;
 pub mod lanes;
 pub mod memory;
+pub mod memory_hierarchy;
 pub mod modality;
 pub mod receipt;
 pub mod residency;

@@ -30,7 +30,8 @@ impl std::error::Error for TernaryPackError {}
 pub fn pack_ternary_codes(weights: &[i8]) -> Result<Vec<u8>, TernaryPackError> {
     let mut packed = Vec::with_capacity(weights.len().div_ceil(4));
     for chunk in weights.chunks(4) {
-        let mut byte: u8 = 0;
+        // Unused lanes decode as zero, the canonical neutral value.
+        let mut byte: u8 = 0x55;
         for (i, &w) in chunk.iter().enumerate() {
             let code: u8 = match w {
                 -1 => 0b00,
@@ -38,7 +39,7 @@ pub fn pack_ternary_codes(weights: &[i8]) -> Result<Vec<u8>, TernaryPackError> {
                 1 => 0b10,
                 other => return Err(TernaryPackError::InvalidWeight(other)),
             };
-            byte |= code << (i * 2);
+            byte = (byte & !(0x03 << (i * 2))) | (code << (i * 2));
         }
         packed.push(byte);
     }

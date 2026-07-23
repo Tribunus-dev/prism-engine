@@ -7,7 +7,7 @@
 
 use crate::evolution::evaluate::EvaluationStrategy;
 use crate::evolution::foundation::{
-    AneUnitAxis, CandidateGenome, DecompositionAxis, FusionAxis, PackingAxis, RepresentationAxis,
+    CandidateGenome, DecompositionAxis, FusionAxis, PackingAxis, RepresentationAxis,
 };
 use crate::evolution::frontier::ParetoFrontier;
 use crate::evolution::memory::{EvolutionReceipt, EvolutionaryMemory};
@@ -234,7 +234,7 @@ impl JointEvolutionSystem {
         for genome in population.iter() {
             let score = synthetic_evaluator.evaluate(genome, b"4096,4096"); // run_generation_with_measured uses default context — callers pass real context via estimate_and_score_genome
             frontier.insert(
-                genome.clone(),
+                prism_ecs_core::Entity::new(frontier.entries.len() as u64 + 1, 0),
                 vec![score],
                 self.generation.get(),
                 &Default::default(),
@@ -249,7 +249,7 @@ impl JointEvolutionSystem {
         // Clone genomes first to avoid borrow conflict between immutable
         // read and mutable update of the frontier entries slice.
         let genomes_to_remeasure: Vec<_> = (0..top_n)
-            .filter_map(|i| frontier.entries.get(i).map(|e| (i, e.genome.clone())))
+            .filter_map(|i| population.get(i).map(|g| (i, g.clone())))
             .collect();
 
         for (i, genome) in genomes_to_remeasure {
@@ -311,11 +311,7 @@ impl JointEvolutionSystem {
             } else {
                 b.runtime.clone()
             },
-            ane_unit: if rng.gen::<f64>() < 0.5 {
-                a.ane_unit.clone()
-            } else {
-                b.ane_unit.clone()
-            },
+            ane_unit: if rng.gen::<f64>() < 0.5 { a.ane_unit.clone() } else { b.ane_unit.clone() },
         }
     }
 
@@ -378,13 +374,7 @@ impl JointEvolutionSystem {
                     result.runtime.dispatch_width =
                         genome.runtime.dispatch_width.saturating_mul(2).max(1)
                 }
-                Some(VariationOperator::AneUnit) => {
-                    result.ane_unit = match genome.ane_unit {
-                        AneUnitAxis::Auto => AneUnitAxis::Planar,
-                        AneUnitAxis::Planar => AneUnitAxis::Matrix,
-                        AneUnitAxis::Matrix => AneUnitAxis::Auto,
-                    }
-                }
+                Some(VariationOperator::AneUnit) => {}
                 Some(VariationOperator::Unknown) => {}
                 None => {}
             }
@@ -562,14 +552,16 @@ impl JointEvolutionSystem {
             if next_gen.len() >= self.config.population_size {
                 break;
             }
-            let entry_digest = Self::genome_digest(&entry.genome);
+            let Some(source) = population.get(entry.entity.id().saturating_sub(1) as usize) else { continue };
+            let entry_genome = source.genome.clone();
+            let entry_digest = Self::genome_digest(&entry_genome);
             if !next_gen
                 .iter()
                 .any(|candidate| Self::genome_digest(&candidate.genome) == entry_digest)
             {
                 let fitness: Vec<f64> = entry.fitness.iter().map(|f| f.value()).collect();
                 next_gen.push(ScoredGenome {
-                    genome: entry.genome.clone(),
+                    genome: entry_genome,
                     fitness,
                 });
                 operators.push(VariationOperator::Unknown);
@@ -655,7 +647,7 @@ impl JointEvolutionSystem {
         let decomp_idx = ((codon / 32) % 4) as usize;
         let fusion_idx = ((codon / 128) % 3) as usize;
 
-        let repr_idx = (codon % 9) as usize;
+        let repr_idx = (codon % 8) as usize;
         let representations = [
             RepresentationAxis::Fp16,
             RepresentationAxis::Bf16,
@@ -664,7 +656,6 @@ impl JointEvolutionSystem {
             RepresentationAxis::Nf4,
             RepresentationAxis::Nf8,
             RepresentationAxis::Ternary158,
-            RepresentationAxis::TernaryTile640,
             RepresentationAxis::Binary1,
         ];
 
@@ -697,11 +688,7 @@ impl JointEvolutionSystem {
             fusion: fusions[fusion_idx].clone(),
             engram: Default::default(),
             runtime: Default::default(),
-            ane_unit: match (codon / 1024) % 3 {
-                0 => AneUnitAxis::Auto,
-                1 => AneUnitAxis::Planar,
-                _ => AneUnitAxis::Matrix,
-            },
+            ane_unit: Default::default(),
         }
     }
 }
@@ -781,7 +768,7 @@ mod tests {
 
         for sg in population.iter() {
             frontier.insert(
-                sg.genome.clone(),
+                prism_ecs_core::Entity::new(frontier.entries.len() as u64 + 1, 0),
                 sg.fitness.iter().map(|&v| FitnessScore::new(v)).collect(),
                 0,
                 &Default::default(),
@@ -816,7 +803,7 @@ mod tests {
 
         for sg in &population {
             frontier.insert(
-                sg.genome.clone(),
+                prism_ecs_core::Entity::new(frontier.entries.len() as u64 + 1, 0),
                 vec![FitnessScore::new(sg.fitness[0])],
                 0,
                 &Default::default(),
@@ -825,7 +812,7 @@ mod tests {
 
         for sg in &population {
             frontier.insert(
-                sg.genome.clone(),
+                prism_ecs_core::Entity::new(frontier.entries.len() as u64 + 1, 0),
                 vec![FitnessScore::new(sg.fitness[0])],
                 0,
                 &Default::default(),
@@ -855,7 +842,7 @@ mod tests {
         let mut frontier = ParetoFrontier::new(1);
         for i in 0..5 {
             frontier.insert(
-                JointEvolutionSystem::codon_to_genome(i),
+                prism_ecs_core::Entity::new(i as u64 + 1, 0),
                 vec![FitnessScore::new(0.5)],
                 0,
                 &Default::default(),
@@ -957,7 +944,7 @@ mod tests {
 
         for sg in &population {
             frontier.insert(
-                sg.genome.clone(),
+                prism_ecs_core::Entity::new(frontier.entries.len() as u64 + 1, 0),
                 vec![FitnessScore::new(sg.fitness[0])],
                 0,
                 &Default::default(),
@@ -999,7 +986,7 @@ mod tests {
 
         for sg in &population {
             frontier.insert(
-                sg.genome.clone(),
+                prism_ecs_core::Entity::new(frontier.entries.len() as u64 + 1, 0),
                 vec![FitnessScore::new(sg.fitness[0])],
                 0,
                 &Default::default(),

@@ -1,1 +1,49 @@
-(() => { const story=document.querySelector('.apple-story'); if(!story||window.matchMedia('(prefers-reduced-motion: reduce)').matches)return; const chapters=[...document.querySelectorAll('.apple-story .scroll-chapter')]; let ticking=false; const update=()=>{ticking=false;const viewport=window.innerHeight;chapters.forEach(chapter=>{const rect=chapter.getBoundingClientRect();const progress=Math.max(0,Math.min(1,(viewport-rect.top)/(viewport+rect.height)));const focus=1-Math.min(1,Math.abs((rect.top+rect.height/2-viewport/2)/viewport));chapter.style.setProperty('--story-heading-y',`${(0.5-progress)*34}px`);chapter.style.setProperty('--story-content-y',`${(0.5-progress)*20}px`);chapter.style.setProperty('--story-content-scale',`${.985+focus*.015}`);chapter.style.setProperty('--story-heading-opacity',`${Math.max(.35,focus)}`);chapter.style.setProperty('--story-content-opacity',`${Math.max(.55,focus)}`)});const hero=document.querySelector('.apple-story .hero');if(hero){const p=Math.max(0,Math.min(1,-hero.getBoundingClientRect().top/viewport));hero.style.setProperty('--hero-scale',`${1+p*.06}`);hero.style.setProperty('--hero-copy-y',`${p*-18}px`)}};const requestUpdate=()=>{if(!ticking){ticking=true;requestAnimationFrame(update)}};window.addEventListener('scroll',requestUpdate,{passive:true});window.addEventListener('resize',requestUpdate);update()})();
+(() => {
+  const story = document.querySelector('.apple-story');
+  if (!story) return;
+  const chapters = [...story.querySelectorAll('.scroll-chapter')];
+  if (!chapters.length) return;
+
+  let boundaries = [];
+  let ticking = false;
+  const clamp = value => Math.max(0, Math.min(1, value));
+  const ease = value => value * value * (3 - 2 * value);
+  const measure = () => {
+    boundaries = chapters.map(chapter => chapter.getBoundingClientRect().top + window.scrollY);
+    update();
+  };
+  const update = () => {
+    ticking = false;
+    const viewport = Math.max(1, window.innerHeight);
+    const scroll = window.scrollY;
+    chapters.forEach((chapter, index) => {
+      const progress = clamp((scroll - boundaries[index]) / viewport);
+      const focus = clamp(1 - Math.abs(progress - 0.5) * 2);
+      const eased = ease(progress);
+      chapter.style.setProperty('--chapter-progress', progress.toFixed(4));
+      chapter.style.setProperty('--chapter-focus', focus.toFixed(4));
+      chapter.style.setProperty('--chapter-enter', eased.toFixed(4));
+      chapter.style.setProperty('--chapter-heading-y', `${((0.5 - focus) * 24).toFixed(2)}px`);
+      chapter.style.setProperty('--chapter-content-y', `${((0.5 - focus) * 14).toFixed(2)}px`);
+      chapter.style.setProperty('--chapter-content-scale', (0.985 + focus * 0.015).toFixed(4));
+      chapter.style.setProperty('--chapter-opacity', Math.max(0.42, 0.42 + focus * 0.58).toFixed(4));
+      chapter.style.setProperty('--chapter-blur', `${((1 - focus) * 1.5).toFixed(2)}px`);
+      chapter.style.setProperty('--chapter-index-progress', index);
+    });
+    const hero = story.querySelector('.hero');
+    if (hero) {
+      const progress = clamp((scroll - boundaries[0]) / viewport);
+      hero.style.setProperty('--hero-scale', (1 + progress * 0.035).toFixed(4));
+      hero.style.setProperty('--hero-copy-y', `${(-progress * 18).toFixed(2)}px`);
+    }
+  };
+  const requestUpdate = () => {
+    if (!ticking) {
+      ticking = true;
+      window.requestAnimationFrame(update);
+    }
+  };
+  window.addEventListener('scroll', requestUpdate, { passive: true });
+  window.addEventListener('resize', measure, { passive: true });
+  measure();
+})();

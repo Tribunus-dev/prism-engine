@@ -123,3 +123,8 @@ pub trait KnowledgeStore: Send + Sync {
     fn list_documents(&self, doc_type: Option<&str>, limit: usize)
         -> Result<Vec<KnowledgeListRow>>;
 }
+
+pub trait ConversationStore: Send + Sync {
+    fn append(&self, _conversation_id: &str, _role: &str, _content: &str) -> Result<()> { Ok(()) }
+    fn list(&self, _conversation_id: &str) -> Result<Vec<(String, String)>> { Ok(Vec::new()) }
+}

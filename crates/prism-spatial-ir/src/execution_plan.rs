@@ -675,18 +675,7 @@ pub fn lower_to_manifest(
     cost: CostEstimate,
     format_plan: Option<&FormatPlan>,
 ) -> Option<KernelManifest> {
-    let selected_metal_tile = format_plan.and_then(|plan| {
-        let tiling = plan.joint_tiling?;
-        let geometry = TileGeometry {
-            width: tiling.metal_threadgroup_width as usize,
-            height: tiling.metal_threadgroup_height as usize,
-        };
-        crate::tiling::validate_joint_tiling_geometry(geometry).ok()?;
-        Some((
-            tiling.metal_threadgroup_width as usize,
-            tiling.metal_threadgroup_height as usize,
-        ))
-    });
+    let selected_metal_tile: Option<(usize, usize)> = None;
     let topo = graph.topological_sort()?;
 
     // Phase 1: build kernel descriptors for every compute node.
@@ -768,8 +757,8 @@ pub fn lower_to_manifest(
         &node_to_kernel,
         &kernel_descriptors,
         cost.latency.as_nanos() as u64,
-        format_plan.and_then(|plan| plan.joint_tiling.map(|t| (t.ane_tile_m, t.ane_tile_n))),
-        format_plan.and_then(|plan| plan.joint_tiling.map(|t| t.ane_unit)),
+        None,
+        None,
     );
     let (fusion_evaluations, workload_evaluations) = graph_strategy_evidence(graph);
     let batch_plan = batch_plan
@@ -804,8 +793,8 @@ pub fn lower_to_manifest(
         &node_to_kernel,
         &kernel_descriptors,
         cost.latency.as_nanos() as u64,
-        format_plan.and_then(|plan| plan.joint_tiling.map(|t| (t.ane_tile_m, t.ane_tile_n))),
-        format_plan.and_then(|plan| plan.joint_tiling.map(|t| t.ane_unit)),
+        None,
+        None,
     );
     let realtime_plan = realtime_plan
         .with_fusion_evaluations(fusion_evaluations)
@@ -1018,7 +1007,7 @@ fn with_fused_steps(
                                 )
                             ) =>
                         {
-                            match ane_unit.unwrap_or_default() {
+                            match ane_unit.clone().unwrap_or_default() {
                                 AneUnitAxis::Planar => PlanBackend::AnePlanar,
                                 AneUnitAxis::Auto | AneUnitAxis::Matrix => PlanBackend::AneMatrix,
                             }
@@ -1033,7 +1022,7 @@ fn with_fused_steps(
                         ComputeKind::Elementwise
                         | ComputeKind::Normalization
                         | ComputeKind::RoPE
-                        | ComputeKind::Softmax => match ane_unit.unwrap_or_default() {
+                        | ComputeKind::Softmax => match ane_unit.clone().unwrap_or_default() {
                             AneUnitAxis::Matrix => PlanBackend::AneMatrix,
                             AneUnitAxis::Auto | AneUnitAxis::Planar => PlanBackend::AnePlanar,
                         },
@@ -1153,7 +1142,7 @@ fn codec_from_annotations(
     let tensor_key = graph
         .get_annotations(node_id)
         .and_then(|metadata| metadata.tensor_key.as_deref())?;
-    let format = format_plan?.per_tensor.get(tensor_key)?.format;
+    let format = *format_plan?.per_tensor.get(tensor_key)?;
     Some(match format {
         TensorFormat::Fp16 => CodecVariant::Fp16,
         TensorFormat::Bf16 => CodecVariant::Bf16,
@@ -1164,7 +1153,6 @@ fn codec_from_annotations(
         TensorFormat::Palettized4Bit => CodecVariant::Nf4,
         TensorFormat::Ternary158 => CodecVariant::Ternary1_58,
         TensorFormat::Binary1 => CodecVariant::Ternary,
-        TensorFormat::TernaryTile640 => CodecVariant::Ternary,
     })
 }
 
@@ -1182,7 +1170,7 @@ fn tensor_format_to_codec_variant(tf: &TensorFormat) -> CodecVariant {
         TensorFormat::Palettized4Bit => CodecVariant::Q4_0,
         TensorFormat::Ternary158 => CodecVariant::Ternary1_58,
         TensorFormat::Binary1 => CodecVariant::Ternary,
-        TensorFormat::TernaryTile640 => CodecVariant::Ternary,
+        
     }
 }
 

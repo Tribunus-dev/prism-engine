@@ -148,6 +148,44 @@ pub struct MappedTensorProbeContext {
 }
 
 impl MappedTensorProbeContext {
+    /// Construct a context for one concrete tensor in a mapped checkpoint.
+    ///
+    /// Keeping the tensor name in the serialized context is important: a
+    /// progressive run must be reproducible against the same source tensor,
+    /// rather than letting the probe select an arbitrary router tensor.
+    pub fn for_tensor(model_dir: impl Into<std::path::PathBuf>, tensor_name: impl Into<String>) -> Self {
+        Self {
+            model_dir: model_dir.into(),
+            tensor_name: tensor_name.into(),
+        }
+    }
+
+    /// Reject an empty or non-file-backed reference before progressive search
+    /// admits any evidence. This does not read tensor payload bytes; it only
+    /// verifies that the requested reference is present in the provider.
+    pub fn validate_reference(&self) -> Result<(), SearchError> {
+        if self.tensor_name.trim().is_empty() {
+            return Err(SearchError::SearchFailed(
+                "mapped probe context has an empty tensor reference".into(),
+            ));
+        }
+        let provider = SafeTensorProvider::new(&self.model_dir)
+            .map_err(SearchError::SearchFailed)?;
+        let present = provider
+            .list_tensors()
+            .map_err(SearchError::SearchFailed)?
+            .into_iter()
+            .any(|tensor| tensor.name == self.tensor_name);
+        if !present {
+            return Err(SearchError::SearchFailed(format!(
+                "mapped probe tensor reference '{}' is not present in {}",
+                self.tensor_name,
+                self.model_dir.display()
+            )));
+        }
+        Ok(())
+    }
+
     pub fn to_bytes(&self) -> Result<Vec<u8>, SearchError> {
         serde_json::to_vec(self)
             .map_err(|e| SearchError::SearchFailed(format!("encode mapped probe context: {e}")))
@@ -204,6 +242,18 @@ impl crate::search::EvaluationStrategy for MappedTensorEvaluationStrategy {
 }
 
 impl MappedTensorBehavioralProbe {
+    /// Build a probe only when the checkpoint directory is a usable,
+    /// provider-backed source. Production progressive ternaryization should
+    /// use this constructor so an invalid path cannot silently become a
+    /// synthetic evaluation.
+    pub fn try_new_real(model_dir: impl Into<std::path::PathBuf>) -> Result<Self, SearchError> {
+        let model_dir = model_dir.into();
+        SafeTensorProvider::new(&model_dir).map_err(SearchError::SearchFailed)?;
+        let model = crate::adapter_for_model_dir(&model_dir)
+            .map_err(SearchError::SearchFailed)?;
+        Ok(Self::with_model(model_dir, Arc::from(model)))
+    }
+
     pub fn new(model_dir: impl Into<std::path::PathBuf>) -> Self {
         let model_dir = model_dir.into();
         let model: Arc<dyn crate::ModelAdapter> = crate::adapter_for_model_dir(&model_dir)
@@ -544,6 +594,7 @@ impl crate::ModelAdapter for GenericNameAdapter {
         };
         crate::TensorDescriptor {
             name: name.to_string(),
+            shape: Vec::new(),
             role,
         }
     }
@@ -562,6 +613,12 @@ impl BehavioralProbe for MappedTensorBehavioralProbe {
         context: &[u8],
     ) -> Result<TernaryObjectiveEvidence, SearchError> {
         if let Ok(context) = serde_json::from_slice::<MappedTensorProbeContext>(context) {
+            if context.model_dir != self.model_dir {
+                return Err(SearchError::SearchFailed(
+                    "mapped probe context source does not match probe source".into(),
+                ));
+            }
+            context.validate_reference()?;
             return self.evaluate_tensor(genome, &context.tensor_name);
         }
         // The ECS progressive stage supplies its catalog context as text.

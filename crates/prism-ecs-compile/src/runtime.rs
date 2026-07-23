@@ -1150,7 +1150,7 @@ impl RuntimeModel {
                                 model.id, projector.tensor_name
                             ))
                         })?;
-                    if record.dim_m != projector.output_dim || record.dim_n != projector.input_dim {
+                    if record.dim_m as usize != projector.output_dim || record.dim_n as usize != projector.input_dim {
                         return Err(RuntimeError::InvalidCImage(format!(
                             "model {:?} projector {:?} has shape {}x{}, expected {}x{}",
                             model.id,

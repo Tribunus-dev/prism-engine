@@ -13,6 +13,18 @@
 
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LayerType { FullAttention, LinearAttention }
+
+pub struct Bonsai27B;
+impl Bonsai27B {
+    pub const LAYERS:u32=64; pub const HIDDEN_DIM:u32=5120; pub const INTERMEDIATE_DIM:u32=17408;
+    pub const NUM_HEADS:u32=24; pub const NUM_KV_HEADS:u32=4; pub const KEY_LENGTH:u32=256;
+    pub const VALUE_LENGTH:u32=256; pub const HEAD_DIM:u32=64; pub const VOCAB_SIZE:u32=248320;
+    pub const CONTEXT_LENGTH:u32=262144; pub const NORM_EPS:f32=1e-6;
+    pub fn layer_type(layer:u32)->LayerType { if layer < Self::LAYERS && layer % 4 == 0 { LayerType::FullAttention } else { LayerType::LinearAttention } }
+}
+
 /// Bonsai-specific quantization configuration for a single tensor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BonsaiTensorConfig {

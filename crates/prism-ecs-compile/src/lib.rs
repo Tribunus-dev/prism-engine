@@ -176,6 +176,7 @@ pub enum CompilationStage {
     CImageEmission,
     ReceiptBuild,
     Certification,
+    Certify,
 }
 
 impl std::fmt::Display for CompilationStage {
@@ -192,6 +193,7 @@ impl std::fmt::Display for CompilationStage {
             Self::CImageEmission => write!(f, "cimage_emission"),
             Self::ReceiptBuild => write!(f, "receipt_build"),
             Self::Certification => write!(f, "certification"),
+            Self::Certify => write!(f, "certification"),
         }
     }
 }
@@ -282,6 +284,7 @@ pub enum CalibrationPolicy {
     FromFile(String),
     Auto,
 }
+impl Default for CalibrationPolicy { fn default() -> Self { Self::Auto } }
 
 /// Validation policy for compilation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -289,6 +292,7 @@ pub enum ValidationPolicy {
     Structural,
     Production,
 }
+impl Default for ValidationPolicy { fn default() -> Self { Self::Structural } }
 
 #[derive(Debug, Clone)]
 pub struct CompilationPolicy {
@@ -425,6 +429,7 @@ pub enum CompileStatus {
     Failed(String),
     Partial(Vec<StageResult>),
 }
+impl Default for CompileStatus { fn default() -> Self { Self::Pending } }
 
 /// Compilation result.
 #[derive(Debug, Clone, Serialize, Deserialize)]

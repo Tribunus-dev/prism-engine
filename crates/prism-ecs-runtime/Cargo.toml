@@ -1,0 +1,23 @@
+[package]
+name = "prism-ecs-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Provider-neutral execution kernel for Prism ECS — owns the authoritative world, compiled schedule, and deterministic commit boundary"
+
+[dependencies]
+blake3 = "1"
+bincode = "1"
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-constitutional = { path = "../prism-ecs-constitutional" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+parking_lot = { workspace = true }
+uuid = { workspace = true }
+
+[lib]
+name = "prism_ecs_runtime"
+
+[features]
+metal-dispatch = []

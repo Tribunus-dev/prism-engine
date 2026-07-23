@@ -31,7 +31,13 @@ pub struct TernaryPackage {
 ///
 /// Returns an error if any weight is not -1, 0, or +1.
 pub fn pack_ternary(weights: &[i8], scales: &[f32]) -> Result<TernaryPackage, String> {
-    let packed = pack_ternary_codes(weights).map_err(|e| e.to_string())?;
+    let mut packed = pack_ternary_codes(weights).map_err(|e| e.to_string())?;
+    if let Some(last) = packed.last_mut() {
+        let used = weights.len() % 4;
+        if used != 0 {
+            for i in used..4 { *last |= 0b01 << (i * 2); }
+        }
+    }
 
     Ok(TernaryPackage {
         weights: weights.to_vec(),

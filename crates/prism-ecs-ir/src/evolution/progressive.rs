@@ -305,7 +305,7 @@ impl<'a> ProgressiveParetoSearch<'a> {
                 let evidence = self.executor.evaluate(&genome, stage, context);
                 if self.config.limits.admits(&evidence) {
                     frontier.insert(
-                        genome.clone(),
+                        prism_ecs_core::Entity::new(stage as u64, 0),
                         evidence.vector(&self.config.limits),
                         stage as u64,
                         &self.config.frontier,

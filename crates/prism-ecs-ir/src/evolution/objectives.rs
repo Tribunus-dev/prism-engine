@@ -99,7 +99,7 @@ impl BehaviorDescriptor {
         use crate::evolution::foundation::{FusionAxis, RepresentationAxis};
         let representation_family = match genome.representation {
             RepresentationAxis::Binary1 => 0,
-            RepresentationAxis::Ternary158 | RepresentationAxis::TernaryTile640 => 1,
+            RepresentationAxis::Ternary158 => 1,
             RepresentationAxis::Int4 | RepresentationAxis::Nf4 => 2,
             RepresentationAxis::Int8 | RepresentationAxis::Nf8 => 3,
             _ => 4,
@@ -115,7 +115,7 @@ impl BehaviorDescriptor {
             .saturating_mul(genome.metal_geometry.threadgroup_height);
         Self {
             representation_family,
-            backend_split: genome.ane_unit as u8,
+            backend_split: 0,
             fusion_complexity,
             memory_residency: (genome.memory.shared_memory_bytes / 65536).min(3) as u8,
             scheduler_behavior: if threads >= 256 {

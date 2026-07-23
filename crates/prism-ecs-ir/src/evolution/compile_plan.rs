@@ -10,6 +10,12 @@ use prism_ecs_core::{Component, Entity, World};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JointTilingPlan { pub ane_unit: crate::evolution::foundation::AneUnitAxis, pub ane_tile_m:u32,pub ane_tile_n:u32,pub ane_tile_k:u32,pub metal_tile_m:u32,pub metal_tile_n:u32,pub metal_tile_k:u32,pub metal_threadgroup_width:u32,pub metal_threadgroup_height:u32 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PerTensorFormat { pub format: TensorFormat }
+pub fn classify_tensor(name:&str)->String { let n=name.to_ascii_lowercase(); if n.contains("norm"){"norm".into()} else if n.contains("embed"){"embed".into()} else if n.contains("attn"){"attention".into()} else if n.contains("mlp")||n.contains("ffn"){"mlp".into()} else {"other".into()} }
+
 // ── Components ──────────────────────────────────────────────────────────────
 
 /// Marker component for an entity that is a compilation plan.
@@ -93,16 +99,16 @@ pub fn get_assigned_format(
 pub fn resolve_matmul_tile(
     world: &World,
     matmul_op: Entity,
-    _m: u32,
-    _n: u32,
-    _k: u32,
+    m: u32,
+    n: u32,
+    k: u32,
 ) -> (u32, u32, u32) {
     if let Some(plan_ref) = world.get_component::<CompilePlanRef>(matmul_op) {
         if let Some(tiles) = world.get_component::<TileSizes>(plan_ref.0) {
             return (tiles.tile_m, tiles.tile_n, tiles.tile_k);
         }
     }
-    // Default tile sizes: 64×64×32
+    let _ = (m, n, k);
     (64, 64, 32)
 }
 
@@ -117,13 +123,14 @@ pub struct FormatPlan {
     /// Per-tensor format assignment, keyed by tensor key
     /// (e.g. "model.layers.0.self_attn.q_proj.weight").
     pub per_tensor: HashMap<String, TensorFormat>,
+    #[serde(default)] pub joint_tiling: Option<JointTilingPlan>,
 }
 
 impl FormatPlan {
     /// Create an empty format plan.
     pub fn new() -> Self {
         Self {
-            per_tensor: HashMap::new(),
+            per_tensor: HashMap::new(), joint_tiling: None,
         }
     }
 
@@ -137,7 +144,7 @@ impl FormatPlan {
         for key in tensor_keys {
             per_tensor.insert(key.clone(), format);
         }
-        Self { per_tensor }
+        Self { per_tensor, joint_tiling: None }
     }
 
     /// Convert a `RepresentationAxis` to the corresponding `TensorFormat`.
@@ -153,6 +160,7 @@ impl FormatPlan {
             RepresentationAxis::Nf4 => TensorFormat::Nf4,
             RepresentationAxis::Nf8 => TensorFormat::Nf8,
             RepresentationAxis::Ternary158 => TensorFormat::Ternary158,
+            RepresentationAxis::TernaryTile640 => TensorFormat::Ternary158,
             RepresentationAxis::Binary1 => TensorFormat::Binary1,
         }
     }
@@ -162,6 +170,8 @@ impl FormatPlan {
         self.per_tensor.get(key).copied()
     }
 }
+
+impl FormatPlan { pub fn with_joint_tiling(mut self, joint: JointTilingPlan)->Self { self.joint_tiling=Some(joint); self } }
 
 impl Default for FormatPlan {
     fn default() -> Self {

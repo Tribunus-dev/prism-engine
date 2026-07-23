@@ -61,7 +61,7 @@ impl AssemblySpec {
             let next_gen = evolution.run_generation(&population, &frontier);
 
             // Extract the best genome and build a format plan from it.
-            if let Some(best) = next_gen.first() {
+            if let Some(best) = next_gen.0.first() {
                 // Pass an empty tensor key list; the format plan captures
                 // the genome's representation axis for downstream compilation.
                 let tensor_keys: Vec<String> = Vec::new();

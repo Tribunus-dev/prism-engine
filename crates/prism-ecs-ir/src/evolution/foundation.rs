@@ -92,6 +92,8 @@ pub struct CandidateGenome {
     pub engram: EngramAxis,
     /// Runtime execution parameters (dispatch width, sync depth).
     pub runtime: RuntimeAxis,
+    /// ANE execution unit strategy used when the candidate targets Apple Neural Engine.
+    pub ane_unit: AneUnitAxis,
 }
 
 impl CandidateGenome {
@@ -112,6 +114,7 @@ impl Default for CandidateGenome {
             fusion: FusionAxis::default(),
             engram: EngramAxis::default(),
             runtime: RuntimeAxis::default(),
+            ane_unit: AneUnitAxis::default(),
         }
     }
 }
@@ -128,6 +131,7 @@ pub enum RepresentationAxis {
     Nf4,
     Nf8,
     Ternary158,
+    TernaryTile640,
     Binary1,
 }
 
@@ -135,6 +139,18 @@ impl Default for RepresentationAxis {
     fn default() -> Self {
         RepresentationAxis::Fp16
     }
+}
+
+/// Apple Neural Engine execution-unit strategy.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AneUnitAxis {
+    Auto,
+    Planar,
+    Matrix,
+}
+
+impl Default for AneUnitAxis {
+    fn default() -> Self { Self::Auto }
 }
 
 /// Packing strategy axis.

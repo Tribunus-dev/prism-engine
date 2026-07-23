@@ -19,3 +19,4 @@ pub mod gates;
 pub mod optimizer;
 pub mod packaging;
 pub mod residual;
+pub mod promotion;

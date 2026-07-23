@@ -18,3 +18,42 @@ document.querySelectorAll('[data-stage]').forEach(node=>node.addEventListener('c
 document.querySelectorAll('[data-candidate]').forEach(row=>row.addEventListener('click',()=>{document.querySelectorAll('[data-candidate]').forEach(r=>{r.classList.remove('is-survivor');r.querySelector('strong').textContent='candidate'});row.classList.add('is-survivor');row.querySelector('strong').textContent='survivor';const out=document.querySelector('#receipt-outcome');if(out)out.textContent=row.dataset.candidate==='ternary'?'gated':'validated'}));
 const engineeringToggle=document.querySelector('#engineering-mode');
 if(engineeringToggle)engineeringToggle.addEventListener('change',()=>document.querySelectorAll('.engineering-output,.engineering-metrics').forEach(el=>el.hidden=!engineeringToggle.checked));
+(() => {
+  const section = document.querySelector('#instruments');
+  const grid = section?.querySelector('.instrument-grid');
+  if (!section || !grid) return;
+  const chapters = document.createElement('div');
+  chapters.className = 'compiler-chapters';
+  chapters.innerHTML = '<article class="compiler-chapter compiler-search-chapter"><div class="chapter-heading"><span class="tiny-label">CHAPTER 01 / REPRESENTATION SEARCH</span><small>Illustrative scroll state</small></div><h3>Candidate population narrows.</h3><p>As admission progresses, the search keeps only candidates that satisfy the quality and resource gates.</p><div class="candidate-population" role="img" aria-label="Illustrative candidate population shrinking during representation search"></div><div class="chapter-foot"><span>population</span><strong class="population-count">08 → 01</strong></div></article><article class="compiler-chapter compiler-execution-chapter"><div class="chapter-heading"><span class="tiny-label">CHAPTER 02 / EXECUTION PLANNING</span><small>Illustrative scroll state</small></div><h3>Work migrates across lanes.</h3><p>The planner moves work between CPU, GPU, and NPU lanes as the target-aware execution view becomes explicit.</p><div class="execution-lanes" role="img" aria-label="Illustrative work migrating across CPU GPU and NPU lanes"><div><span>CPU</span><i></i></div><div><span>GPU</span><i></i></div><div><span>NPU</span><i></i></div></div><div class="chapter-foot"><span>planning progress</span><strong class="lane-progress">00%</strong></div></article>';
+  grid.parentElement.insertBefore(chapters, grid);
+  const population = chapters.querySelector('.candidate-population');
+  for (let index = 0; index < 8; index += 1) {
+    const candidate = document.createElement('i');
+    candidate.style.setProperty('--candidate-index', index);
+    candidate.setAttribute('aria-hidden', 'true');
+    population.append(candidate);
+  }
+  const lanes = [...chapters.querySelectorAll('.execution-lanes i')];
+  const count = chapters.querySelector('.population-count');
+  const progressLabel = chapters.querySelector('.lane-progress');
+  let frame;
+  const render = () => {
+    frame = null;
+    const rect = section.getBoundingClientRect();
+    const progress = Math.max(0, Math.min(1, (window.innerHeight * .72 - rect.top) / Math.max(rect.height * .72, 1)));
+    const survivors = Math.max(1, Math.ceil(8 - progress * 7));
+    population.style.setProperty('--search-progress', progress);
+    population.querySelectorAll('i').forEach((node, index) => node.classList.toggle('is-survivor', index < survivors));
+    count.textContent = `${String(survivors).padStart(2, '0')} / 08`;
+    lanes.forEach((lane, index) => {
+      const phase = Math.max(0, Math.min(1, progress * 1.45 - index * .18));
+      lane.style.setProperty('--lane-progress', phase);
+      lane.classList.toggle('is-active', phase > .08 && phase < .95);
+    });
+    progressLabel.textContent = `${String(Math.round(progress * 100)).padStart(2, '0')}%`;
+  };
+  const requestRender = () => { if (!frame) frame = requestAnimationFrame(render); };
+  window.addEventListener('scroll', requestRender, { passive: true });
+  window.addEventListener('resize', requestRender);
+  render();
+})();

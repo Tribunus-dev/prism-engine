@@ -1,10 +1,10 @@
 (() => {
   const stages = [
-    ['01', 'SOURCE', 'Model identity enters the compiler.'],
-    ['02', 'COMPILE', 'Graph semantics and lowered work become explicit.'],
-    ['03', 'SEARCH', 'Representations evolve against the BF16 canary.'],
-    ['04', 'REALIZE', 'The target hardware shapes execution views.'],
-    ['05', 'PROVE', 'Quality, legality, and receipts gate admission.']
+    ['01', 'ARTIFACT BIRTH', 'A source model becomes an identified ComputeImage candidate.'],
+    ['02', 'ANATOMY', 'Logical tensors become physical layouts and execution views.'],
+    ['03', 'SEARCH', 'Representations evolve against the BF16 reference and gates.'],
+    ['04', 'EXECUTION', 'The target hardware shapes routes, residency, and runtime work.'],
+    ['05', 'RECEIPTS', 'Quality, legality, and evidence gate the result.']
   ];
   const sources = ['.hero', '#working-path', '#compiler', '#architecture', '#status'];
   const sections = sources.map(selector => document.querySelector(selector)).filter(Boolean);

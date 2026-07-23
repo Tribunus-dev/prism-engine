@@ -521,7 +521,7 @@ fn joint_tiling_fitness(graph: &SpatialGraph, genome: &CandidateGenome) -> f64 {
 }
 
 fn schedule_fitness(graph: &SpatialGraph, tensor_keys: &[String], genome: &CandidateGenome) -> f64 {
-    let format_plan = FormatPlan::from_best_genome(genome, tensor_keys, None, None);
+    let format_plan = FormatPlan::from_best_genome(genome, tensor_keys);
     let Some(manifest) = prism_spatial_ir::execution_plan::lower_to_manifest(
         graph,
         prism_spatial_ir::cost::CostEstimate::zero(),
@@ -761,7 +761,7 @@ impl SearchCoordinator {
         if let Some(first_tensor) = tensor_keys.first() {
             let tensor_family =
                 prism_ecs_ir::evolution::compile_plan::classify_tensor(first_tensor);
-            initial_genomes.extend(self.runtime.tensor_elites(tensor_family, 4));
+            initial_genomes.extend(self.runtime.tensor_elites(&tensor_family, 4));
         }
         for backend in [SearchBackend::Ane, SearchBackend::Metal] {
             initial_genomes.extend(self.runtime.hardware_elites(
@@ -920,7 +920,7 @@ impl SearchCoordinator {
                 prism_ecs_ir::evolution::compile_plan::classify_tensor(first_tensor);
             for entry in self
                 .runtime
-                .tensor_archive_entries(tensor_family, self.config.population_size as usize)
+                .tensor_archive_entries(&tensor_family, self.config.population_size as usize)
             {
                 quality_archive.insert(entry);
             }
@@ -943,7 +943,7 @@ impl SearchCoordinator {
         for gen in 0..self.config.max_generations {
             let mut generation_candidates: Vec<CandidateRecord> = Vec::new();
 
-            for (_idx, scored_genome) in population.iter().enumerate() {
+            for (idx, scored_genome) in population.iter().enumerate() {
                 let genome_str = serde_json::to_string(&scored_genome.genome).unwrap_or_default();
                 let candidate_digest = format!("gen{}-{}", gen, sha256_digest(&genome_str));
 
@@ -1013,7 +1013,7 @@ impl SearchCoordinator {
                 );
 
                 frontier.insert(
-                    scored_genome.genome.clone(),
+                    prism_ecs_core::Entity::new(idx as u64, 0),
                     vec![
                         FitnessScore::new(joint_evidence.selected_score.unwrap_or(0.0)),
                         FitnessScore::new(schedule_score),
@@ -1414,11 +1414,7 @@ impl SearchCoordinator {
             .ranked_elites()
             .first()
             .map(|entry| entry.genome.clone())
-            .or_else(|| {
-                frontier
-                    .best_by_dimension(0)
-                    .map(|entry| entry.genome.clone())
-            });
+            ;
 
         if production_mode
             && !all_candidates
@@ -1514,8 +1510,6 @@ impl SearchCoordinator {
             let plan = FormatPlan::from_best_genome(
                 genome,
                 &tensor_keys,
-                None,
-                per_tensor_overrides.as_ref(),
             );
             let plan = best_joint_tiling
                 .as_ref()
@@ -1652,7 +1646,7 @@ impl SearchCoordinator {
                 }
             }
             if let Some((candidate, _)) = best {
-                let plan = FormatPlan::from_best_genome(&candidate, &[tensor.clone()], None, None);
+                let plan = FormatPlan::from_best_genome(&candidate, &[tensor.clone()]);
                 if let Some(assignment) = plan.per_tensor.get(tensor) {
                     overrides
                         .entry(class.to_string())
@@ -1661,7 +1655,7 @@ impl SearchCoordinator {
                 }
             }
         }
-        overrides
+        overrides.into_iter().map(|(class, tensors)| (class, tensors.into_iter().map(|(name, format)| (name, prism_ecs_ir::evolution::compile_plan::PerTensorFormat { format })).collect())).collect()
     }
 
     pub fn trace(&self) -> &SearchTrace {

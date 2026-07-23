@@ -401,7 +401,7 @@ fn load_weight_f32(
 
 /// Universal tensor-to-f32: handles F32, BF16, F16 natively,
 /// and U32 block-quantized (NF4/INT4/INT8) via dequantization.
-fn tensor_to_f32(
+pub(crate) fn tensor_to_f32(
     tensors: &safetensors::SafeTensors<'_>,
     view: &safetensors::tensor::TensorView<'_>,
     key: &str,

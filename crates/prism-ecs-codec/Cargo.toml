@@ -1,0 +1,15 @@
+[package]
+name = "prism-ecs-codec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Versioned, checked tensor serialization for the Prism ECS pipeline"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

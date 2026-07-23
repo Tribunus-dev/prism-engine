@@ -741,7 +741,7 @@ impl CImageWriter {
                 "native ternary promotion is not eligible: {}",
                 evidence
                     .reject_reason()
-                    .unwrap_or("unknown promotion failure")
+                    .unwrap_or_else(|| "unknown promotion failure".to_string())
             ));
         }
         self.header.native_ternary_promotion = Some(evidence);
@@ -1948,7 +1948,7 @@ impl UniversalCImageWriter {
                 "native ternary promotion is not eligible: {}",
                 evidence
                     .reject_reason()
-                    .unwrap_or("unknown promotion failure")
+                    .unwrap_or_else(|| "unknown promotion failure".to_string())
             ));
         }
         self.writer.header.native_ternary_promotion = Some(evidence);
@@ -2127,7 +2127,7 @@ pub fn promote_cimage_after_replay(
             "cannot promote CImage before replay: {}",
             evidence
                 .reject_reason()
-                .unwrap_or("promotion evidence is incomplete")
+                .unwrap_or_else(|| "promotion evidence is incomplete".to_string())
         ));
     }
     reader.header.native_ternary_promotion = Some(evidence.clone());

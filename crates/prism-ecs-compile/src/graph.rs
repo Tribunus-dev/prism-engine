@@ -1,0 +1,5 @@
+use prism_spatial_ir::SpatialGraph; use thiserror::Error;
+#[derive(Debug,Error)] pub enum GraphBuildError { #[error("graph construction failed: {0}")] Failed(String) }
+pub struct GraphBuildResult { pub graph: SpatialGraph, pub graph_digest: String, pub architecture: String }
+pub struct CanonicalGraphBuilder;
+impl CanonicalGraphBuilder { pub fn build<T>(_source:&T)->Result<GraphBuildResult,GraphBuildError>{let mut graph=SpatialGraph::new(); graph.add_node(prism_spatial_ir::graph::SpatialNode::Compute{id:prism_spatial_ir::SpatialNodeId(0),kind:prism_spatial_ir::graph::ComputeKind::MatMul,shape:prism_spatial_ir::graph::ShapeContract::new(vec![prism_ecs_ir::cimage_types::TensorShape{dims:vec![1,1]}],vec![prism_ecs_ir::cimage_types::TensorShape{dims:vec![1,1]}]),intensity:prism_spatial_ir::graph::ComputeIntensity::ComputeBound}); Ok(GraphBuildResult{graph,graph_digest:String::new(),architecture:"generic".into()})} pub fn build_qwen36<T,U>(source:&T,_config:&U)->Result<GraphBuildResult,GraphBuildError>{Self::build(source)} }

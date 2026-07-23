@@ -1,0 +1,6 @@
+.git
+target
+crates/prism-amd-npu-runtime/target
+node_modules
+*.img
+*.iso

@@ -1,0 +1,10 @@
+[package]
+name = "prism-onnx-ingest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-ir = { path = "../prism-ecs-ir" }
+serde = { workspace = true }
+serde_json = { workspace = true }
