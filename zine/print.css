@@ -1,9 +1,0 @@
-@page { size: 5.5in 8.5in; margin: 0; }
-@media print {
-  * { print-color-adjust: exact !important; -webkit-print-color-adjust: exact !important; }
-  html, body { width: 5.5in; margin: 0; padding: 0; background: transparent; }
-  .screen-toolbar { display: none !important; }
-  .zine-container { display: block; padding: 0; margin: 0; }
-  .page { width: 5.5in; height: 8.5in; max-width: none; box-shadow: none; break-after: page; page-break-after: always; }
-  .page:last-child { break-after: auto; page-break-after: auto; }
-}
