@@ -1,8 +1,8 @@
 /* Desktop chapters share one viewport stage. Mobile deliberately returns to flow. */
 @media (min-width:801px){
   body{overflow-x:hidden}
-  .scroll-chapter{position:fixed!important;inset:0!important;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;max-height:100svh;display:flex;flex-direction:column;justify-content:center;overflow:hidden!important;visibility:hidden;opacity:0;pointer-events:none;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px)}
-  .scroll-chapter.is-chapter-active{visibility:visible;opacity:1;pointer-events:auto}
+  .scroll-chapter{position:fixed!important;inset:0!important;z-index:calc(2 + var(--chapter-index));height:100svh;min-height:560px;max-height:100svh;display:flex;flex-direction:column;justify-content:center;overflow:hidden!important;visibility:hidden;opacity:0;pointer-events:none;scroll-margin-top:0;padding:clamp(54px,7vh,82px) 0 clamp(42px,6vh,70px);transition:opacity .55s ease,visibility 0s linear .55s}
+  .scroll-chapter.is-chapter-active{visibility:visible;opacity:1;pointer-events:auto;transition-delay:0s}
   .chapter-timeline-spacer{height:100svh;display:block}
   .scroll-chapter.computeimage-anatomy{min-height:100svh;height:100svh}
   .scroll-chapter.computeimage-anatomy .computeimage-sticky{position:relative;top:auto;min-height:0;height:100%;padding-top:0;padding-bottom:0}
@@ -19,5 +19,5 @@
   .scroll-chapter#architecture{background:var(--deep);isolation:isolate}
   .scroll-chapter#status{background:var(--paper);isolation:isolate}
 }
-@media(max-width:800px){.chapter-timeline-spacer{height:0!important}.scroll-chapter{position:relative!important;inset:auto!important;top:auto;z-index:auto;min-height:0;height:auto;max-height:none;display:block;overflow:visible;padding-top:80px;padding-bottom:80px;visibility:visible;opacity:1;pointer-events:auto}}
-@media(prefers-reduced-motion:reduce){.scroll-chapter.is-chapter-active>*{animation:none!important}}
+@media(max-width:800px){.chapter-timeline-spacer{height:0!important}.scroll-chapter{position:relative!important;inset:auto!important;top:auto;z-index:auto;min-height:0;height:auto;max-height:none;display:block;overflow:visible;padding-top:80px;padding-bottom:80px;visibility:visible;opacity:1;pointer-events:auto;transition:none}}
+@media(prefers-reduced-motion:reduce){.scroll-chapter{transition:none!important}.scroll-chapter.is-chapter-active>*{animation:none!important}}
