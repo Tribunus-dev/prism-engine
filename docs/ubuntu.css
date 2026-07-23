@@ -52,6 +52,24 @@ body { font-family: var(--sans); }
   .instrument-tab.is-active { background: #294332; color: #eef7f0; }
   .candidate-list, .candidate-row, .candidate-footer { border-color: #3a5047; color: #b4c4bc; }
   .candidate-footer b, .candidate-row strong { color: #eef7f0; }
+  .tensor-journey { background: #0d1512 !important; color: #eef7f0; }
+  .tensor-journey .section-heading > p { color: #b4c4bc; }
+  .journey-frame { background: #111b16 !important; border-color: #3a5047; box-shadow: 0 22px 60px #0008; }
+  .journey-toolbar { background: #17231d; border-color: #3a5047; color: #eef7f0; }
+  .journey-caption, .journey-legend { color: #b4c4bc; }
+  .journey-controls button { background: #20352a; color: #eef7f0; border-color: #698174; }
+  .journey-controls button:hover, .journey-controls button:focus-visible { background: #294332; border-color: #b8d9b7; }
+  .journey-route { stroke: #83c29a; }
+  .journey-station circle { fill: #111b16; stroke: #698174; }
+  .journey-station text { fill: #d4e1d8; }
+  .journey-station rect { fill: #20352a; stroke: #698174; }
+  .journey-station .station-index { fill: #b4c4bc; }
+  .journey-station.active circle, .journey-station.visited circle { fill: #294332; stroke: #83c29a; }
+  .journey-station.active text { fill: #b8d9b7; }
+  .journey-annotation rect { fill: #20352a; stroke: #698174; }
+  .annotation-title { fill: #b8d9b7; }
+  .annotation-body { fill: #b4c4bc; }
+  .journey-legend .legend-line { border-color: #83c29a; }
   .surface-main, .journey-guide-card-primary { background: #294332; color: #eef7f0; border-color: #5a8065; }
   .surface-card p, .reality-bands p, .journey-guide-card p,
   .surface-card code, .path-stage code { color: #b4c4bc; }
