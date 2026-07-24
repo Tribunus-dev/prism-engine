@@ -19,7 +19,7 @@ export const createKernel = ({ continuity } = {}) => {
     },
   });
   const state = { subjectId, currentObservation: null, observerMode: 'observer', opticalState: 'observation', observations: [], transformations: [], claims: [], receipts: [], visitorIntent: 'explore', disclosureLevel: 'intuition', repositoryState: null, history: [], continuity: { visits: 1, lastObservation: null, lastStage: null } };
-  const subject = { id: subjectId, name: 'Semantic Continuum', intent: null, representations: [], plans: [], computeImage: null, execution: [], receipts: [], existence: 'active', knowledge: 'observed', belief: 'observed', questions: [], lifecycle: [{ phase: 'birth', timestamp: Date.now(), state: 'possible' }], history: [], relationships: [], objects: Object.fromEntries(OBJECT_KINDS.map(kind => [kind, { kind, subject: subjectId, knowledge: 'observed', belief: 'observed', existence: 'active', history: [], relationships: [] }])) };
+  const subject = { id: subjectId, name: 'ComputeImage Runtime Subject', intent: null, representations: [], plans: [], computeImage: null, execution: [], receipts: [], existence: 'active', knowledge: 'observed', belief: 'observed', questions: [], lifecycle: [{ phase: 'birth', timestamp: Date.now(), state: 'possible' }], history: [], relationships: [], objects: Object.fromEntries(OBJECT_KINDS.map(kind => [kind, { kind, subject: subjectId, knowledge: 'observed', belief: 'observed', existence: 'active', history: [], relationships: [] }])) };
   const listeners = new Map();
   const emit = (type, payload) => (listeners.get(type) || []).forEach(listener => listener(payload));
   const kernel = {

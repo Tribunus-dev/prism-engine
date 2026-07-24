@@ -88,8 +88,8 @@ export const createComputeImageControls = () => {
         const result = prediction.querySelector('[data-prediction-result]');
         result.hidden = false;
         result.textContent = correct
-          ? 'Correct. The observation changes; the Semantic Continuum remains invariant.'
-          : 'The observation changes, but the Semantic Continuum keeps its identity. Inspect the provenance.';
+          ? 'Correct. The observation changes while the ComputeImage object remains invariant.'
+          : 'The observation changes, but the ComputeImage subject keeps its identity. Inspect the provenance.';
         prediction.dataset.predictionState = correct ? 'resolved' : 'corrected';
         kernel?.record({
           type: 'prediction',
