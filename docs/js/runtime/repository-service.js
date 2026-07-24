@@ -39,10 +39,21 @@ export const createRepositoryService = ({ fetchImpl = fetch } = {}) => {
         : Array.isArray(capabilities?.capabilities)
           ? capabilities.capabilities
           : [];
+      const normalizedState = state || {};
+      if (!Array.isArray(normalizedState.claims) && Array.isArray(normalizedClaims)) {
+        normalizedState.claims = normalizedClaims;
+      }
+      if (!Array.isArray(normalizedState.capabilities) && Array.isArray(normalizedCapabilities)) {
+        normalizedState.capabilities = normalizedCapabilities;
+      }
       service.state = state;
       service.claims = normalizedClaims;
       service.capabilities = normalizedCapabilities;
-      const snapshot = Object.freeze({ state, claims: service.claims, capabilities: service.capabilities });
+      const snapshot = Object.freeze({
+        state: normalizedState,
+        claims: service.claims,
+        capabilities: service.capabilities,
+      });
       service.publish('repository-ready', snapshot);
       return snapshot;
     }
