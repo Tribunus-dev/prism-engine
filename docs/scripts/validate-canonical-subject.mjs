@@ -36,7 +36,7 @@ if (!canonicalObjectSource.includes('context?.runtime?.getCanonicalSubject?.()')
   checks.push('canonical-object.js is not consuming runtime.getCanonicalSubject');
 }
 
-if (!/modes\s*=\s*\{[^}]*representation:\s*['\"]representation['\"]/ .test(canonicalObjectSource)) {
+if (!/CANONICAL_OBJECT_STAGES/.test(canonicalObjectSource) || !canonicalObjectSource.includes("representation: 'representation'")) {
   checks.push('canonical-object.js is not mapping representation to representation mode');
 }
 

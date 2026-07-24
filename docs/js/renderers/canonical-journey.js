@@ -1,4 +1,10 @@
 
+export const CANONICAL_JOURNEY_STAGES = {
+  execution: ['ComputeImage', 'Execution', ['provider capability is compatible']],
+  receipt: ['Execution', 'Receipt', ['observation occurred', 'provenance is available']],
+  fabric: ['ComputeImage', 'Fabric', ['subject identity persists']],
+};
+
 export const createCanonicalJourneyRenderer = () => {
   const start = (context) => {
     const kernel = context?.kernel;
@@ -24,12 +30,7 @@ export const createCanonicalJourneyRenderer = () => {
       stages.forEach((stage, index) => stage.toggleAttribute('data-canonical-active', index === active));
       const stage = stages[active].dataset.canonicalStage;
       document.body.dataset.canonicalJourneyStage = stage;
-      const mapping = {
-        execution: ['ComputeImage', 'Execution', ['provider capability is compatible']],
-        receipt: ['Execution', 'Receipt', ['observation occurred', 'provenance is available']],
-        fabric: ['ComputeImage', 'Fabric', ['subject identity persists']],
-      };
-      const data = mapping[stage];
+      const data = CANONICAL_JOURNEY_STAGES[stage];
       if (data) {
         try {
           context?.client?.transform({
