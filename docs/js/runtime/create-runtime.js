@@ -54,7 +54,6 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
         kernel.emit('continuity', kernel.state.continuity);
       }
       domRuntime?.mark('observation-graph-loaded');
-      domRuntime?.mark('build-subject', { subject: kernel?.subject?.id });
       const route = projection.project(window?.location?.pathname);
       runtime.currentProjection = route;
       runtime.currentRoute = route?.route || null;
@@ -77,6 +76,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
         subjectId: repositorySnapshot?.state?.subjectId,
       });
       runtime.stateSubject = runtime.getCanonicalSubject();
+      domRuntime?.mark('build-subject', { subject: runtime.stateSubject?.id || kernel?.subject?.id });
       domRuntime?.mark('repository-loaded', { synchronized: Boolean(repositorySnapshot) });
       const invalid = validateTransformations(TRANSFORMATIONS).concat(
         Object.values(PROJECTIONS).flatMap(page => page.claims.map(claim => validateClaim(claim)))
