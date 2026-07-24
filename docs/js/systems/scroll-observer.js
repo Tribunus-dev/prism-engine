@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createScrollObserverSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
   const kernel = context?.kernel;
   document.body.dataset.prismScrollOwner = 'kernel';
   let lastY = window.scrollY;

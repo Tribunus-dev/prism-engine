@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createCanonicalObjectSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const domRuntime = context.domRuntime;
     const kernel = context.kernel;
     const repository = context.repository;
@@ -18,13 +17,8 @@ export const createCanonicalObjectSystem = () => {
         source: repositoryState?.evidenceBoundary ? 'repository-state' : 'runtime-fallback',
         boundary: repositoryState?.evidenceBoundary || 'repository evidence pending',
       },
-    }) || kernel?.subject?.computeImage || {
-      id: 'computational-subject:prism-model',
-      kind: 'ComputeImage',
-      claims,
-      sourceRefs: claims.flatMap(claim => claim.sourceRefs || []),
-      evidenceBoundary: repositoryState?.evidenceBoundary || 'repository evidence pending',
-    };
+    }) || kernel?.subject?.computeImage;
+    if (!computation) return { stop() {} };
     if (kernel?.subject) kernel.subject.computeImage = computation;
     specimen.dataset.subjectId = computation.id;
     specimen.dataset.canonicalObject = 'true';

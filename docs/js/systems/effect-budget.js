@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createEffectBudgetSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context?.kernel;
     const budget = Object.freeze({
       source: ['beam', 'origin', 'haze'],

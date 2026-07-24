@@ -1,18 +1,15 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
-export const createComputeImageRenderer = (context = runtimeContext()) => {
+export const createComputeImageRenderer = (context) => {
   const modes = ['silhouette', 'identity', 'semantic', 'physical', 'execution', 'history', 'evidence', 'fabric'];
   const instances = new WeakMap();
   const resolveComputation = (computation) => {
     if (computation) return computation;
-    const kernelSubject = context?.kernel?.computeImageSubject
-      || context?.kernel?.subject?.computeImage
-      || context?.kernel?.ensureComputeImageSubject?.();
-    return kernelSubject || { id: 'computational-subject:prism-model' };
+    return context?.kernel?.ensureComputeImageSubject?.() || context?.kernel?.subject?.computeImage || null;
   };
   const mount = (element, computation) => {
     if (!element) return null;
     const resolved = resolveComputation(computation);
+    if (!resolved) return null;
     const kernel = context?.kernel;
     const instance = { element, computation: resolved };
     element.dataset.computeimageRenderer = 'shared';
@@ -64,7 +61,7 @@ export const createComputeImageRenderer = (context = runtimeContext()) => {
 };
 
 export const createComputeImageControls = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context.kernel;
     const domRuntime = context.domRuntime;
     const owner = 'computeimage-controls';

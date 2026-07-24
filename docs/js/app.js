@@ -8,7 +8,6 @@ import { createRepositoryService } from './runtime/repository-service.js';
 import { createContinuityService } from './runtime/continuity-service.js';
 import { createObservatoryClient } from './runtime/client.js';
 import { createDomRuntime } from './runtime/dom-runtime.js';
-import { setRuntimeContext } from './runtime/runtime-context.js';
 import { createRuntimeConfig } from './runtime/config.js';
 import { createObservationGraphSystem } from './core/observation-graph.js';
 import { createStateProjectionSystem } from './systems/state-projection.js';
@@ -412,7 +411,6 @@ const start = async () => {
   runtime.continuity = continuity;
   runtime.config = config;
   runtime.degraded = false;
-  setRuntimeContext(runtime);
 
   const diagnostics = createDiagnosticsHandle(runtime, domRuntime, kernel);
   const minimalBootHandle = Object.freeze({

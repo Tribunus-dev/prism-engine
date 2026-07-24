@@ -1,7 +1,6 @@
-import { runtimeContext } from './runtime/runtime-context.js';
 
 export const createVisitorStateSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const intents = {
       explore: { label: 'Explore', emphasis: 'ComputeImage first' },
       understand: { label: 'Understand', emphasis: 'Compiler and representation' },

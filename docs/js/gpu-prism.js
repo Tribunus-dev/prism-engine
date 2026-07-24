@@ -1,8 +1,7 @@
-import { runtimeContext } from './runtime/runtime-context.js';
 import { createPrismError, ERROR_CODES } from './runtime/errors.js';
 
 export const createGpuPrismSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context.kernel;
     const domRuntime = context.domRuntime;
     const config = context.config || {};

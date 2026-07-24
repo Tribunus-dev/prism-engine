@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createCanonicalJourneyRenderer = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context?.kernel;
     const journey = document.querySelector('[data-canonical-journey]');
     if (!journey) return { stop() {} };

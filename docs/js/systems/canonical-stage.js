@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createCanonicalStageSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context?.kernel;
     const stages = [...document.querySelectorAll('[data-canonical-stage]')];
     if (!stages.length || !kernel) return { stop() {} };

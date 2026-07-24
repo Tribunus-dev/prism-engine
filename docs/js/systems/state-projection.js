@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createStateProjectionSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context?.kernel;
     if (!kernel) return;
     const project = () => {

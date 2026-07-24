@@ -1,4 +1,3 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const chapterMap = [
   ['Introduction', 'index.html', 'compiler'],
@@ -18,7 +17,7 @@ export const currentChapter = () => {
 };
 
 export const createNavigationSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context?.kernel;
     const domRuntime = context?.domRuntime;
     const owner = 'navigation';

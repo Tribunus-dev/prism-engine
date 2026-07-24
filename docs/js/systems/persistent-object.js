@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createPersistentObjectSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context.kernel;
     const domRuntime = context.domRuntime;
     const stages = [
@@ -13,7 +12,7 @@ export const createPersistentObjectSystem = () => {
       ['persistence', 'Persistence', 'What remains attached to the object?'],
     ];
     const objectViews = ['silhouette', 'cross-section', 'topology', 'ABI', 'execution', 'receipts', 'history', 'Fabric', 'capabilities', 'relationships'];
-    const objectId = kernel?.subject?.id || 'computational-subject:prism-model';
+    const objectId = kernel?.ensureComputeImageSubject?.().id || kernel?.subject?.id || '';
     const key = 'prism-experience-object';
     const owner = 'persistent-object';
 

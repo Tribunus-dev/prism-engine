@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createObservatoryShellSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context.kernel;
     const domRuntime = context.domRuntime;
     const owner = 'observatory-shell';

@@ -1,4 +1,3 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const makeMotionPreferenceHandler = kernel => () => applyMotionPreference(kernel);
@@ -35,7 +34,7 @@ const announceCanonicalState = observation => {
 };
 
 export const createAccessibilitySystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const kernel = context?.kernel;
     if (!kernel) return { stop() {} };
     const motionHandler = makeMotionPreferenceHandler(kernel);

@@ -1,8 +1,8 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createObservationGraphSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const domRuntime = context?.domRuntime;
+    const kernel = context?.kernel;
     const owner = 'observation-graph';
     const scenes = {
       origin: {
@@ -148,7 +148,7 @@ export const createObservationGraphSystem = () => {
     const page = location.pathname.split('/').pop() || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];
-    const objectId = kernel?.subject?.id || 'computational-subject:prism-model';
+    const objectId = kernel?.ensureComputeImageSubject?.()?.id || kernel?.subject?.id || '';
 
     if (!scene) return { stop() {} };
 
@@ -198,7 +198,6 @@ export const createObservationGraphSystem = () => {
       domRuntime?.assertOwnership?.(owner, badge);
     }
 
-    const kernel = context?.kernel;
     const observation = kernel?.registerObservation({
       instrument: scene.observation,
       phase: scene.phase,

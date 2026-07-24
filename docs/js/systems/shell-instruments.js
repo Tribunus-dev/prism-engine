@@ -1,7 +1,6 @@
-import { runtimeContext } from '../runtime/runtime-context.js';
 
 export const createShellInstrumentsSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const domRuntime = context?.domRuntime;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const owner = 'shell-instruments';

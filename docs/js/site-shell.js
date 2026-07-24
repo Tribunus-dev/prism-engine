@@ -1,5 +1,4 @@
 import { chapterMap, currentChapter } from './systems/navigation.js';
-import { runtimeContext } from './runtime/runtime-context.js';
 
 const initMythology = (domRuntime) => {
   const owner = 'site-shell';
@@ -592,7 +591,7 @@ const initStoryHooks = () => {
 };
 
 export const createSiteShellSystem = () => {
-  const start = (context = runtimeContext()) => {
+  const start = (context) => {
     const domRuntime = context?.domRuntime;
     const kernel = context?.kernel;
     initDiscoveryRooms(domRuntime);
