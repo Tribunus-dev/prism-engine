@@ -6,13 +6,16 @@
 // memory pressure monitoring, receipt storage, and HTTP serving.
 
 use std::sync::Arc;
+use parking_lot::RwLock;
 
 use super::manifest::ContextProfile;
 use super::server::InferenceExecutionPolicy;
 use super::server::{
     CancellationHandle, CreateSessionRequest, GenerateRequest, InferenceCancelledReceipt,
+    KvEpochId, KvPageId,
 };
 use crate::llm::manifest::SessionId;
+use prism_ecs_runtime::{Command, CommandEnvelope, KernelHandle};
 
 // ── Subsystem declarations ───────────────────────────────────────────
 
@@ -114,6 +117,7 @@ pub struct PrismInferenceServer {
     pub memory_monitor: Arc<memory::MemoryPressureMonitor>,
     /// Optional Axum-based HTTP server for the inference API.
     pub http_server: Arc<server::HttpServer>,
+    ecs_kernel: Arc<RwLock<Option<KernelHandle>>>,
 }
 
 impl PrismInferenceServer {
@@ -149,7 +153,39 @@ impl PrismInferenceServer {
             cancellation_manager,
             memory_monitor,
             http_server,
+            ecs_kernel: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Attach the canonical ECS kernel used for journaled inference/KV state.
+    pub fn attach_ecs_kernel(&self, kernel: KernelHandle) {
+        *self.ecs_kernel.write() = Some(kernel);
+    }
+
+    /// Propagate a KV epoch/page reservation to the canonical ECS work entity.
+    pub fn bind_kv_to_ecs(
+        &self,
+        entity: u64,
+        epoch: KvEpochId,
+        page_ids: &[KvPageId],
+        logical_context_tokens: u32,
+        capacity_tokens: u32,
+    ) -> Result<(), String> {
+        let kernel = self
+            .ecs_kernel
+            .read()
+            .clone()
+            .ok_or_else(|| "ECS kernel is not attached".to_string())?;
+        kernel
+            .submit(CommandEnvelope::new(Command::BindInferenceKv {
+                entity,
+                epoch: epoch.0,
+                page_ids: page_ids.iter().map(|page| page.0).collect(),
+                logical_context_tokens,
+                capacity_tokens,
+            }))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     /// Creates a new inference session and returns its [`SessionId`].
