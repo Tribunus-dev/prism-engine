@@ -1,0 +1,10 @@
+/* Compatibility bundle for the legacy homepage instruments. The page exposes
+ * one stylesheet boundary; shared tokens and layout layers are loaded by the
+ * component shell before this page-specific bundle. */
+@import url('signature-inspector.css');
+@import url('living-instruments.css');
+@import url('ubuntu.css');
+@import url('scroll-state.css');
+@import url('scroll-reveal.css');
+@import url('hero-chapters.css');
+@import url('computeimage-anatomy.css');

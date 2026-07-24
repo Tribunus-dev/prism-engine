@@ -113,10 +113,13 @@ impl GraphBuilder {
 
     /// Resolve a SystemId to its index for edge insertion.
     fn resolve(&self, id: SystemId) -> Result<usize, ScheduleError> {
-        self.id_to_idx.get(&id).copied().ok_or(ScheduleError::TargetNotRegistered {
-            from: id,
-            target: id,
-        })
+        self.id_to_idx
+            .get(&id)
+            .copied()
+            .ok_or(ScheduleError::TargetNotRegistered {
+                from: id,
+                target: id,
+            })
     }
 
     /// Add an explicit `after` edge: `from` must run after `target`.
@@ -183,7 +186,11 @@ impl GraphBuilder {
     /// `a` will run before `b`.
     pub fn add_serialization_edge(&mut self, a: SystemId, b: SystemId) {
         // Only add if not already present.
-        if !self.pending_edges.iter().any(|(f, t, _)| *f == a && *t == b) {
+        if !self
+            .pending_edges
+            .iter()
+            .any(|(f, t, _)| *f == a && *t == b)
+        {
             self.pending_edges.push((a, b, EdgeKind::Serialization));
         }
     }
@@ -193,7 +200,8 @@ impl GraphBuilder {
         if from == target {
             return Err(ScheduleError::TargetNotRegistered { from, target });
         }
-        self.resolve(target).map_err(|_| ScheduleError::TargetNotRegistered { from, target })
+        self.resolve(target)
+            .map_err(|_| ScheduleError::TargetNotRegistered { from, target })
     }
 
     /// Consume the builder and produce a validated `DependencyGraph`.

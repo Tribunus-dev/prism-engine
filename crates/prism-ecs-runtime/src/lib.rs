@@ -1,27 +1,28 @@
-pub mod fault;
 pub mod backend;
+pub mod fault;
 pub mod inference;
-pub mod modality;
 mod kernel;
+pub mod modality;
 mod ports;
 pub mod schedule;
 pub mod test_adapters;
 pub mod world_view;
 
+pub use backend::{
+    BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher, KernelDispatchSpec,
+};
 pub use fault::{
     FaultMode, FaultPlan, FaultPoint, FaultingCommandStore, FaultingLeaseCoordinator,
     FaultingSnapshotStore,
 };
-pub use backend::{
-    BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher,
-    KernelDispatchSpec,
+pub use inference::{
+    InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata, KvCacheBinding,
 };
-pub use inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata, KvCacheBinding};
-pub use modality::{ModalityExecution, ModalityFailure, ModalityKind, ModalityWork};
 pub use kernel::{
     create_kernel, AgentSnapshot, Command, CommandEnvelope, CommandResult, CommitOutcome,
     KernelHandle, KernelHealth, RuntimeKernel,
 };
+pub use modality::{ModalityExecution, ModalityFailure, ModalityKind, ModalityWork};
 pub use ports::{
     Admission, AdmittedCommand, AuthorityJournal, CommandStore, CommandWatermarks,
     CompletedCommand, DispatchError, DispatchHandle, DispatchRequest, DispatchStatus, EvidenceSink,

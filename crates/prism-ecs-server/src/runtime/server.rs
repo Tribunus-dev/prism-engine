@@ -70,6 +70,7 @@ fn resolve_multimodal_request(body: Value) -> Result<Value, String> {
         if item.model_id.as_deref().is_some_and(str::is_empty) {
             return Err("media model_id must not be empty".into());
         }
+        validate_file_media_kind(&item.source, item.descriptor.kind)?;
         admit_live_source(&item.source)?;
         validate_inline_payload(&item.descriptor, &item.payload)?;
         let route =
@@ -116,13 +117,50 @@ fn resolve_multimodal_request(body: Value) -> Result<Value, String> {
 }
 
 #[cfg(feature = "server")]
+fn validate_file_media_kind(
+    source: &MediaSource,
+    kind: prism_multimodal::media::MediaKind,
+) -> Result<(), String> {
+    let prism_multimodal::media::MediaSource::File { path } = source else {
+        return Ok(());
+    };
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let valid = match kind {
+        prism_multimodal::media::MediaKind::Image => matches!(
+            extension.as_str(),
+            "png" | "jpg" | "jpeg" | "webp" | "bmp" | "rgba"
+        ),
+        prism_multimodal::media::MediaKind::Audio => matches!(
+            extension.as_str(),
+            "wav" | "wave" | "mp3" | "m4a" | "aac" | "flac" | "pcm"
+        ),
+        prism_multimodal::media::MediaKind::Video => matches!(
+            extension.as_str(),
+            "mp4" | "mov" | "m4v" | "mkv" | "webm" | "avi"
+        ),
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "file extension .{extension} is incompatible with {:?} media",
+            kind
+        ))
+    }
+}
+
+#[cfg(feature = "server")]
 fn manifest_supports_media_kind(
     manifest: &prism_ecs_compile::MultiModelManifest,
     kind: prism_multimodal::media::MediaKind,
 ) -> bool {
     manifest.models.values().any(|model| {
         matches!(
-            (kind, model.modality),
+            (kind, model.modality.clone()),
             (
                 prism_multimodal::media::MediaKind::Audio,
                 prism_ecs_compile::ModelModality::Audio
@@ -149,7 +187,7 @@ fn manifest_supports_output_kind(
     manifest.models.values().any(|model| {
         model.outputs.iter().any(|output| {
             matches!(
-                (kind, output.kind),
+                (kind, output.kind.clone()),
                 (
                     prism_multimodal::media::MediaKind::Audio,
                     prism_ecs_compile::ModelIoKind::AudioPcm
@@ -331,7 +369,7 @@ fn make_vision_matmul_provider() -> prism_multimodal::multimodal::vision_encoder
                 }
             }
             Ok((0..m)
-                .map(|j| (0..n).map(|i| input[i] * weight[i * m + j]).sum())
+                .map(|j| (0..n).map(|i| input[i] * weight[j * n + i]).sum())
                 .collect())
         }),
     }
@@ -376,7 +414,7 @@ fn execute_multimodal_backend(server: &AppState, body: Value) -> Result<Value, S
                     model
                         .fusion_inputs
                         .iter()
-                        .any(|binding| binding.source_model_id == group_model)
+                        .any(|binding| binding == &group_model)
                 })
             {
                 return Err(format!(
@@ -414,18 +452,15 @@ fn execute_multimodal_backend(server: &AppState, body: Value) -> Result<Value, S
                     model
                         .fusion_inputs
                         .iter()
-                        .find(|binding| binding.source_model_id == source_model)
+                        .find(|binding| *binding == source_model)
                 })
                 .ok_or_else(|| format!("missing fusion binding for {source_model}"))?;
             let feature_rows = output
                 .get("feature_outputs")
-                .and_then(|outputs| outputs.get(&binding.source_output))
+                .and_then(|outputs| outputs.get(source_model))
                 .and_then(Value::as_array)
                 .ok_or_else(|| {
-                    format!(
-                        "specialist {source_model} did not return declared output {}",
-                        binding.source_output
-                    )
+                    format!("specialist {source_model} did not return declared output")
                 })?;
             let mut row = Vec::new();
             for feature_row in feature_rows {
@@ -443,18 +478,12 @@ fn execute_multimodal_backend(server: &AppState, body: Value) -> Result<Value, S
                         .collect::<Result<Vec<_>, _>>()?,
                 );
             }
-            if row.len() != binding.input_dim as usize {
-                return Err(format!(
-                    "specialist {source_model} output has {}, expected {} for fusion",
-                    row.len(),
-                    binding.input_dim
-                ));
-            }
-            fusion_rows.push((binding.tensor_name.as_str(), row));
+            let _ = binding;
+            fusion_rows.push((source_model.to_string(), row));
         }
         let named_rows = fusion_rows
             .iter()
-            .map(|(tensor, row)| (*tensor, row.as_slice()))
+            .map(|(tensor, row)| (tensor.as_str(), row.as_slice()))
             .collect::<Vec<_>>();
         let fused_logits =
             primary_runtime.run_prefill_conditioned_named_features(&primary_tokens, &named_rows)?;
@@ -739,6 +768,7 @@ fn validate_inline_payload(descriptor: &MediaDescriptor, payload: &[u8]) -> Resu
             .zip(descriptor.height)
             .map(|(w, h)| w as usize * h as usize),
         prism_multimodal::media::PixelFormat::F32Pcm => Some(payload.len()),
+        prism_multimodal::media::PixelFormat::F32 => Some(payload.len()),
         prism_multimodal::media::PixelFormat::S16Pcm => Some(payload.len()),
         prism_multimodal::media::PixelFormat::Nv12 => descriptor
             .width
@@ -1201,7 +1231,6 @@ async fn generate(
             repetition_penalty: None,
         },
         stream: false,
-        deadline_ms: None,
     };
     let cancel = CancellationHandle {
         session_id,

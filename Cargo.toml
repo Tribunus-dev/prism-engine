@@ -59,6 +59,7 @@ path = "src/bin/prism-workload-manifest.rs"
 name = "prism-diff"
 path = "src/bin/prism-diff.rs"
 
+
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["ws"] }
@@ -113,7 +114,7 @@ prism-spatial-ir = { path = "crates/prism-spatial-ir" }
 prism-ecs-quantization = { path = "crates/prism-ecs-quantization" }
 prism-ecs-server = { path = "crates/prism-ecs-server" }
 prism-ecs-duckdb = { path = "crates/prism-ecs-duckdb" }
-prism-ecs-compile = { path = "crates/prism-ecs-compile" }
+prism-ecs-compile = { path = "crates/prism-ecs-compile", features = ["phase4_evaluation", "ane", "metal-dispatch"] }
 prism-ecs-constitutional = { path = "crates/prism-ecs-constitutional" }
 prism-ecs-runtime = { path = "crates/prism-ecs-runtime" }
 prism-ecs-kernel = { path = "crates/prism-ecs-kernel" }
@@ -306,7 +307,7 @@ prism-ecs-core = { path = "crates/prism-ecs-core" }
 prism-ecs-runtime = { path = "crates/prism-ecs-runtime" }
 prism-ecs-constitutional = { path = "crates/prism-ecs-constitutional" }
 prism-ecs-source = { path = "crates/prism-ecs-source" }
-prism-ecs-compile = { path = "crates/prism-ecs-compile" }
+prism-ecs-compile = { path = "crates/prism-ecs-compile", features = ["phase4_evaluation", "ane", "metal-dispatch"] }
 prism-ecs-codec = { path = "crates/prism-ecs-codec" }
 prism-ecs-kernel = { path = "crates/prism-ecs-kernel" }
 prism-ecs-server = { path = "crates/prism-ecs-server" }

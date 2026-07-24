@@ -147,10 +147,7 @@ impl DialectRegistry {
     }
 
     /// Get all registered component entries for a dialect.
-    pub fn components_for_dialect(
-        &self,
-        namespace: &str,
-    ) -> Option<&Vec<ComponentRegistration>> {
+    pub fn components_for_dialect(&self, namespace: &str) -> Option<&Vec<ComponentRegistration>> {
         self.by_dialect.get(namespace)
     }
 
@@ -224,11 +221,7 @@ impl DialectRegistry {
     }
 
     /// Verify an operation using the op registry.
-    pub fn verify_op(
-        &self,
-        name: &str,
-        context: &OpVerifierContext,
-    ) -> Result<(), Vec<String>> {
+    pub fn verify_op(&self, name: &str, context: &OpVerifierContext) -> Result<(), Vec<String>> {
         self.op_registry.verify(name, context)
     }
 
@@ -239,7 +232,8 @@ impl DialectRegistry {
         operand_types: &[Type],
         attributes: &[Attribute],
     ) -> Option<Vec<Type>> {
-        self.op_registry.infer_result_types(name, operand_types, attributes)
+        self.op_registry
+            .infer_result_types(name, operand_types, attributes)
     }
 }
 
@@ -284,10 +278,7 @@ mod tests {
                     infer_fn: None,
                 }),
             );
-            registry.register(
-                "arith",
-                ComponentRegistration::Trait("Commutative"),
-            );
+            registry.register("arith", ComponentRegistration::Trait("Commutative"));
         }
     }
 

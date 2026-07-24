@@ -311,7 +311,11 @@ impl JointEvolutionSystem {
             } else {
                 b.runtime.clone()
             },
-            ane_unit: if rng.gen::<f64>() < 0.5 { a.ane_unit.clone() } else { b.ane_unit.clone() },
+            ane_unit: if rng.gen::<f64>() < 0.5 {
+                a.ane_unit.clone()
+            } else {
+                b.ane_unit.clone()
+            },
         }
     }
 
@@ -552,7 +556,9 @@ impl JointEvolutionSystem {
             if next_gen.len() >= self.config.population_size {
                 break;
             }
-            let Some(source) = population.get(entry.entity.id().saturating_sub(1) as usize) else { continue };
+            let Some(source) = population.get(entry.entity.id().saturating_sub(1) as usize) else {
+                continue;
+            };
             let entry_genome = source.genome.clone();
             let entry_digest = Self::genome_digest(&entry_genome);
             if !next_gen

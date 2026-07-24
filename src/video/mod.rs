@@ -118,6 +118,7 @@ pub fn generate_video(
     prompt: &str,
     params: VideoParams,
 ) -> Result<VideoGenerationReceipt, PrismVideoError> {
+    crate::ecs_state::publish("video", "generation", "requested", "started", model_path);
     #[cfg(feature = "generation-video")]
     {
         generate_via_compute_core(model_path, prompt, params)
@@ -125,6 +126,13 @@ pub fn generate_video(
 
     #[cfg(not(feature = "generation-video"))]
     {
+        crate::ecs_state::publish(
+            "video",
+            "generation",
+            "completed",
+            "feature_unavailable",
+            model_path,
+        );
         let _ = (model_path, prompt, params);
         Err(PrismVideoError::MissingFeature)
     }

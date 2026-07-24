@@ -1170,7 +1170,6 @@ fn tensor_format_to_codec_variant(tf: &TensorFormat) -> CodecVariant {
         TensorFormat::Palettized4Bit => CodecVariant::Q4_0,
         TensorFormat::Ternary158 => CodecVariant::Ternary1_58,
         TensorFormat::Binary1 => CodecVariant::Ternary,
-        
     }
 }
 

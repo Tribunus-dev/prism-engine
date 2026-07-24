@@ -18,7 +18,9 @@ pub mod sampling;
 pub mod streaming;
 
 pub use cpu as cpu_executor_legacy;
-pub mod ecs_engine { pub use super::engine::*; }
+pub mod ecs_engine {
+    pub use super::engine::*;
+}
 
 #[cfg(feature = "metal-dispatch")]
 pub mod metal;

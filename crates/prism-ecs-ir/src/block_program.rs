@@ -96,7 +96,27 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
 
     let grid = extract_3d_u32(&attrs, "grid")?;
     let block = extract_3d_u32(&attrs, "block")?;
-    let program_name = attrs.0.iter().find_map(|a| if let Attribute::Dictionary(items) = a { items.iter().find_map(|(k,v)| if k == "program_name" { if let Attribute::String(s)=v { Some(s.clone()) } else { None } } else { None }) } else { None }).unwrap_or(op_name);
+    let program_name = attrs
+        .0
+        .iter()
+        .find_map(|a| {
+            if let Attribute::Dictionary(items) = a {
+                items.iter().find_map(|(k, v)| {
+                    if k == "program_name" {
+                        if let Attribute::String(s) = v {
+                            Some(s.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            }
+        })
+        .unwrap_or(op_name);
 
     // ── Build inputs from Operands ────────────────────────────────────────
     let operands = world
@@ -111,7 +131,9 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
             arg_from_value_entity(world, val_entity, binding as u32, MemorySpace::Global)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    for (arg, name) in inputs.iter_mut().zip(["A", "B", "C"]) { arg.name = name.into(); }
+    for (arg, name) in inputs.iter_mut().zip(["A", "B", "C"]) {
+        arg.name = name.into();
+    }
 
     // ── Build outputs from Results ────────────────────────────────────────
     let results = world
@@ -132,7 +154,9 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    for (arg, name) in outputs.iter_mut().zip(["D"]) { arg.name = name.into(); }
+    for (arg, name) in outputs.iter_mut().zip(["D"]) {
+        arg.name = name.into();
+    }
 
     // ── Return the spec ───────────────────────────────────────────────────
 
@@ -320,7 +344,17 @@ pub fn lower_program(
         .add_component(op_entity, Results(output_values.clone()))
         .map_err(|e| format!("failed to add Results: {e}"))?;
     world
-        .add_component(op_entity, OpAttributes(vec![grid_attr, block_attr, Attribute::Dictionary(vec![("program_name".into(), Attribute::String(spec.name.clone()))])]))
+        .add_component(
+            op_entity,
+            OpAttributes(vec![
+                grid_attr,
+                block_attr,
+                Attribute::Dictionary(vec![(
+                    "program_name".into(),
+                    Attribute::String(spec.name.clone()),
+                )]),
+            ]),
+        )
         .map_err(|e| format!("failed to add OpAttributes: {e}"))?;
 
     // ── Delegate to the HAL codegen dispatch ──────────────────────────────

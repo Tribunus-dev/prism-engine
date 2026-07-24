@@ -1,15 +1,17 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use prism_ecs_core::{Entity, EntityKind, World, WorldEpoch};
+use prism_ecs_core::{
+    global_context, Entity, EntityKind, StateStream, TraceContext, World, WorldEpoch,
+};
 
+use crate::backend::{BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher};
 use crate::inference::{InferencePhase, InferenceWorkMetadata};
 use crate::ports::{
     Admission, CommandStore, KernelClock, LeaseCoordinator, ProviderSelectionReceipt,
     ProviderSelectionRequest, ProviderSelector, RecoveryReport, RuntimeError, SnapshotPayload,
     SnapshotStore, StaticProviderSelector, TickReceiptStore, WorldSnapshot,
 };
-use crate::backend::{BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher};
 use crate::schedule::{RuntimeSchedule, TickReceipt};
 
 use prism_ecs_constitutional::lifecycle_command::{
@@ -75,7 +77,10 @@ pub enum Command {
         output_digest: String,
         output_bytes: u64,
     },
-    FailModalityWork { entity: u64, error: String },
+    FailModalityWork {
+        entity: u64,
+        error: String,
+    },
 
     // ── Lifecycle (typed, domain-specific) ──
     Lifecycle(LifecycleCommand),
@@ -105,9 +110,17 @@ pub enum CommandResult {
         entity_id: u64,
         epoch: u64,
     },
-    ModalitySubmitted { entity_id: u64 },
-    ModalityCompleted { entity_id: u64, output_digest: String },
-    ModalityFailed { entity_id: u64, error: String },
+    ModalitySubmitted {
+        entity_id: u64,
+    },
+    ModalityCompleted {
+        entity_id: u64,
+        output_digest: String,
+    },
+    ModalityFailed {
+        entity_id: u64,
+        error: String,
+    },
 
     // Lifecycle
     Lifecycle(LifecycleCommandResult),
@@ -215,6 +228,8 @@ struct RuntimeKernelInner {
     provider_selector: Arc<dyn ProviderSelector>,
     backend_resources: BackendExecutionRegistry,
     sequence: AtomicU64,
+    trace: TraceContext,
+    state_stream: StateStream,
 }
 
 /// Thread-safe handle to the runtime kernel.
@@ -223,7 +238,36 @@ pub struct KernelHandle {
     inner: Arc<RuntimeKernelInner>,
 }
 
+// KernelHandle exposes only operations that serialize world mutation through
+// the kernel's internal locks. The world contains type-erased staged work and
+// extensions which are not themselves marked Sync, even though they are
+// never accessed without the kernel's synchronization boundary. The handle
+// is the cross-thread boundary used by the daemon/application adapter.
+unsafe impl Send for KernelHandle {}
+unsafe impl Sync for KernelHandle {}
+
 impl KernelHandle {
+    /// Subscribe to the authoritative ECS runtime state stream.
+    pub fn state_stream(&self) -> std::sync::mpsc::Receiver<prism_ecs_core::StateRecord> {
+        self.inner.state_stream.subscribe()
+    }
+
+    pub fn state_snapshot(&self) -> prism_ecs_core::StateSnapshot {
+        self.inner.state_stream.snapshot()
+    }
+
+    pub fn publish_state(
+        &self,
+        domain: impl Into<String>,
+        phase: impl Into<String>,
+        kind: impl Into<String>,
+        status: impl Into<String>,
+        state: std::collections::BTreeMap<String, serde_json::Value>,
+    ) {
+        self.inner
+            .state_stream
+            .emit(&self.inner.trace, domain, phase, kind, status, state);
+    }
     /// Persistent compiled-artifact/backend resources for kernel dispatch.
     pub fn backend_resources(&self) -> BackendExecutionRegistry {
         self.inner.backend_resources.clone()
@@ -235,7 +279,24 @@ impl KernelHandle {
         &self,
         artifact: prism_ecs_kernel::KernelArtifact,
     ) -> Result<KernelArtifactBinding, RuntimeError> {
-        self.inner.backend_resources.register_artifact(artifact)
+        let digest = artifact.manifest.manifest_digest.clone();
+        let result = self.inner.backend_resources.register_artifact(artifact);
+        self.inner.state_stream.emit(
+            &self.inner.trace,
+            "runtime",
+            "model_registration",
+            "artifact_registered",
+            if result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            },
+            std::collections::BTreeMap::from([(
+                String::from("artifact_digest"),
+                serde_json::json!(digest),
+            )]),
+        );
+        result
     }
 
     /// Attach an already-registered artifact reference to a work entity in
@@ -449,14 +510,8 @@ impl KernelHandle {
                 model_path,
                 prompt,
                 output_path,
-            } => execute_create_modality_work(
-                &mut world,
-                kind,
-                model_path,
-                prompt,
-                output_path,
-            )
-            .map(|entity_id| CommandResult::ModalitySubmitted { entity_id }),
+            } => execute_create_modality_work(&mut world, kind, model_path, prompt, output_path)
+                .map(|entity_id| CommandResult::ModalitySubmitted { entity_id }),
             Command::CompleteModalityWork {
                 entity,
                 output_digest,
@@ -484,14 +539,21 @@ impl KernelHandle {
             }
             Command::FailModalityWork { entity, error } => {
                 if error.trim().is_empty() {
-                    Err(RuntimeError::Dispatch("modality failure must include an error".into()))
+                    Err(RuntimeError::Dispatch(
+                        "modality failure must include an error".into(),
+                    ))
                 } else {
                     world
                         .add_component(
                             prism_ecs_core::Entity::new(entity, 0),
-                            crate::modality::ModalityFailure { error: error.clone() },
+                            crate::modality::ModalityFailure {
+                                error: error.clone(),
+                            },
                         )
-                        .map(|_| CommandResult::ModalityFailed { entity_id: entity, error })
+                        .map(|_| CommandResult::ModalityFailed {
+                            entity_id: entity,
+                            error,
+                        })
                         .map_err(|error| RuntimeError::Dispatch(error.to_string()))
                 }
             }
@@ -757,7 +819,10 @@ impl RuntimeKernel {
                     prompt,
                     output_path,
                 )?;
-                if let CommandResult::ModalitySubmitted { entity_id: expected } = stored_result {
+                if let CommandResult::ModalitySubmitted {
+                    entity_id: expected,
+                } = stored_result
+                {
                     if entity_id != expected {
                         return Err(RuntimeError::Journal(format!(
                             "replay modality entity mismatch: generated {entity_id}, stored {expected}"
@@ -784,20 +849,32 @@ impl RuntimeKernel {
                         entity_id: expected,
                         output_digest: expected_digest,
                     } if entity == expected && output_digest == expected_digest => {}
-                    _ => return Err(RuntimeError::Journal("replay modality completion mismatch".into())),
+                    _ => {
+                        return Err(RuntimeError::Journal(
+                            "replay modality completion mismatch".into(),
+                        ))
+                    }
                 }
             }
             Command::FailModalityWork { entity, error } => {
                 world
                     .add_component(
                         prism_ecs_core::Entity::new(entity, 0),
-                        crate::modality::ModalityFailure { error: error.clone() },
+                        crate::modality::ModalityFailure {
+                            error: error.clone(),
+                        },
                     )
                     .map_err(|error| RuntimeError::Journal(error.to_string()))?;
                 match stored_result {
-                    CommandResult::ModalityFailed { entity_id, error: expected }
-                        if entity == entity_id && error == expected => {}
-                    _ => return Err(RuntimeError::Journal("replay modality failure mismatch".into())),
+                    CommandResult::ModalityFailed {
+                        entity_id,
+                        error: expected,
+                    } if entity == entity_id && error == expected => {}
+                    _ => {
+                        return Err(RuntimeError::Journal(
+                            "replay modality failure mismatch".into(),
+                        ))
+                    }
                 }
             }
             // Re-execute lifecycle commands so entity ID allocation stays
@@ -887,6 +964,7 @@ impl RuntimeKernel {
         clock: Box<dyn KernelClock>,
         provider_selector: Arc<dyn ProviderSelector>,
     ) -> Self {
+        let trace = global_context();
         Self {
             inner: Arc::new(RuntimeKernelInner {
                 world: std::sync::Arc::new(std::sync::RwLock::new(World::new())),
@@ -898,6 +976,8 @@ impl RuntimeKernel {
                 provider_selector,
                 backend_resources: crate::backend::BackendExecutionRegistry::new(),
                 sequence: AtomicU64::new(0),
+                trace: trace.clone(),
+                state_stream: StateStream::global(),
             }),
             schedule: parking_lot::Mutex::new(None),
         }
@@ -949,6 +1029,7 @@ impl RuntimeKernel {
         clock: Box<dyn KernelClock>,
         provider_selector: Arc<dyn ProviderSelector>,
     ) -> Self {
+        let trace = global_context();
         Self {
             inner: Arc::new(RuntimeKernelInner {
                 world,
@@ -960,6 +1041,8 @@ impl RuntimeKernel {
                 provider_selector,
                 backend_resources: crate::backend::BackendExecutionRegistry::new(),
                 sequence: AtomicU64::new(0),
+                trace: trace.clone(),
+                state_stream: StateStream::global(),
             }),
             schedule: parking_lot::Mutex::new(None),
         }
@@ -1446,7 +1529,9 @@ fn execute_bind_inference_kv(
 ) -> Result<(), RuntimeError> {
     let target = Entity::new(entity, 0);
     if !world.has_entity(target) {
-        return Err(RuntimeError::Entity(format!("inference entity {entity} not found")));
+        return Err(RuntimeError::Entity(format!(
+            "inference entity {entity} not found"
+        )));
     }
     let binding = crate::inference::KvCacheBinding {
         epoch,
@@ -1586,7 +1671,9 @@ fn execute_register_model(
 ) -> Result<u64, RuntimeError> {
     use prism_ecs_constitutional::artifact::{ArtifactDigest, ArtifactMetadata, ArtifactPath};
     use prism_ecs_constitutional::lifecycle::ArtifactLifecycle;
-    use prism_ecs_constitutional::residency::{ModelArtifactRef, ModelFormat, ModelId, ModelLifecycle, ModelName};
+    use prism_ecs_constitutional::residency::{
+        ModelArtifactRef, ModelFormat, ModelId, ModelLifecycle, ModelName,
+    };
     use prism_ecs_constitutional::types::DomainId;
 
     if name.trim().is_empty() || source_path.trim().is_empty() || format.trim().is_empty() {
@@ -1598,9 +1685,8 @@ fn execute_register_model(
     // Registration is deterministic across journal replay. When the source is
     // available, its content is the provenance; otherwise retain a stable
     // descriptor digest so the model can still be admitted for later loading.
-    let provenance = std::fs::read(source_path).unwrap_or_else(|_| {
-        format!("{name}\0{source_path}\0{format}").into_bytes()
-    });
+    let provenance = std::fs::read(source_path)
+        .unwrap_or_else(|_| format!("{name}\0{source_path}\0{format}").into_bytes());
     let digest = ArtifactDigest(*blake3::hash(&provenance).as_bytes());
 
     let artifact = world
@@ -1708,11 +1794,15 @@ mod tests {
         );
         assert_eq!(
             world.get_component::<prism_ecs_constitutional::residency::ModelName>(model),
-            Some(&prism_ecs_constitutional::residency::ModelName("demo".into()))
+            Some(&prism_ecs_constitutional::residency::ModelName(
+                "demo".into()
+            ))
         );
         assert_eq!(
             world.get_component::<prism_ecs_constitutional::residency::ModelFormat>(model),
-            Some(&prism_ecs_constitutional::residency::ModelFormat("safetensors".into()))
+            Some(&prism_ecs_constitutional::residency::ModelFormat(
+                "safetensors".into()
+            ))
         );
         let artifact = Entity::new(model_ref.artifact_id, 0);
         assert_eq!(world.entity_kind(artifact), Some(EntityKind::Artifact));
@@ -1721,7 +1811,8 @@ mod tests {
             Some(&prism_ecs_constitutional::lifecycle::ArtifactLifecycle::Discovered)
         );
         assert_eq!(
-            world.get_component::<prism_ecs_constitutional::artifact::ArtifactDigest>(artifact)
+            world
+                .get_component::<prism_ecs_constitutional::artifact::ArtifactDigest>(artifact)
                 .expect("artifact digest"),
             &model_ref.digest
         );
@@ -1748,7 +1839,8 @@ mod tests {
         let entity = Entity::new(entity_id, 0);
         assert_eq!(world.entity_kind(entity), Some(EntityKind::WorkUnit));
         assert_eq!(
-            world.get_component::<crate::modality::ModalityWork>(entity)
+            world
+                .get_component::<crate::modality::ModalityWork>(entity)
                 .expect("modality component")
                 .kind,
             crate::modality::ModalityKind::Image

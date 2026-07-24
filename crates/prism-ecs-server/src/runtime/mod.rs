@@ -12,12 +12,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
 
-use crate::runtime::manifest::ContextProfile;
 use crate::runtime::manifest::SessionId;
+use crate::runtime::manifest::{ContextProfile, IslandAllocationId};
+use crate::runtime::scheduler::KvDispatchMetadata;
 use crate::runtime::server::PrefillDecodeRuntime;
 use crate::runtime::server_types::{
     CancellationHandle, CreateSessionRequest, GenerateRequest, InferenceCancelledReceipt,
-    InferenceExecutionPolicy,
+    InferenceExecutionPolicy, KvPage, KvPageId, KvPageState,
 };
 
 // ── Local dependency stubs ──────────────────────────────────────────
@@ -116,6 +117,11 @@ pub enum GenerationStreamEvent {
 pub struct ModelRegistryEntry {
     pub model_id: String,
     pub cimage_path: PathBuf,
+    /// Complete namespaced model metadata captured at registration time.
+    /// Keeping this alongside the digest lets ECS admission and recovery
+    /// observe the same manifest that dispatch routing uses.
+    #[serde(default)]
+    pub model_manifest: Option<prism_ecs_compile::MultiModelManifest>,
     /// Digest of the embedded multimodal manifest captured for recovery.
     #[serde(default)]
     pub manifest_digest: Option<String>,
@@ -280,7 +286,10 @@ impl PrismInferenceServer {
             .model_registry
             .write()
             .map_err(|_| "model registry lock poisoned".to_string())?;
-        if registry.contains_key(&model_id) {
+        if let Some(existing) = registry.get(&model_id) {
+            if existing == path {
+                return Ok(());
+            }
             return Err(format!("model_id already registered: {model_id}"));
         }
         registry.insert(model_id.clone(), path.to_path_buf());
@@ -328,6 +337,7 @@ impl PrismInferenceServer {
             entries.push(ModelRegistryEntry {
                 model_id: model_id.clone(),
                 cimage_path: cimage_path.clone(),
+                model_manifest: inspection.model_manifest.clone(),
                 manifest_digest: multimodal_manifest_digest(inspection.model_manifest.as_ref()),
                 native_ternary_promotion: inspection.native_ternary_promotion,
                 joint_tiling_evidence: inspection.joint_tiling_evidence,
@@ -371,6 +381,12 @@ impl PrismInferenceServer {
             {
                 return Err(format!(
                     "multimodal manifest changed for {} since recovery snapshot",
+                    entry.model_id
+                ));
+            }
+            if entry.model_manifest != inspection.model_manifest {
+                return Err(format!(
+                    "model manifest metadata changed for {} since recovery snapshot",
                     entry.model_id
                 ));
             }
@@ -595,6 +611,26 @@ impl PrismInferenceServer {
         Ok(())
     }
 
+    /// Bind an already-loaded wire runtime to the ECS namespace. This is the
+    /// composition seam used by daemon registries so model bytes are not
+    /// loaded twice merely to make the ECS owner authoritative.
+    pub fn register_live_runtime_instance(
+        &self,
+        model_id: &str,
+        runtime: Arc<crate::runtime::wire_runtime::WirePrefillDecodeRuntime>,
+    ) -> Result<(), String> {
+        self.model_path(model_id)?;
+        let mut runtimes = self
+            .live_runtimes
+            .write()
+            .map_err(|_| "live runtime registry lock poisoned".to_string())?;
+        if runtimes.contains_key(model_id) {
+            return Ok(());
+        }
+        runtimes.insert(model_id.to_string(), runtime);
+        Ok(())
+    }
+
     /// Register a live runtime for a specialist namespace embedded in an
     /// owning CImage. The specialist gets its own graph/runtime identity,
     /// while weights and execution artifacts remain backed by the owner's
@@ -679,13 +715,58 @@ impl PrismInferenceServer {
             .0;
         let runtime = self.live_runtime(&model_id)?;
 
+        // Tokenization is part of admission because page ownership must be
+        // derived from the actual prompt, never from transport byte length.
+        let prompt_tokens = runtime.tokenize(&request.prompt)?;
+
+        // Admission creates the authoritative KV epoch before any backend
+        // work starts. Materialize one ECS-owned page record per prompt
+        // chunk, then seal the epoch before dispatch so the backend receives
+        // an active, immutable page set.
+        let kv_epoch = self.kv_manager.create_epoch(None)?;
+        const PAGE_TOKENS: u32 = 4096;
+        let page_ids = prompt_tokens
+            .chunks(PAGE_TOKENS as usize)
+            .enumerate()
+            .map(|(index, tokens)| {
+                self.kv_manager.add_page(
+                    &kv_epoch,
+                    KvPage {
+                        page_id: KvPageId(0),
+                        layer_range: (0, u32::MAX),
+                        token_range: (
+                            (index as u32) * PAGE_TOKENS,
+                            (index as u32) * PAGE_TOKENS + tokens.len() as u32,
+                        ),
+                        original_position_range: (
+                            (index as u32) * PAGE_TOKENS,
+                            (index as u32) * PAGE_TOKENS + tokens.len() as u32,
+                        ),
+                        allocation_id: IslandAllocationId(index as u64),
+                        residency: "ecs-admitted".into(),
+                        state: KvPageState::Allocated,
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        self.kv_manager.seal_epoch(&kv_epoch)?;
+        let dispatch_id = self.scheduler.schedule_prefill_with_metadata(
+            &request.session_id,
+            prompt_tokens.len() as u32,
+            Some(KvDispatchMetadata {
+                model_id: model_id.clone(),
+                epoch_id: kv_epoch,
+                page_ids,
+                absolute_decode_position: 0,
+            }),
+        )?;
+
         // Spawn generation work on the tokio runtime.
         let cancel_mgr = Arc::clone(&self.cancellation_manager);
         let telemetry = Arc::clone(&self.telemetry);
         telemetry.started();
         let session_id = request.session_id;
         let max_tokens = request.max_new_tokens;
-        let prompt = request.prompt;
         let sampling = request.sampling;
         tokio::spawn(async move {
             struct CancellationCleanup {
@@ -702,14 +783,11 @@ impl PrismInferenceServer {
                 session_id,
             };
             {
-                let prompt_tokens = match runtime.tokenize(&prompt) {
-                    Ok(tokens) => tokens,
-                    Err(error) => {
-                        telemetry.failed();
-                        let _ = tx.send(GenerationStreamEvent::Error(error)).await;
-                        return;
-                    }
-                };
+                let _ = tx
+                    .send(GenerationStreamEvent::Status(format!(
+                        "ecs dispatch {dispatch_id:?} admitted with kv epoch {kv_epoch:?}"
+                    )))
+                    .await;
                 let prefill_started = std::time::Instant::now();
                 let mut logits = match runtime.run_prefill(&prompt_tokens) {
                     Ok(logits) => logits,
@@ -797,6 +875,8 @@ impl PrismInferenceServer {
 #[cfg(test)]
 mod recovery_tests {
     use super::*;
+    use crate::engine::model::Model;
+    use crate::runtime::wire_runtime::WirePrefillDecodeRuntime;
     use prism_ecs_compile::model_manifest::{
         ModelIoBinding, ModelIoKind, ModelManifest, ModelModality,
     };
@@ -842,6 +922,49 @@ mod recovery_tests {
     }
 
     #[test]
+    fn live_runtime_binding_reuses_loaded_runtime_instance() {
+        let server = PrismInferenceServer::new(ServerConfig {
+            cimage_path: String::new(),
+            context_profiles: Vec::new(),
+            execution_policy: InferenceExecutionPolicy::HybridMetalAccelerate,
+            max_concurrent_sessions: 1,
+            http_listen: None,
+            receipt_store_path: std::env::temp_dir()
+                .join("prism-runtime-binding.receipts")
+                .display()
+                .to_string(),
+            memory_elevated_threshold_bytes: 1,
+            memory_critical_threshold_bytes: 2,
+        });
+        let model_id = "integration/test";
+        let path = std::path::PathBuf::from("/tmp/integration-test.cimage");
+        server
+            .model_registry
+            .write()
+            .unwrap()
+            .insert(model_id.into(), path);
+        let runtime = Arc::new(WirePrefillDecodeRuntime::new(
+            Model {
+                path: std::path::PathBuf::new(),
+                tensors: std::collections::HashMap::new(),
+                metadata: serde_json::json!({"eos_token_id": 0}),
+            },
+            prism_ecs_ir::model_graph::ModelGraph {
+                nodes: Vec::new(),
+                num_layers: 0,
+            },
+            0,
+        ));
+        server
+            .register_live_runtime_instance(model_id, runtime.clone())
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &server.live_runtime(model_id).unwrap(),
+            &runtime
+        ));
+    }
+
+    #[test]
     fn recovery_snapshot_remains_compatible_without_legacy_digest() {
         let snapshot: ModelRegistrySnapshot = serde_json::from_value(serde_json::json!({
             "entries": [{"model_id": "vision", "cimage_path": "/tmp/vision.cimage"}]
@@ -881,12 +1004,15 @@ mod recovery_tests {
             selected_score: Some(1.0),
             both_backends_feasible: true,
             both_backends_measured: true,
+            all_backends_feasible: false,
+            all_backends_measured: false,
             profiles_evaluated: Vec::new(),
         };
         let snapshot = ModelRegistrySnapshot {
             entries: vec![ModelRegistryEntry {
                 model_id: "vision".into(),
                 cimage_path: "/tmp/vision.cimage".into(),
+                model_manifest: None,
                 manifest_digest: None,
                 native_ternary_promotion: Some(evidence.clone()),
                 joint_tiling_evidence: Some(tiling.clone()),

@@ -2444,6 +2444,7 @@ name = "prism-ane"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "cc",
  "coreml-proto",
  "prism-ecs-ir",
  "prost",
@@ -2458,10 +2459,13 @@ dependencies = [
 name = "prism-ane-runtime"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "coreml-proto",
+ "prism-ane",
  "prism-ecs-core",
  "prism-ecs-ir",
  "serde",
+ "tempfile",
  "thiserror",
 ]
 
@@ -2572,7 +2576,9 @@ dependencies = [
  "bincode",
  "lmdb-rkv",
  "serde",
+ "serde_json",
  "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -2725,6 +2731,8 @@ name = "prism-ecs-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "blake3",
+ "bytemuck",
  "futures",
  "half",
  "image",
@@ -2734,7 +2742,9 @@ dependencies = [
  "prism-ecs-core",
  "prism-ecs-duckdb",
  "prism-ecs-ir",
+ "prism-ecs-kernel",
  "prism-ecs-quantization",
+ "prism-ecs-runtime",
  "prism-kv-cache",
  "prism-multimodal",
  "prism-spatial-ir",
@@ -2756,6 +2766,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "prism-ecs-core",
+ "safetensors 0.8.0",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2794,6 +2805,7 @@ dependencies = [
  "prism-ecs-core",
  "prism-ecs-duckdb",
  "prism-ecs-ir",
+ "prism-ecs-kernel",
  "prism-ecs-quantization",
  "prism-ecs-runtime",
  "prism-ecs-server",

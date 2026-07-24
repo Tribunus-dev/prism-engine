@@ -4234,6 +4234,11 @@ pub fn execute_uop_reference(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prism_ecs_ir::cimage_types::TensorShape;
+    use prism_spatial_ir::graph::{
+        ComputeIntensity, ComputeKind, EdgeDirection, MemoryKind, MemoryRegion, ShapeContract,
+        SpatialEdge, SpatialEdgeId, SpatialGraph, SpatialNode, SpatialNodeId,
+    };
     use prism_spatial_ir::{TinyGraph, UOpKind};
     use std::collections::BTreeMap;
 
@@ -4372,12 +4377,9 @@ mod tests {
         let input = graph.add(UOpKind::Input { name: "x".into() }, vec![], vec![8]);
         let relu = graph.add(UOpKind::Relu, vec![input], vec![8]);
         graph.add(UOpKind::Output { name: "y".into() }, vec![relu], vec![8]);
-        let strategies = [
-            FusionStrategy::StandardFused,
-            FusionStrategy::PerOperation,
-        ];
-        let candidates = compile_uop_graph_strategies(&graph, LoweringTarget::Portable, &strategies)
-            .unwrap();
+        let strategies = [FusionStrategy::StandardFused, FusionStrategy::PerOperation];
+        let candidates =
+            compile_uop_graph_strategies(&graph, LoweringTarget::Portable, &strategies).unwrap();
         let measurements = benchmark_uop_strategy_candidates(&candidates, 2).unwrap();
         let receipt = UOpTuningReceipt::from_candidates(
             "graph-digest",
@@ -4572,6 +4574,89 @@ mod tests {
             )]))
             .unwrap();
         assert_eq!(persistent_output.outputs["y"].len(), 4);
+    }
+
+    #[test]
+    fn spatial_graph_strategy_lowering_projects_through_compact_pipeline() {
+        let mut graph = SpatialGraph::new();
+        let a = graph.add_node(SpatialNode::Memory {
+            id: SpatialNodeId(0),
+            kind: MemoryKind::WeightStorage,
+            region: MemoryRegion {
+                shape: TensorShape { dims: vec![4, 4] },
+                element_size: 4,
+                strides: vec![4, 1],
+            },
+        });
+        let b = graph.add_node(SpatialNode::Memory {
+            id: SpatialNodeId(1),
+            kind: MemoryKind::WeightStorage,
+            region: MemoryRegion {
+                shape: TensorShape { dims: vec![4, 4] },
+                element_size: 4,
+                strides: vec![4, 1],
+            },
+        });
+        let out = graph.add_node(SpatialNode::Memory {
+            id: SpatialNodeId(2),
+            kind: MemoryKind::ActivationBuffer,
+            region: MemoryRegion {
+                shape: TensorShape { dims: vec![4, 4] },
+                element_size: 4,
+                strides: vec![4, 1],
+            },
+        });
+        let compute = graph.add_node(SpatialNode::Compute {
+            id: SpatialNodeId(3),
+            kind: ComputeKind::MatMul,
+            shape: ShapeContract::new(
+                vec![
+                    TensorShape { dims: vec![4, 4] },
+                    TensorShape { dims: vec![4, 4] },
+                ],
+                vec![TensorShape { dims: vec![4, 4] }],
+            ),
+            intensity: ComputeIntensity::ComputeBound,
+        });
+        graph.add_edge(SpatialEdge {
+            id: SpatialEdgeId(0),
+            source: a,
+            sink: compute,
+            direction: EdgeDirection::Forward,
+            source_output_idx: 0,
+            sink_input_idx: 0,
+            shape: Some(TensorShape { dims: vec![4, 4] }),
+        });
+        graph.add_edge(SpatialEdge {
+            id: SpatialEdgeId(1),
+            source: b,
+            sink: compute,
+            direction: EdgeDirection::Forward,
+            source_output_idx: 0,
+            sink_input_idx: 1,
+            shape: Some(TensorShape { dims: vec![4, 4] }),
+        });
+        graph.add_edge(SpatialEdge {
+            id: SpatialEdgeId(2),
+            source: compute,
+            sink: out,
+            direction: EdgeDirection::Forward,
+            source_output_idx: 0,
+            sink_input_idx: 0,
+            shape: Some(TensorShape { dims: vec![4, 4] }),
+        });
+
+        let strategies = [
+            prism_spatial_ir::FusionStrategy::StandardFused,
+            prism_spatial_ir::FusionStrategy::PerOperation,
+        ];
+        let candidates =
+            compile_spatial_graph_strategies(&graph, LoweringTarget::Portable, &strategies)
+                .unwrap();
+        assert_eq!(candidates.len(), strategies.len());
+        assert!(candidates.iter().all(|(_, capture, artifacts)| {
+            !capture.graph.ops.is_empty() && !artifacts.is_empty()
+        }));
     }
 
     #[test]

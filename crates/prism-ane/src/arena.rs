@@ -7,6 +7,8 @@ use crate::arena_info::ArenaInfo;
 pub enum Dtype {
     Float16 = 0,
     Float32 = 1,
+    Int8 = 2,
+    Int32 = 3,
 }
 
 extern "C" {
@@ -39,7 +41,7 @@ impl Arena {
     /// Rust merely holds the metadata.
     pub fn new(logical_dim0: u32, logical_dim1: u32, dtype: Dtype) -> Result<Self, String> {
         match dtype {
-            Dtype::Float16 | Dtype::Float32 => {}
+            Dtype::Float16 | Dtype::Float32 | Dtype::Int8 | Dtype::Int32 => {}
         }
 
         let mut info: ArenaInfo = unsafe { std::mem::zeroed() };

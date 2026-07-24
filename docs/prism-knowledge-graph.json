@@ -1,0 +1,30 @@
+{
+  "version": "1",
+  "nodes": [
+    {"id":"intent","kind":"ontology","knowledge":"derived"},
+    {"id":"representation","kind":"ontology","knowledge":"derived"},
+    {"id":"compiler","kind":"system","knowledge":"repository-evidence"},
+    {"id":"computeimage","kind":"canonical-object","knowledge":"repository-evidence"},
+    {"id":"scheduler","kind":"system","knowledge":"repository-evidence"},
+    {"id":"execution-packet","kind":"canonical-object","knowledge":"architectural-derivation"},
+    {"id":"receipt","kind":"canonical-object","knowledge":"repository-evidence"},
+    {"id":"capability-surface","kind":"canonical-object","knowledge":"repository-evidence"},
+    {"id":"provider","kind":"canonical-object","knowledge":"repository-evidence"},
+    {"id":"fabric","kind":"system","knowledge":"research-direction"},
+    {"id":"adr-031","kind":"repository-record","knowledge":"repository-evidence","source":"adr-031-aiter-atom-rocm-provider.md"},
+    {"id":"research-frontier","kind":"research","knowledge":"research-direction"}
+  ],
+  "edges": [
+    ["intent","representation","transforms-to"],
+    ["representation","compiler","explored-by"],
+    ["compiler","computeimage","seals"],
+    ["computeimage","scheduler","observed-by"],
+    ["scheduler","execution-packet","emits"],
+    ["execution-packet","provider","targets"],
+    ["provider","capability-surface","exposes"],
+    ["computeimage","receipt","validated-by"],
+    ["receipt","fabric","informs"],
+    ["adr-031","provider","documents"],
+    ["research-frontier","fabric","extends"]
+  ]
+}

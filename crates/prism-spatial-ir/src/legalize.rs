@@ -428,11 +428,23 @@ pub fn metal_specific_checks(
     }
 }
 
-pub fn ane_specific_checks(node: &SpatialNode, graph: &SpatialGraph) -> Result<(), Vec<LegalizationError>> {
-    BackendLegalizer::legalize(graph, |candidate| if candidate.id() == node.id() { Ok(()) } else { Ok(()) })
+pub fn ane_specific_checks(
+    node: &SpatialNode,
+    graph: &SpatialGraph,
+) -> Result<(), Vec<LegalizationError>> {
+    BackendLegalizer::legalize(graph, |candidate| {
+        if candidate.id() == node.id() {
+            Ok(())
+        } else {
+            Ok(())
+        }
+    })
 }
 
-pub fn joint_tiling_checks(node: &SpatialNode, graph: &SpatialGraph) -> Result<(), Vec<LegalizationError>> {
+pub fn joint_tiling_checks(
+    node: &SpatialNode,
+    graph: &SpatialGraph,
+) -> Result<(), Vec<LegalizationError>> {
     metal_specific_checks(node, graph)
 }
 

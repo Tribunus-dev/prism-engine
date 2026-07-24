@@ -202,7 +202,9 @@ impl NocTransferSystem {
 
             match transfer_type {
                 DmaTransferType::Put | DmaTransferType::Get => {
-                    if let Some(tx) = world.component_store_mut().column_mut::<DmaTransfer>()
+                    if let Some(tx) = world
+                        .component_store_mut()
+                        .column_mut::<DmaTransfer>()
                         .get_mut(*entity)
                     {
                         tx.status = DmaTransferStatus::InFlight;
@@ -221,7 +223,9 @@ impl NocTransferSystem {
                     };
 
                     if all_complete {
-                        if let Some(tx) = world.component_store_mut().column_mut::<DmaTransfer>()
+                        if let Some(tx) = world
+                            .component_store_mut()
+                            .column_mut::<DmaTransfer>()
                             .get_mut(*entity)
                         {
                             tx.status = DmaTransferStatus::Completed;
@@ -248,7 +252,9 @@ impl NocTransferSystem {
         };
 
         for entity in &in_flight {
-            let tx = match world.component_store_mut().column_mut::<DmaTransfer>()
+            let tx = match world
+                .component_store_mut()
+                .column_mut::<DmaTransfer>()
                 .get_mut(*entity)
             {
                 Some(t) => t,
@@ -314,7 +320,9 @@ impl NocTransferSystem {
             };
 
             if all_complete {
-                if let Some(tx) = world.component_store_mut().column_mut::<DmaTransfer>()
+                if let Some(tx) = world
+                    .component_store_mut()
+                    .column_mut::<DmaTransfer>()
                     .get_mut(*entity)
                 {
                     tx.status = DmaTransferStatus::Completed;
@@ -328,7 +336,9 @@ impl NocTransferSystem {
 
     /// Return the number of transfers still in `Pending` state.
     pub fn pending_count(world: &World) -> usize {
-        world.component_store().column::<DmaTransfer>()
+        world
+            .component_store()
+            .column::<DmaTransfer>()
             .map(|col| {
                 col.iter()
                     .filter(|(_, tx)| tx.status == DmaTransferStatus::Pending)
@@ -339,7 +349,9 @@ impl NocTransferSystem {
 
     /// Return the number of transfers in `InFlight` state.
     pub fn in_flight_count(world: &World) -> usize {
-        world.component_store().column::<DmaTransfer>()
+        world
+            .component_store()
+            .column::<DmaTransfer>()
             .map(|col| {
                 col.iter()
                     .filter(|(_, tx)| tx.status == DmaTransferStatus::InFlight)
@@ -350,7 +362,9 @@ impl NocTransferSystem {
 
     /// Return the number of transfers in `Completed` state.
     pub fn completed_count(world: &World) -> usize {
-        world.component_store().column::<DmaTransfer>()
+        world
+            .component_store()
+            .column::<DmaTransfer>()
             .map(|col| {
                 col.iter()
                     .filter(|(_, tx)| tx.status == DmaTransferStatus::Completed)
@@ -445,7 +459,9 @@ mod tests {
         assert_eq!(d, 2, "both puts dispatch");
         assert_eq!(c, 3, "both puts + sync complete in same tick");
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(tx_sync)
+            world
+                .component_store()
+                .get::<DmaTransfer>(tx_sync)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed,
@@ -459,13 +475,17 @@ mod tests {
 
         // Confirm the puts are still completed.
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(tx_a)
+            world
+                .component_store()
+                .get::<DmaTransfer>(tx_a)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed
         );
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(tx_b)
+            world
+                .component_store()
+                .get::<DmaTransfer>(tx_b)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed
@@ -486,7 +506,9 @@ mod tests {
         assert_eq!(d, 1);
         assert_eq!(c, 2); // put completes + sync barrier satisfied
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(tx_sync)
+            world
+                .component_store()
+                .get::<DmaTransfer>(tx_sync)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed
@@ -510,7 +532,10 @@ mod tests {
 
         // Both transfer and notify entity should have DmaCompletion.
         assert!(world.component_store().get::<DmaCompletion>(e).is_some());
-        assert!(world.component_store().get::<DmaCompletion>(notify).is_some());
+        assert!(world
+            .component_store()
+            .get::<DmaCompletion>(notify)
+            .is_some());
     }
 
     #[test]
@@ -539,25 +564,33 @@ mod tests {
         NocTransferSystem::run(&mut world);
 
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(tx_a)
+            world
+                .component_store()
+                .get::<DmaTransfer>(tx_a)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed
         );
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(tx_b)
+            world
+                .component_store()
+                .get::<DmaTransfer>(tx_b)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed
         );
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(sync_a)
+            world
+                .component_store()
+                .get::<DmaTransfer>(sync_a)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed
         );
         assert_eq!(
-            world.component_store().get::<DmaTransfer>(sync_b)
+            world
+                .component_store()
+                .get::<DmaTransfer>(sync_b)
                 .unwrap()
                 .status,
             DmaTransferStatus::Completed

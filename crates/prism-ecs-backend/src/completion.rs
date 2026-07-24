@@ -4,8 +4,8 @@
 //! and tracks GPU completion. Handles fall through to the actual types
 //! defined in the prism-engine compute core.
 
-use std::sync::{Arc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Weak};
 
 static NEXT_TOKEN_ID: AtomicU64 = AtomicU64::new(1);
 

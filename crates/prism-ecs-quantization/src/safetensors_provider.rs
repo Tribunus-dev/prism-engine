@@ -4,14 +4,19 @@
 //! from their JSON header, and provides streaming access to f32 tensor data.
 
 use std::sync::Mutex;
+use std::io::Read;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use memmap2::{Mmap, MmapOptions};
 
 use prism_ecs_core::identity::{TensorInfo, TensorProvider, TensorReader};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TernaryPreprocessRecord { pub tensor_name: String, pub rows: usize, pub cols: usize, pub changed: bool, pub status:String, pub shard_digest:String, pub metal_packed_file:String, pub packed_file:String, pub scales_file:String, pub group_size:usize, pub physical_tile_width:usize }
 #[derive(Debug,Clone)] pub struct ShardSummary { pub tensor_names:Vec<String> }
+
+pub struct MappedTensor { pub map: Mmap, pub shape: Vec<usize>, pub dtype: String }
+impl MappedTensor { pub fn bytes(&self) -> &[u8] { &self.map } }
 
 /// Provide tensor access from a directory of `.safetensors` shard files.
 ///
@@ -26,8 +31,40 @@ pub struct SafeTensorProvider {
 }
 
 impl SafeTensorProvider {
+    pub fn map_tensor(&self, name: &str) -> Result<MappedTensor, String> {
+        let shard_idx = *self.tensor_index.get(name).ok_or_else(|| format!("tensor '{name}' not found"))?;
+        let path = &self.shards[shard_idx];
+        let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+        let mut len = [0u8; 8]; file.read_exact(&mut len).map_err(|e| e.to_string())?;
+        let header_len = u64::from_le_bytes(len) as usize;
+        let mut header_bytes = vec![0u8; header_len]; file.read_exact(&mut header_bytes).map_err(|e| e.to_string())?;
+        let header: serde_json::Value = serde_json::from_slice(&header_bytes).map_err(|e| e.to_string())?;
+        let info = header.get(name).ok_or_else(|| format!("tensor '{name}' missing header"))?;
+        let shape = info.get("shape").and_then(|v| v.as_array()).ok_or_else(|| "tensor shape missing".to_string())?.iter().map(|v| v.as_u64().unwrap_or(0) as usize).collect::<Vec<_>>();
+        let dtype = info.get("dtype").and_then(|v| v.as_str()).unwrap_or("U8").to_string();
+        let offsets = info.get("data_offsets").and_then(|v| v.as_array()).ok_or_else(|| "tensor offsets missing".to_string())?;
+        let start = offsets.first().and_then(|v| v.as_u64()).ok_or_else(|| "tensor start missing".to_string())?;
+        let end = offsets.get(1).and_then(|v| v.as_u64()).ok_or_else(|| "tensor end missing".to_string())?;
+        let absolute = 8u64.checked_add(header_len as u64).and_then(|v| v.checked_add(start)).ok_or_else(|| "tensor mapping overflow".to_string())?;
+        let map = unsafe { MmapOptions::new().offset(absolute).len((end - start) as usize).map(&file).map_err(|e| format!("map tensor '{name}': {e}"))? };
+        Ok(MappedTensor { map, shape, dtype })
+    }
     pub fn open_streaming_tensor(&self,name:&str)->Result<Box<dyn TensorReader>,String>{self.open_tensor(name)}
-    pub fn shard_summaries(&self)->Result<Vec<ShardSummary>,String>{Ok(self.shards.iter().map(|_| ShardSummary{tensor_names:self.tensor_index.keys().cloned().collect()}).collect())}
+    pub fn shard_summaries(&self)->Result<Vec<ShardSummary>,String>{
+        self.shards.iter().map(|path| {
+            let mut file = std::fs::File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+            let mut len = [0u8; 8];
+            file.read_exact(&mut len).map_err(|e| format!("read header length {}: {e}", path.display()))?;
+            let header_len = u64::from_le_bytes(len) as usize;
+            let mut header_bytes = vec![0u8; header_len];
+            file.read_exact(&mut header_bytes).map_err(|e| format!("read header {}: {e}", path.display()))?;
+            let header: serde_json::Value = serde_json::from_slice(&header_bytes)
+                .map_err(|e| format!("parse safetensors header {}: {e}", path.display()))?;
+            let tensor_names = header.as_object().ok_or_else(|| "safetensors header is not a JSON object".to_string())?
+                .keys().filter(|name| name.as_str() != "__metadata__").cloned().collect();
+            Ok(ShardSummary { tensor_names })
+        }).collect()
+    }
     pub fn write_preprocess_cache(&self, _dir:&Path)->Result<Vec<TernaryPreprocessRecord>,String>{Ok(self.list_tensors()?.into_iter().map(|t|TernaryPreprocessRecord{tensor_name:t.name,rows:t.shape.first().copied().unwrap_or(1),cols:t.shape.last().copied().unwrap_or(1),changed:false,status:"source".into(),shard_digest:String::new(),metal_packed_file:String::new(),packed_file:String::new(),scales_file:String::new(),group_size:0,physical_tile_width:0}).collect())}
     pub fn write_ternary_preprocess_cache_from_records(&self, _dir:&Path, records:Vec<TernaryPreprocessRecord>)->Result<Vec<TernaryPreprocessRecord>,String>{Ok(records)}
     /// Discover all `.safetensors` shards in `dir` and index their tensors.
@@ -48,13 +85,15 @@ impl SafeTensorProvider {
         // Build tensor name → shard index by reading each shard's JSON header.
         let mut tensor_index: HashMap<String, usize> = HashMap::new();
         for (shard_idx, shard_path) in shards.iter().enumerate() {
-            let data = std::fs::read(shard_path)
-                .map_err(|e| format!("read {}: {e}", shard_path.display()))?;
-            // Parse the JSON header to get tensor names.
-            let header_len =
-                u64::from_le_bytes(data[..8].try_into().map_err(|_| "invalid header length")?);
-            let header_bytes = &data[8..8 + header_len as usize];
-            let header: serde_json::Value = serde_json::from_slice(header_bytes)
+            let mut file = std::fs::File::open(shard_path)
+                .map_err(|e| format!("open {}: {e}", shard_path.display()))?;
+            let mut len = [0u8; 8];
+            file.read_exact(&mut len).map_err(|e| format!("read header length: {e}"))?;
+            let header_len = u64::from_le_bytes(len) as usize;
+            let mut header_bytes = vec![0u8; header_len];
+            file.read_exact(&mut header_bytes).map_err(|e| format!("read header: {e}"))?;
+            // Parse only the JSON header to get tensor names; never materialize a full shard here.
+            let header: serde_json::Value = serde_json::from_slice(&header_bytes)
                 .map_err(|e| format!("parse safetensors header: {e}"))?;
             let header_obj = header
                 .as_object()

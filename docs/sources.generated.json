@@ -1,0 +1,157 @@
+{
+  "schema": "prism-sources/v1",
+  "sources": [
+    {
+      "id": "source:crates:prism-amd-npu-runtime",
+      "path": "crates/prism-amd-npu-runtime"
+    },
+    {
+      "id": "source:crates:prism-ecs-artifact",
+      "path": "crates/prism-ecs-artifact"
+    },
+    {
+      "id": "source:crates:prism-ecs-compile",
+      "path": "crates/prism-ecs-compile"
+    },
+    {
+      "id": "source:crates:prism-ecs-core",
+      "path": "crates/prism-ecs-core"
+    },
+    {
+      "id": "source:crates:prism-ecs-ir",
+      "path": "crates/prism-ecs-ir"
+    },
+    {
+      "id": "source:crates:prism-intel-npu-runtime",
+      "path": "crates/prism-intel-npu-runtime"
+    },
+    {
+      "id": "source:crates:prism-metal-runtime",
+      "path": "crates/prism-metal-runtime"
+    },
+    {
+      "id": "source:docs:RELEASE_CHECKLIST",
+      "path": "docs/RELEASE_CHECKLIST.md"
+    },
+    {
+      "id": "source:docs:adr-001-resumable-ternary-distill-compiler",
+      "path": "docs/adr-001-resumable-ternary-distill-compiler.md"
+    },
+    {
+      "id": "source:docs:adr-002-progressive-tensor-update",
+      "path": "docs/adr-002-progressive-tensor-update.md"
+    },
+    {
+      "id": "source:docs:adr-003-canonical-ecs-world",
+      "path": "docs/adr-003-canonical-ecs-world.md"
+    },
+    {
+      "id": "source:docs:adr-005-ecs-native-compiler-absorption",
+      "path": "docs/adr-005-ecs-native-compiler-absorption.md"
+    },
+    {
+      "id": "source:docs:adr-026-workspace-consolidation",
+      "path": "docs/adr-026-workspace-consolidation.md"
+    },
+    {
+      "id": "source:docs:adr-027-memory-model",
+      "path": "docs/adr-027-memory-model.md"
+    },
+    {
+      "id": "source:docs:adr-028-ntb-cluster-coordination",
+      "path": "docs/adr-028-ntb-cluster-coordination.md"
+    },
+    {
+      "id": "source:docs:adr-029-prism-fabric-os-blackhole",
+      "path": "docs/adr-029-prism-fabric-os-blackhole.md"
+    },
+    {
+      "id": "source:docs:adr-030-prism-fabric-os-strix-halo",
+      "path": "docs/adr-030-prism-fabric-os-strix-halo.md"
+    },
+    {
+      "id": "source:docs:adr-031-aiter-atom-rocm-provider",
+      "path": "docs/adr-031-aiter-atom-rocm-provider.md"
+    },
+    {
+      "id": "source:docs:cimage-layout-abi-v1",
+      "path": "docs/cimage-layout-abi-v1.md"
+    },
+    {
+      "id": "source:docs:current-capabilities",
+      "path": "docs/current-capabilities.md"
+    },
+    {
+      "id": "source:docs:demo",
+      "path": "docs/demo.html"
+    },
+    {
+      "id": "source:docs:design-review-checklist",
+      "path": "docs/design-review-checklist.md"
+    },
+    {
+      "id": "source:docs:ecs-architecture",
+      "path": "docs/ecs-architecture.md"
+    },
+    {
+      "id": "source:docs:heterogeneous",
+      "path": "docs/heterogeneous.html"
+    },
+    {
+      "id": "source:docs:maturity-audit-2026-07-15",
+      "path": "docs/maturity-audit-2026-07-15.md"
+    },
+    {
+      "id": "source:docs:pareto-optimization",
+      "path": "docs/pareto-optimization.md"
+    },
+    {
+      "id": "source:docs:physics-of-prism",
+      "path": "docs/physics-of-prism.md"
+    },
+    {
+      "id": "source:docs:prism-bonsai-technical-brief",
+      "path": "docs/prism-bonsai-technical-brief.md"
+    },
+    {
+      "id": "source:docs:prism-constitution",
+      "path": "docs/prism-constitution.md"
+    },
+    {
+      "id": "source:docs:prism-epistemology",
+      "path": "docs/prism-epistemology.md"
+    },
+    {
+      "id": "source:docs:prism-experience-architecture-v2",
+      "path": "docs/prism-experience-architecture-v2.md"
+    },
+    {
+      "id": "source:docs:prism-experience-architecture",
+      "path": "docs/prism-experience-architecture.md"
+    },
+    {
+      "id": "source:docs:prism-interaction-runtime",
+      "path": "docs/prism-interaction-runtime.md"
+    },
+    {
+      "id": "source:docs:prism-meaning-runtime",
+      "path": "docs/prism-meaning-runtime.md"
+    },
+    {
+      "id": "source:docs:prism-observation-protocol",
+      "path": "docs/prism-observation-protocol.md"
+    },
+    {
+      "id": "source:docs:prism-ontology",
+      "path": "docs/prism-ontology.md"
+    },
+    {
+      "id": "source:docs:prism-runtime",
+      "path": "docs/prism-runtime.md"
+    },
+    {
+      "id": "source:docs:prism-semantics",
+      "path": "docs/prism-semantics.md"
+    }
+  ]
+}

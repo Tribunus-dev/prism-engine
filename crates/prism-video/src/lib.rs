@@ -3,6 +3,13 @@ pub mod frame_scheduler;
 pub mod temporal_attention;
 pub mod vae_3d;
 
+pub mod types {
+    #[derive(Debug, Clone, Copy)]
+    pub enum VideoCodec {
+        H264,
+    }
+}
+
 pub use frame_scheduler::FrameIndex;
 
 /// New operation kinds for video generation

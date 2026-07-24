@@ -1,0 +1,7 @@
+@layer components {
+  .site-header,.component-header{min-height:72px}
+  .chapter-rail{max-width:220px}
+  .site-footer,.chapter-nav{width:var(--layout-wide);margin-inline:auto}
+  .site-header a:focus-visible,.chapter-rail a:focus-visible,.chapter-nav a:focus-visible,.menu-toggle:focus-visible{outline-offset:3px}
+  button[disabled]{cursor:not-allowed;opacity:.55}
+}

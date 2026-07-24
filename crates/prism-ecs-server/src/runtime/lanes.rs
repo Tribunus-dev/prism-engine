@@ -4,14 +4,14 @@
 // receipts.  All dispatch methods in this stub "succeed" immediately
 // with fake timing data.
 
-use std::collections::HashMap;
-use std::sync::Mutex;
 use crate::runtime::manifest::{ExecutionLane, QualificationStatus};
 use crate::runtime::server_types::{
     AccelerateExecutionReceipt, ArtifactDigest, CoreMlAuxiliaryReceipt, DispatchId, LaneDispatch,
     LaneExecutionReceipt, MetalExecutionReceipt,
 };
 use prism_ecs_runtime::{BackendExecutionRegistry, KernelDispatchSpec};
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -35,8 +35,20 @@ pub struct LaneRouter {
     kernel_registry: BackendExecutionRegistry,
 }
 
-pub struct LaneCapabilities { pub coreml_ane: bool, pub metal: bool, pub accelerate: bool }
-impl LaneCapabilities { pub fn host() -> Self { Self { coreml_ane: false, metal: false, accelerate: true } } }
+pub struct LaneCapabilities {
+    pub coreml_ane: bool,
+    pub metal: bool,
+    pub accelerate: bool,
+}
+impl LaneCapabilities {
+    pub fn host() -> Self {
+        Self {
+            coreml_ane: false,
+            metal: false,
+            accelerate: true,
+        }
+    }
+}
 
 impl LaneRouter {
     /// Create a new, empty lane router with no cached receipts.
@@ -68,7 +80,10 @@ impl LaneRouter {
         &self,
         _dispatch: &LaneDispatch,
     ) -> Result<MetalExecutionReceipt, String> {
-        Err("legacy Metal prefill router is non-authoritative; dispatch through ECS registry".into())
+        Err(
+            "legacy Metal prefill router is non-authoritative; dispatch through ECS registry"
+                .into(),
+        )
     }
 
     /// Dispatch a Metal decode (token generation) operation.

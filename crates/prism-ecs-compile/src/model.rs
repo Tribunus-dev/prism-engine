@@ -1,8 +1,89 @@
 use serde::{Deserialize, Serialize};
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)] pub enum TensorRole { Weight, Bias, Activation, Input, Output, Unknown, OutputHead, Other, Router { layer: usize }, RoutedExpert { layer: usize, expert: usize, component: String }, RoutedExpertBank { layer: usize, component: String }, SharedExpert { layer: usize, component: String }, Vision { component: String } }
-#[derive(Debug, Clone, Serialize, Deserialize)] pub struct TensorDescriptor { pub name:String, pub shape:Vec<usize>, pub role:TensorRole }
-pub trait ModelAdapter: Send + Sync { fn tensors(&self)->Result<Vec<TensorDescriptor>,String>{Ok(Vec::new())} fn family(&self)->&str {"generic"} fn classify_tensor(&self,name:&str)->TensorDescriptor {classify_tensor(name)} fn validate_inventory(&self,_:&[String])->Result<(),String>{Ok(())} fn layer_count(&self)->Option<usize>{None} }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TensorRole {
+    Weight,
+    Bias,
+    Activation,
+    Input,
+    Output,
+    Unknown,
+    OutputHead,
+    Other,
+    Router {
+        layer: usize,
+    },
+    RoutedExpert {
+        layer: usize,
+        expert: usize,
+        component: String,
+    },
+    RoutedExpertBank {
+        layer: usize,
+        component: String,
+    },
+    SharedExpert {
+        layer: usize,
+        component: String,
+    },
+    Vision {
+        component: String,
+    },
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TensorDescriptor {
+    pub name: String,
+    pub shape: Vec<usize>,
+    pub role: TensorRole,
+}
+pub trait ModelAdapter: Send + Sync {
+    fn tensors(&self) -> Result<Vec<TensorDescriptor>, String> {
+        Ok(Vec::new())
+    }
+    fn family(&self) -> &str {
+        "generic"
+    }
+    fn classify_tensor(&self, name: &str) -> TensorDescriptor {
+        classify_tensor(name)
+    }
+    fn validate_inventory(&self, _: &[String]) -> Result<(), String> {
+        Ok(())
+    }
+    fn layer_count(&self) -> Option<usize> {
+        None
+    }
+}
 pub struct DenseTransformerAdapter;
-impl ModelAdapter for DenseTransformerAdapter { fn tensors(&self)->Result<Vec<TensorDescriptor>,String>{Ok(Vec::new())} }
-pub fn classify_tensor(name:&str)->TensorDescriptor { let n=name.to_ascii_lowercase(); let role=if n.contains("lm_head") || n.contains("output") {TensorRole::OutputHead} else if n.contains("router") {TensorRole::Router { layer: 0 }} else if n.contains("embed") {TensorRole::Input} else if n.contains("norm") {TensorRole::Activation} else if n.contains("bias") {TensorRole::Bias} else if n.contains("weight") {TensorRole::Weight} else {TensorRole::Other}; TensorDescriptor{name:name.into(),shape:vec![],role} }
-pub fn adapter_for_model_dir(path:&std::path::Path)->Result<Box<dyn ModelAdapter>,String>{ if !path.is_dir(){return Err(format!("model path is not a directory: {}",path.display()))} Ok(Box::new(DenseTransformerAdapter)) }
+impl ModelAdapter for DenseTransformerAdapter {
+    fn tensors(&self) -> Result<Vec<TensorDescriptor>, String> {
+        Ok(Vec::new())
+    }
+}
+pub fn classify_tensor(name: &str) -> TensorDescriptor {
+    let n = name.to_ascii_lowercase();
+    let role = if n.contains("lm_head") || n.contains("output") {
+        TensorRole::OutputHead
+    } else if n.contains("router") {
+        TensorRole::Router { layer: 0 }
+    } else if n.contains("embed") {
+        TensorRole::Input
+    } else if n.contains("norm") {
+        TensorRole::Activation
+    } else if n.contains("bias") {
+        TensorRole::Bias
+    } else if n.contains("weight") {
+        TensorRole::Weight
+    } else {
+        TensorRole::Other
+    };
+    TensorDescriptor {
+        name: name.into(),
+        shape: vec![],
+        role,
+    }
+}
+pub fn adapter_for_model_dir(path: &std::path::Path) -> Result<Box<dyn ModelAdapter>, String> {
+    if !path.is_dir() {
+        return Err(format!("model path is not a directory: {}", path.display()));
+    }
+    Ok(Box::new(DenseTransformerAdapter))
+}

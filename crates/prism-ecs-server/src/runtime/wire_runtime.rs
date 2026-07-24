@@ -271,12 +271,39 @@ impl WirePrefillDecodeRuntime {
                 let tensor_count = manifest.tensor_metadata.len();
                 if manifest.canonical_manifest.is_some() {
                     let (batch_steps, realtime_steps) = manifest.canonical_plan_counts();
+                    let mut selected_route = String::new();
+                    if let Ok(runtime_guard) = self.canonical_runtime.lock() {
+                        if let Some(runtime) = runtime_guard.as_ref() {
+                            if let Some(graph) = runtime
+                                .selected_execution_graph()
+                                .filter(|g| !g.profiles.is_empty())
+                            {
+                                let route = graph
+                                    .route_sequence
+                                    .iter()
+                                    .map(|lane| format!("{lane:?}"))
+                                    .collect::<Vec<_>>()
+                                    .join(",");
+                                selected_route = format!(
+                                    " selected route [{}], {} selected profile(s)",
+                                    route,
+                                    graph.profiles.len()
+                                );
+                            }
+                        }
+                    }
+                    let selected_route = if selected_route.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" {selected_route}")
+                    };
                     return format!(
-                        "CImage loaded from {} ({} tensors) — canonical SpatialIR manifest admitted with {} batch and {} realtime fused steps; server KV runtime uses validated compatibility fallback",
+                        "CImage loaded from {} ({} tensors) — canonical SpatialIR manifest admitted with {} batch and {} realtime fused steps; server KV runtime uses validated compatibility fallback;{}",
                         manifest.cimage_path.display(),
                         tensor_count,
                         batch_steps,
                         realtime_steps,
+                        selected_route,
                     );
                 }
                 match &manifest.execution_graph {

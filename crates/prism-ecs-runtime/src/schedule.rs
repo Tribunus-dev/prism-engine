@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
 use crate::backend::KernelArtifactBinding;
+use crate::inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
 use crate::kernel::{
     AdmittedMarker, Command, CommandEnvelope, KernelHandle, PlannedMarker, PublishedMarker,
 };
@@ -1074,7 +1074,10 @@ impl System for DispatchSystem {
             } else {
                 config.clone()
             };
-            let artifact_binding = ctx.world_view.get::<KernelArtifactBinding>(*entity).cloned();
+            let artifact_binding = ctx
+                .world_view
+                .get::<KernelArtifactBinding>(*entity)
+                .cloned();
             if let Some(binding) = &artifact_binding {
                 if let Err(error) = ctx
                     .kernel
@@ -1192,10 +1195,7 @@ impl System for CollectSystem {
         if ctx.should_stop() {
             return Ok(());
         }
-        if let Some(dispatcher) = ctx
-            .dispatcher
-            .or(ctx.kernel_dispatcher)
-        {
+        if let Some(dispatcher) = ctx.dispatcher.or(ctx.kernel_dispatcher) {
             if let Ok(mut active) = ctx.active_dispatches.lock() {
                 let mut i = 0;
                 while i < active.len() {
@@ -1636,15 +1636,17 @@ mod tests {
         }
         let world = handle.lock_world();
         assert_eq!(
-            world
-                .get_component::<WorkState>(Entity::new(work_entity, 0)),
+            world.get_component::<WorkState>(Entity::new(work_entity, 0)),
             Some(&WorkState::Completed)
         );
         let payload = world
             .get_component::<crate::ports::ResultPayload>(Entity::new(work_entity, 0))
             .expect("backend output receipt");
         eprintln!("result bytes {:?}", payload.result.as_bytes());
-        assert!(!payload.result.is_empty(), "backend output receipt should contain bytes");
+        assert!(
+            !payload.result.is_empty(),
+            "backend output receipt should contain bytes"
+        );
     }
 
     #[test]

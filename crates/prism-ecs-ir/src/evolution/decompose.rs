@@ -139,12 +139,7 @@ impl DecompositionSystem {
             pg.decomposition = Default::default();
             pg.fusion = Default::default();
             pg.runtime = Default::default();
-            problems.push(SubProblem::new(
-                1,
-                "memory-config",
-                pg,
-                MEMORY_MASK,
-            ));
+            problems.push(SubProblem::new(1, "memory-config", pg, MEMORY_MASK));
         }
 
         // Sub-problem 3: fusion strategy
@@ -154,12 +149,7 @@ impl DecompositionSystem {
             pg.decomposition = Default::default();
             pg.memory = Default::default();
             pg.runtime = Default::default();
-            problems.push(SubProblem::new(
-                2,
-                "fusion-strategy",
-                pg,
-                FUSION_MASK,
-            ));
+            problems.push(SubProblem::new(2, "fusion-strategy", pg, FUSION_MASK));
         }
 
         // Sub-problem 4: runtime parameters
@@ -169,12 +159,7 @@ impl DecompositionSystem {
             pg.decomposition = Default::default();
             pg.memory = Default::default();
             pg.fusion = Default::default();
-            problems.push(SubProblem::new(
-                3,
-                "runtime-params",
-                pg,
-                RUNTIME_MASK,
-            ));
+            problems.push(SubProblem::new(3, "runtime-params", pg, RUNTIME_MASK));
         }
 
         problems.truncate(self.config.max_sub_problems);

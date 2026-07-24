@@ -20,9 +20,11 @@ use prism_ecs_ir::evolution::{
 use prism_ecs_runtime::KernelHandle;
 use prism_ecs_runtime::{Command, CommandEnvelope};
 use prism_ecs_protocol::{Event, ProtocolRequest, ProtocolError, EventBody, ErrorCode};
-use prism_ecs_protocol_adapter::ApplicationClient;
+use prism_ecs_protocol_adapter::{ApplicationClient, NoopWorkflowCancellation, ProjectionWorkflowStore, WorkflowClient};
 use prism_ecs_server::runtime::server::PrefillDecodeRuntime;
 use prism_ecs_server::runtime::server_types::SamplingConfig;
+use prism_ecs_server::runtime::{CreateSessionRequest, GenerateRequest as EcsGenerateRequest, GenerationStreamEvent};
+use prism_ecs_server::runtime::server_types::{CImageId, ContextProfileId};
 use prism_mcp_core::{
     ArtifactKind, ArtifactRepository, EvidenceReceipt, EvidenceStatus, MetricSet, ProjectionStore,
     ToolInvocationId,
@@ -44,6 +46,10 @@ pub struct DashboardState {
     pub authorized: Arc<AtomicBool>,
     pub auth_token: Arc<String>,
     pub registry: Arc<Mutex<prism_ecs_server::inference::ModelRegistry>>,
+    /// The single ECS inference owner shared with model registration.
+    pub ecs_inference: Arc<prism_ecs_server::runtime::PrismInferenceServer>,
+    /// Maps ECS session ownership back to the Swift workflow thread.
+    pub session_threads: Arc<Mutex<HashMap<u64, uuid::Uuid>>>,
     /// Broadcast channel for model list change notifications.
     pub model_tx: broadcast::Sender<Vec<String>>,
     /// Structured compiler-lab events for native and web clients.
@@ -62,7 +68,7 @@ pub struct DashboardState {
     pub provenance_store: Arc<dyn prism_mcp_core::ProvenanceGraphStore>,
     pub graph_projection: Arc<crate::daemon::trifecta_store::DuckDbGraphProjection>,
     /// Versioned Rust-owned application/workflow protocol boundary.
-    pub workflow_client: Arc<dyn ApplicationClient>,
+    pub workflow_client: Arc<parking_lot::Mutex<WorkflowClient<ProjectionWorkflowStore, NoopWorkflowCancellation>>>,
 }
 
 pub fn router(state: DashboardState) -> Router {
@@ -90,7 +96,7 @@ async fn ecs_protocol(
     Json(request): Json<Result<ProtocolRequest, serde_json::Error>>,
 ) -> Json<Event> {
     match request {
-        Ok(request) => Json(state.workflow_client.send(request)),
+        Ok(request) => Json(state.workflow_client.lock().send(request)),
         Err(error) => Json(Event::new(
             uuid::Uuid::nil(),
             EventBody::Error(ProtocolError::new(
@@ -374,6 +380,8 @@ enum WsClientMessage {
         model: String,
         prompt: String,
         max_tokens: Option<u64>,
+        #[serde(default)]
+        thread_id: Option<uuid::Uuid>,
     },
     ToolCall {
         id: Value,
@@ -436,7 +444,7 @@ async fn handle_generation_socket(socket: WebSocket, state: Arc<DashboardState>)
     let (mut sender, mut receiver) = socket.split();
 
     // Wait for a generate command
-    let (model, prompt, max_tokens) = loop {
+    let (model, prompt, max_tokens, thread_id) = loop {
         let Some(Ok(msg)) = receiver.next().await else {
             return;
         };
@@ -449,8 +457,9 @@ async fn handle_generation_socket(socket: WebSocket, state: Arc<DashboardState>)
                             model,
                             prompt,
                             max_tokens,
+                            thread_id,
                         } if command == "generate" => {
-                            break (model, prompt, max_tokens.unwrap_or(256));
+                            break (model, prompt, max_tokens.unwrap_or(256), thread_id);
                         }
                         WsClientMessage::ToolCall { id, tool, args } => {
                             let response = tokio::task::spawn_blocking({
@@ -476,6 +485,53 @@ async fn handle_generation_socket(socket: WebSocket, state: Arc<DashboardState>)
             _ => continue,
         }
     };
+
+    // The ECS server is the authoritative generation path. This branch also
+    // binds the ECS session to the originating Swift workflow thread so
+    // committed runtime observations can be projected back to that thread.
+    if state.ecs_inference.has_live_runtime(&model).unwrap_or(false) {
+        let session_id = match state.ecs_inference.create_session(CreateSessionRequest {
+            cimage_id: CImageId(model.clone()),
+            context_profile: ContextProfileId("default".into()),
+            execution_policy: prism_ecs_server::runtime::server_types::InferenceExecutionPolicy::HybridMetalAccelerate,
+        }) {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                let _ = sender.send(Message::Text(json!({"error": error}).to_string().into())).await;
+                return;
+            }
+        };
+        if let Some(thread_id) = thread_id {
+            state.session_threads.lock().insert(session_id.0, thread_id);
+        }
+        let mut events = match state.ecs_inference.generate(EcsGenerateRequest {
+            session_id,
+            prompt,
+            max_new_tokens: max_tokens.clamp(1, 4096) as u32,
+            sampling: SamplingConfig::default(),
+            stream: true,
+        }, None) {
+            Ok(events) => events,
+            Err(error) => {
+                let _ = sender.send(Message::Text(json!({"error": error}).to_string().into())).await;
+                return;
+            }
+        };
+        while let Some(event) = events.recv().await {
+            let payload = match event {
+                GenerationStreamEvent::Token(token) => json!({"token": token}),
+                GenerationStreamEvent::Status(status) => json!({"status": status}),
+                GenerationStreamEvent::Done(total) => json!({"done": true, "total_tokens": total}),
+                GenerationStreamEvent::Error(error) => json!({"error": error}),
+                GenerationStreamEvent::Backpressure => json!({"backpressure": true}),
+            };
+            if sender.send(Message::Text(payload.to_string().into())).await.is_err() {
+                return;
+            }
+        }
+        let _ = sender.send(Message::Close(None)).await;
+        return;
+    }
 
     // Verify model is loaded
     let runtime = {
@@ -761,6 +817,8 @@ struct GenerateRequest {
     model: String,
     prompt: String,
     max_tokens: Option<u64>,
+    #[serde(default)]
+    thread_id: Option<uuid::Uuid>,
 }
 
 #[derive(Serialize)]
@@ -772,38 +830,34 @@ async fn generate(
     State(state): State<Arc<DashboardState>>,
     Json(req): Json<GenerateRequest>,
 ) -> Json<GenerateResponse> {
-    let model = match state.registry.lock().acquire(&req.model) {
-        Ok(lease) => lease,
-        Err(error) => {
-            return Json(GenerateResponse {
-                text: format!("[admission] {error}"),
-            })
+    let server = state.ecs_inference.clone();
+    let result = async move {
+        let session_id = server.create_session(CreateSessionRequest {
+            cimage_id: CImageId(req.model),
+            context_profile: ContextProfileId("default".into()),
+            execution_policy: prism_ecs_server::runtime::server_types::InferenceExecutionPolicy::HybridMetalAccelerate,
+        })?;
+        if let Some(thread_id) = req.thread_id {
+            state.session_threads.lock().insert(session_id.0, thread_id);
         }
-    };
-    let max_tokens = req.max_tokens.unwrap_or(256).clamp(1, 4096) as usize;
-    let runtime = model.model.runtime.clone();
-    let lease = model;
-    let result = tokio::task::spawn_blocking(move || {
-        let _lease = lease;
-        let prompt_tokens = runtime.tokenize(&req.prompt)?;
-        if prompt_tokens.is_empty() {
-            return Err("prompt tokenized to an empty sequence".to_string());
-        }
-        let mut logits = runtime.run_prefill(&prompt_tokens)?;
-        let sampling = SamplingConfig::default();
+        let mut events = server.generate(EcsGenerateRequest {
+            session_id,
+            prompt: req.prompt,
+            max_new_tokens: req.max_tokens.unwrap_or(256).clamp(1, 4096) as u32,
+            sampling: SamplingConfig::default(),
+            stream: false,
+        }, None)?;
         let mut output = String::new();
-        for _ in 0..max_tokens {
-            let token = runtime.sample(&logits, &sampling)?;
-            if token == runtime.eos_token_id() {
-                break;
+        while let Some(event) = events.recv().await {
+            match event {
+                GenerationStreamEvent::Token(text) => output.push_str(&text),
+                GenerationStreamEvent::Error(error) => return Err(error),
+                GenerationStreamEvent::Done(_) => break,
+                GenerationStreamEvent::Status(_) | GenerationStreamEvent::Backpressure => {}
             }
-            output.push_str(&runtime.detokenize(token)?);
-            logits = runtime.run_decode(token)?;
         }
         Ok::<String, String>(output)
-    })
-    .await
-    .unwrap_or_else(|error| Err(format!("inference task failed: {error}")));
+    }.await;
     Json(GenerateResponse {
         text: result.unwrap_or_else(|error| format!("[engine] inference failed: {error}")),
     })

@@ -51,17 +51,21 @@ impl StreamingLayerLoader {
     ) -> Result<Self, String> {
         let file = std::fs::File::open(path.as_ref())
             .map_err(|e| format!("open cimage for streaming: {e}"))?;
-        let mmap = unsafe { Mmap::map(&file) }
-            .map_err(|e| format!("mmap cimage for streaming: {e}"))?;
-        Ok(Self::new(mmap, num_layers, layer_data_offset, layer_byte_length))
+        let mmap =
+            unsafe { Mmap::map(&file) }.map_err(|e| format!("mmap cimage for streaming: {e}"))?;
+        Ok(Self::new(
+            mmap,
+            num_layers,
+            layer_data_offset,
+            layer_byte_length,
+        ))
     }
 
     /// Return a byte slice of the weights for `layer_index`.
     ///
     /// This is a direct mmap view — zero-copy read from the OS page cache.
     pub fn load(&self, layer_index: usize) -> &[u8] {
-        let offset = self.layer_data_offset as usize
-            + layer_index * self.layer_byte_length;
+        let offset = self.layer_data_offset as usize + layer_index * self.layer_byte_length;
         &self.mmap[offset..offset + self.layer_byte_length]
     }
 

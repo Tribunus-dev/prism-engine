@@ -1,10 +1,72 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Prism Engine roadmap: end-to-end architecture validation and the upcoming Prism Agent for Mac demo application."><title>Prism Engine · Roadmap</title><link rel="stylesheet" href="site.css"><link rel="stylesheet" href="roadmap.css"></head>
-<body><header class="nav"><a href="index.html" class="wordmark"><b>◢</b> PRISM ENGINE</a><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="heterogeneous.html">Heterogeneous first</a><a href="prism-ml.html">Prism ML</a><a href="roadmap.html" class="current">Roadmap</a><a href="general-compute.html">General Compute</a><a href="field-guide.html">Field guide</a></nav></header><main>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Prism Engine roadmap: end-to-end architecture validation and the upcoming Prism Agent for Mac demo application."><title>Prism Engine · Roadmap</title>
+  <link rel="stylesheet" href="foundation.css">
+  <link rel="stylesheet" href="components.css">
+  <link rel="stylesheet" href="instruments.css">
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body class="">
+  <header class="nav site-header component-header" data-observatory-shell>
+  <a class="brand" href="index.html" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
+  <span class="component-chapter" data-component="chapter">Roadmap</span>
+  <div class="component-orientation" aria-label="Observatory orientation"><strong data-reading-chapter>Roadmap</strong><span data-reading-count>Primary journey</span><span data-reading-time>3 min read</span><span class="reading-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+  <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span>Menu</span></button>
+  <nav id="primary-navigation" aria-label="Primary navigation" data-observatory-navigation>
+    <a href="architecture.html">Graph</a>
+    <a href="demo.html">Artifact</a>
+    <a href="heterogeneous.html">Execution</a>
+    <a href="roadmap.html">Evidence</a>
+    <a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a>
+  </nav>
+</header>
+
+  <main>
 <section class="roadmap-hero"><p class="kicker">VOLUME I / CURRENT WORK</p><h1>From architecture<br><em>to evidence.</em></h1><p class="lede">The next phase is not another isolated subsystem. It is end-to-end validation of ECS-native compile, progressive representation search, KV-cache policy, spatial planning, heterogeneous routing, execution, observation, and recovery on real hardware.</p><div class="status-banner"><span class="live-dot"></span><b>NOW VALIDATING</b><small>CPU · MI300X ROCm/HIP · XDNA/XDNA2 planning</small></div></section>
 <section class="roadmap-section"><label>01 / CURRENT PHASE</label><div><h2>Validate the whole path.</h2><p>Prism is validating the architecture across CPU, MI300X ROCm/HIP, and XDNA/XDNA2 planning surfaces, with different claims kept separate by evidence boundary. The goal is to prove that semantic, representation, routing, KV-cache, and receipt contracts survive different hardware and memory conditions.</p><div class="validation-grid"><article><span>TRACK A</span><h3>CPU reference</h3><p>Correctness differential gates, ECS-native compilation, CImage assembly, and explicit fallback behavior.</p><b class="state-live">ACTIVE VALIDATION</b></article><article><span>TRACK B</span><h3>MI300X ROCm/HIP</h3><p>GPU compilation, progressive quantization and ternary scoring/execution, KV policy, calibration, and evidence comparison on the AMD CDNA target.</p><b class="state-live">ACTIVE VALIDATION</b></article><article><span>TRACK C</span><h3>XDNA / XDNA2</h3><p>Spatial resources, FIFO/DMA/barrier legality, execution planning, and CImage-facing artifacts; hardware execution remains an explicit boundary.</p><b class="state-progress">COMPILE-VERIFIED</b></article></div></div></section>
 <section class="roadmap-section tinted"><label>02 / END-TO-END GATE</label><div><h2>One executable path.<br><em>Every boundary observed.</em></h2><div class="gate-line"><div><b>01</b><span>INGEST</span><small>model identity + source digest</small></div><i>→</i><div><b>02</b><span>COMPILE</span><small>admission + CImage</small></div><i>→</i><div><b>03</b><span>PLAN</span><small>capabilities + placement</small></div><i>→</i><div><b>04</b><span>EXECUTE</span><small>backend + residency</small></div><i>→</i><div><b>05</b><span>PROVE</span><small>receipt + replay evidence</small></div></div><aside class="roadmap-note"><b>Validation principle</b><br>A green subsystem is not enough. The release gate is the complete chain from source model to observable execution outcome.</aside></div></section>
 <section class="roadmap-section"><label>03 / NEXT RELEASE</label><div><h2>Prism Agent for Mac.</h2><p>We are preparing an executable, self-contained Prism Agent application for macOS. It is designed to let users see the architecture working live on their own machines rather than encountering Prism only as a paper or command-line claim.</p><div class="agent-card"><div class="agent-orb">◢</div><div><span>PRISM AGENT / MAC</span><h3>See the system where it runs.</h3><p>The demo will make the local model, compiled artifact, runtime route, hardware state, and execution evidence visible as one connected experience.</p></div><div class="agent-status"><b>IN PREPARATION</b><small>Self-contained executable demo</small></div></div><details><summary>What the demo is meant to show</summary><p>A user should be able to run the app locally, select or load a model, watch the deployment path resolve, inspect the resulting artifact and route, and observe live inference on the machine's available hardware. The goal is architectural legibility, not a synthetic dashboard.</p></details></div></section>
 <section class="roadmap-section tinted"><label>04 / RELEASE CRITERIA</label><div><h2>Ship evidence with the executable.</h2><div class="criteria"><div><span>01</span><b>SELF-CONTAINED</b><small>Install and run without reconstructing the development environment.</small></div><div><span>02</span><b>OBSERVABLE</b><small>Show the model, CImage, execution lane, and current state.</small></div><div><span>03</span><b>LOCAL</b><small>Run on the user's Mac with no required cloud inference path.</small></div><div><span>04</span><b>HONEST</b><small>Distinguish supported routes, fallbacks, and development surfaces.</small></div></div></div></section>
 <section class="roadmap-final"><p class="kicker">THE PRISM PAPERS / VOLUME I</p><h2>The architecture becomes real<br><em>when another engineer can run it.</em></h2><p>Prism Agent is the next bridge between systems research and a live machine: a self-contained way to observe compiler-first deployment in motion.</p><a class="button" href="architecture.html">Read the architecture ↗</a> <a class="link" href="index.html">Back to Prism Engine ↗</a></section>
-</main><footer class="site-footer">PRISM ENGINE / ROADMAP <span>JULY 2026</span></footer><script src="site.js"></script></body></html>
+<section class="roadmap-section living-adr" data-adr="adr-031"><label>05 / LIVING ADR</label><div><h2>Decisions should<br><em>remain observable.</em></h2><p>ADR-031 is a knowledge node connecting a provider decision to capability surfaces, compiler constraints, receipts, and repository evidence.</p><div class="adr-observation"><span class="tiny-label">OPEN ADR / ADR-031</span><strong>AITer Atom ROCm provider</strong><div><span>PROVIDER</span><b>ROCm / HIP</b><span>CAPABILITY</span><b>GPU execution surface</b><span>KNOWLEDGE</span><b>Repository evidence</b></div><a href="adr-031-aiter-atom-rocm-provider.md">Inspect the source record ↗</a></div></div></section>
+<section class="living-atlas" data-atlas-context="Roadmap" aria-labelledby="living-atlas-title">
+  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from semantic input to physical execution and evidence.</p></div>
+  <div class="atlas-layout">
+    <div class="atlas-graph" role="list" aria-label="Prism living architecture">
+      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>meaning → candidates</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="image" role="listitem"><small>02</small><strong>ComputeImage</strong><span>views → sealed artifact</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="scheduler" role="listitem"><small>03</small><strong>Scheduler</strong><span>work → execution lanes</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="evidence" role="listitem"><small>04</small><strong>Evidence</strong><span>run → receipt</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="fabric" role="listitem"><small>05</small><strong>Fabric</strong><span>machine → fleet</span></button>
+      <svg class="atlas-wires" viewBox="0 0 700 360" aria-hidden="true"><path d="M140 70 C250 20 340 20 560 70 M140 70 C250 130 350 130 560 180 M140 180 C270 180 370 180 560 180 M140 290 C250 240 350 240 560 290 M140 290 C290 350 420 350 560 290"/><path d="M560 70 C600 120 600 230 560 290"/></svg>
+    </div>
+    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves semantic identity while searching representation, placement, and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
+  </div>
+</section>
+<aside class="shared-computeimage-observation" aria-labelledby="shared-computeimage-title">
+  <div>
+    <span class="eyebrow">Canonical object / shared observation</span>
+    <h2 id="shared-computeimage-title">The same computation, inspected from Roadmap.</h2>
+    <p>Every instrument observes one ComputeImage identity. This surface changes its disclosure without creating a second artifact.</p>
+  </div>
+  <div class="shared-computeimage-specimen" data-computeimage-renderer data-subject-id="computational-subject:prism-model" role="img" aria-label="Shared canonical ComputeImage observation"></div>
+</aside>
+</main>
+  <footer class="site-footer component-footer">
+  <div class="continue-reading" aria-label="Continue reading">
+    <span class="eyebrow">Continue reading</span>
+    <a class="continue-reading-link" href="field-guide.html">Start Here <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="footer-meta">
+    <span>PRISM ENGINE / Roadmap</span>
+    <span>AGPLv3 · commercial dual licensing</span>
+  </div>
+</footer>
+
+  <script type="module" src="site.js"></script>
+
+</body>
+</html>

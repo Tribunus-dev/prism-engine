@@ -6,7 +6,6 @@
 //! blocks for a logical decode slot and recycling them back to a free
 //! pool.
 
-
 use std::collections::HashMap;
 
 /// Per-position KV cache bytes in NF4 tile640 format (8 heads × 2 (K+V) × 360 bytes).

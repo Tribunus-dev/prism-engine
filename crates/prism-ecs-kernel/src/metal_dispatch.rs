@@ -60,9 +60,52 @@ kernel void ternary_tile640_gemv(
 
 use std::time::Instant;
 
-use metal::{Device, MTLResourceOptions, MTLSize};
+use metal::{Buffer, Device, MTLResourceOptions, MTLSize, SharedEvent};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::{KernelDispatchRequest, KernelError, KernelOutput, KernelVariant};
+
+/// Borrow caller-owned resident storage for the duration of a synchronous
+/// dispatch. The command buffer is waited before the function returns, so the
+/// source slice remains valid for the entire GPU submission without a host
+/// copy. The caller must keep the backing mapping alive until dispatch returns.
+fn shared_buffer(
+    device: &Device,
+    bytes: *const std::ffi::c_void,
+    length: u64,
+    options: MTLResourceOptions,
+) -> Buffer {
+    device.new_buffer_with_bytes_no_copy(bytes, length, options, None)
+}
+
+/// Lock-free backend coordination timeline. Producers reserve monotonically
+/// increasing values; command buffers wait/signal on the same Metal shared
+/// event rather than taking a host mutex or forcing a CPU round trip.
+pub struct MetalEventTimeline {
+    event: SharedEvent,
+    next_value: AtomicU64,
+}
+
+impl MetalEventTimeline {
+    pub fn new(device: &Device) -> Self {
+        Self {
+            event: device.new_shared_event(),
+            next_value: AtomicU64::new(0),
+        }
+    }
+    pub fn reserve(&self) -> u64 {
+        self.next_value.fetch_add(1, Ordering::AcqRel) + 1
+    }
+    pub fn wait(&self, command: &metal::CommandBufferRef, value: u64) {
+        command.encode_wait_for_event(self.event.as_ref(), value);
+    }
+    pub fn signal(&self, command: &metal::CommandBufferRef, value: u64) {
+        command.encode_signal_event(self.event.as_ref(), value);
+    }
+    pub fn event(&self) -> &metal::SharedEventRef {
+        self.event.as_ref()
+    }
+}
 
 /// Dispatch a compiled FP16 GEMV artifact through a reusable Metal command
 /// queue. Inputs are the raw FP16 weight matrix followed by an FP32 vector;
@@ -175,7 +218,8 @@ fn dispatch_uop_rms_norm(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -282,7 +326,8 @@ fn dispatch_uop_conv2d(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -367,7 +412,8 @@ fn dispatch_uop_layer_norm(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -461,7 +507,8 @@ fn dispatch_uop_rope(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -548,7 +595,8 @@ fn dispatch_uop_gather(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -636,7 +684,8 @@ fn dispatch_uop_scatter(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -725,7 +774,8 @@ fn dispatch_uop_ssm(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -805,7 +855,8 @@ fn dispatch_uop_elementwise(request: &KernelDispatchRequest) -> Result<KernelOut
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -874,7 +925,8 @@ fn dispatch_uop_reduce_sum(request: &KernelDispatchRequest) -> Result<KernelOutp
     let pipeline = device
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
-    let input_buffer = device.new_buffer_with_data(
+    let input_buffer = shared_buffer(
+        &device,
         input.as_ptr() as *const _,
         input.len() as u64,
         MTLResourceOptions::StorageModeShared,
@@ -949,7 +1001,8 @@ fn dispatch_uop_reduce_sum_axis(
     let pipeline = device
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
-    let input_buffer = device.new_buffer_with_data(
+    let input_buffer = shared_buffer(
+        &device,
         input.as_ptr() as *const _,
         input.len() as u64,
         MTLResourceOptions::StorageModeShared,
@@ -1032,7 +1085,8 @@ fn dispatch_uop_softmax_axis(
     let pipeline = device
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
-    let input_buffer = device.new_buffer_with_data(
+    let input_buffer = shared_buffer(
+        &device,
         input.as_ptr() as *const _,
         input.len() as u64,
         MTLResourceOptions::StorageModeShared,
@@ -1114,7 +1168,8 @@ fn dispatch_uop_attention_batched(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |input: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             input.as_ptr() as *const _,
             input.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -1197,7 +1252,8 @@ fn dispatch_uop_attention(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |input: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             input.as_ptr() as *const _,
             input.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -1284,7 +1340,8 @@ fn dispatch_uop_matmul(
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -1365,7 +1422,8 @@ fn dispatch_nf4_gemv(request: &KernelDispatchRequest) -> Result<KernelOutput, Ke
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -1454,7 +1512,8 @@ fn dispatch_int8_gemv(request: &KernelDispatchRequest) -> Result<KernelOutput, K
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const _,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,
@@ -1501,15 +1560,19 @@ fn dispatch_int8_gemv(request: &KernelDispatchRequest) -> Result<KernelOutput, K
     })
 }
 
-fn dispatch_gemv(request: &KernelDispatchRequest) -> Result<KernelOutput, KernelError> {
-    let payload = request.artifact.payloads.first().unwrap();
-    if request.inputs.len() < 2 {
+pub fn dispatch_artifact_resident(
+    artifact: &crate::KernelArtifact,
+    inputs: &[&[u8]],
+    _bindings: &[crate::BindingSlot],
+) -> Result<KernelOutput, KernelError> {
+    let payload = artifact.payloads.first().unwrap();
+    if inputs.len() < 2 {
         return Err(KernelError::BindingMismatch(
             "FP16 GEMV requires weights and input buffers".into(),
         ));
     }
-    let weights = &request.inputs[0];
-    let input = &request.inputs[1];
+    let weights = inputs[0];
+    let input = inputs[1];
     if input.len() % 4 != 0 || weights.len() % 2 != 0 {
         return Err(KernelError::DispatchFailed(
             "FP16 GEMV buffer lengths are not element aligned".into(),
@@ -1535,12 +1598,14 @@ fn dispatch_gemv(request: &KernelDispatchRequest) -> Result<KernelOutput, Kernel
     let pipeline = device
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
-    let weight_buffer = device.new_buffer_with_data(
+    let weight_buffer = shared_buffer(
+        &device,
         weights.as_ptr() as *const std::ffi::c_void,
         weights.len() as u64,
         MTLResourceOptions::StorageModeShared,
     );
-    let input_buffer = device.new_buffer_with_data(
+    let input_buffer = shared_buffer(
+        &device,
         input.as_ptr() as *const std::ffi::c_void,
         input.len() as u64,
         MTLResourceOptions::StorageModeShared,
@@ -1572,6 +1637,11 @@ fn dispatch_gemv(request: &KernelDispatchRequest) -> Result<KernelOutput, Kernel
         outputs: vec![bytes.to_vec()],
         dispatch_time_ns: start.elapsed().as_nanos() as u64,
     })
+}
+
+fn dispatch_gemv(request: &KernelDispatchRequest) -> Result<KernelOutput, KernelError> {
+    let inputs: Vec<&[u8]> = request.inputs.iter().map(Vec::as_slice).collect();
+    dispatch_artifact_resident(&request.artifact, &inputs, &request.bindings)
 }
 
 fn dispatch_matmul(request: &KernelDispatchRequest) -> Result<KernelOutput, KernelError> {
@@ -1609,19 +1679,22 @@ fn dispatch_matmul(request: &KernelDispatchRequest) -> Result<KernelOutput, Kern
     let pipeline = device
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
-    let a_buffer = device.new_buffer_with_data(
+    let a_buffer = shared_buffer(
+        &device,
         a.as_ptr() as *const std::ffi::c_void,
         a.len() as u64,
         MTLResourceOptions::StorageModeShared,
     );
-    let b_buffer = device.new_buffer_with_data(
+    let b_buffer = shared_buffer(
+        &device,
         b.as_ptr() as *const std::ffi::c_void,
         b.len() as u64,
         MTLResourceOptions::StorageModeShared,
     );
     let output_buffer =
         device.new_buffer((m * n * 4) as u64, MTLResourceOptions::StorageModeShared);
-    let dims_buffer = device.new_buffer_with_data(
+    let dims_buffer = shared_buffer(
+        &device,
         dims.as_ptr() as *const std::ffi::c_void,
         12,
         MTLResourceOptions::StorageModeShared,
@@ -1698,7 +1771,8 @@ fn dispatch_ternary(request: &KernelDispatchRequest) -> Result<KernelOutput, Ker
         .new_compute_pipeline_state_with_function(&function)
         .map_err(|e| KernelError::DispatchFailed(e.to_string()))?;
     let make_buffer = |bytes: &[u8]| {
-        device.new_buffer_with_data(
+        shared_buffer(
+            &device,
             bytes.as_ptr() as *const std::ffi::c_void,
             bytes.len() as u64,
             MTLResourceOptions::StorageModeShared,

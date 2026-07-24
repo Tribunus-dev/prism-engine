@@ -28,13 +28,14 @@
 
 use std::path::PathBuf;
 
-use sha2::Digest;
 use crate::compilation_systems::sync_compilation_entity;
+use sha2::Digest;
 
 use prism_ecs_core::component::Component;
 use prism_ecs_core::entity::{Entity, EntityKind};
 use prism_ecs_core::identity::{CompilerIdentity, SourceFormat};
 use prism_ecs_core::world::World;
+use prism_ecs_core::{global_context, StateStream};
 use prism_ecs_ir::evolution::{
     foundation::{AneUnitAxis, CandidateGenome, RepresentationAxis},
     progressive::{ProgressiveParetoSearch, ProgressiveSearchConfig},
@@ -220,6 +221,7 @@ pub struct SearchStateComponent {
     /// reducing hardware measurements to the format plan.
     pub best_joint_tiling: Option<crate::search::JointTilingEvidence>,
     pub selection_receipt: crate::search::SearchSelectionReceipt,
+    pub heterogeneous_workload_evidence: Option<crate::search::HeterogeneousScheduleEvidence>,
     /// Durable deployment-level candidates promoted from measured search
     /// records. Runtime policy consumes this archive, not the scalar genome
     /// fitness used during mutation.
@@ -510,6 +512,7 @@ pub fn system_run_search(world: &mut World) -> Result<(), CompileError> {
                 generations_completed: result.generations_completed,
                 format_plan: result.format_plan,
                 best_joint_tiling: result.best_joint_tiling,
+                heterogeneous_workload_evidence: result.heterogeneous_schedule,
                 selection_receipt: result.selection_receipt,
                 selected_deployment_digest: result
                     .deployment_archive
@@ -545,7 +548,9 @@ pub fn system_legalize(world: &mut World) -> Result<(), CompileError> {
             .map_err(|e| CompileError::LegalizationFailed(format!("search state missing: {e}")))?;
         if let Some(plan) = search.format_plan.as_deref() {
             serde_json::from_str::<prism_ecs_ir::evolution::compile_plan::FormatPlan>(plan)
-                .map_err(|e| CompileError::LegalizationFailed(format!("invalid selected format plan: {e}")))?;
+                .map_err(|e| {
+                    CompileError::LegalizationFailed(format!("invalid selected format plan: {e}"))
+                })?;
         } else if config.production_mode {
             return Err(CompileError::LegalizationFailed(
                 "production legalization requires a selected format plan".into(),
@@ -929,10 +934,11 @@ pub fn system_generate_kernels(world: &mut World) -> Result<(), CompileError> {
         },
     ];
     let uop_strategy_candidates = if uop_capture_result.is_ok() {
-        crate::compile_spatial_graph_strategies(&graph.graph, uop_target, &strategies)
-            .map_err(|error| {
+        crate::compile_spatial_graph_strategies(&graph.graph, uop_target, &strategies).map_err(
+            |error| {
                 CompileError::KernelGenFailed(format!("UOp strategy compilation failed: {error}"))
-            })?
+            },
+        )?
     } else {
         Vec::new()
     };
@@ -955,8 +961,8 @@ pub fn system_generate_kernels(world: &mut World) -> Result<(), CompileError> {
             batch_size: 1,
             sequence_length: 1,
         };
-        match crate::benchmark_uop_strategy_candidates(&uop_strategy_candidates, 3)
-            .and_then(|measurements| {
+        match crate::benchmark_uop_strategy_candidates(&uop_strategy_candidates, 3).and_then(
+            |measurements| {
                 crate::uop::UOpTuningReceipt::from_candidates(
                     graph.graph_digest.clone(),
                     uop_target,
@@ -968,7 +974,8 @@ pub fn system_generate_kernels(world: &mut World) -> Result<(), CompileError> {
                     crate::uop::UOpMeasurementSource::CpuReference,
                     true,
                 )
-            }) {
+            },
+        ) {
             Ok(receipt) => Some(receipt),
             Err(error) => Some(
                 crate::uop::UOpTuningReceipt::explicit_fallback(
@@ -1067,9 +1074,9 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
         CompileError::CImageEmitFailed("source has no tensor data provider".into())
     })?;
     for tensor in source.0.catalog.iter() {
-        let payload = provider
-            .read_tensor(tensor)
-            .map_err(|error| CompileError::CImageEmitFailed(format!("read tensor {}: {error}", tensor.name)))?;
+        let payload = provider.read_tensor(tensor).map_err(|error| {
+            CompileError::CImageEmitFailed(format!("read tensor {}: {error}", tensor.name))
+        })?;
         let dim_m = tensor.shape.first().copied().unwrap_or(0) as u32;
         let dim_n = tensor.shape.get(1).copied().unwrap_or(0) as u32;
         writer
@@ -1091,6 +1098,9 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
         writer.set_selection_receipt(search.selection_receipt.clone());
         if let Some(evidence) = &search.best_joint_tiling {
             writer.set_joint_tiling_evidence(evidence.clone());
+        }
+        if let Some(evidence) = &search.heterogeneous_workload_evidence {
+            writer.set_heterogeneous_workload_evidence(evidence.clone());
         }
     }
 
@@ -1185,9 +1195,9 @@ pub fn system_certify(world: &mut World) -> Result<(), CompileError> {
             "CImage artifact digest does not match emitted bytes".into(),
         ));
     }
-    let source = world
-        .get_extension::<CurrentSource>()
-        .ok_or_else(|| CompileError::CompilationFailed("source missing during certification".into()))?;
+    let source = world.get_extension::<CurrentSource>().ok_or_else(|| {
+        CompileError::CompilationFailed("source missing during certification".into())
+    })?;
     if reader.header.source_identity.as_ref() != Some(&source.0.identity)
         || reader.header.source_catalog.as_ref() != Some(&source.0.catalog)
     {
@@ -1195,8 +1205,16 @@ pub fn system_certify(world: &mut World) -> Result<(), CompileError> {
             "CImage source provenance does not match the session source".into(),
         ));
     }
-    let expected_names = source.0.catalog.tensors.iter().map(|tensor| tensor.name.as_str());
-    if expected_names.clone().any(|name| !model.tensors.contains_key(name)) {
+    let expected_names = source
+        .0
+        .catalog
+        .tensors
+        .iter()
+        .map(|tensor| tensor.name.as_str());
+    if expected_names
+        .clone()
+        .any(|name| !model.tensors.contains_key(name))
+    {
         return Err(CompileError::CompilationFailed(
             "CImage is missing a catalog tensor payload".into(),
         ));
@@ -1242,7 +1260,10 @@ pub fn system_build_receipt(world: &mut World) -> Result<(), CompileError> {
     let session_state = world
         .component::<CompilationSession>(session)
         .map_err(|e| CompileError::CompilationFailed(e.to_string()))?;
-    if !matches!(session_state.status, SessionStatus::Certified | SessionStatus::Complete) {
+    if !matches!(
+        session_state.status,
+        SessionStatus::Certified | SessionStatus::Complete
+    ) {
         return Err(CompileError::CompilationFailed(
             "receipt build requires a certified CImage artifact".into(),
         ));
@@ -1337,7 +1358,12 @@ pub fn system_build_receipt(world: &mut World) -> Result<(), CompileError> {
     }
 
     receipt.receipt_id = hex::encode(sha2::Sha256::digest(
-        format!("{}:{}", receipt.output_digest, receipt.search_trace_digest.clone().unwrap_or_default()).as_bytes(),
+        format!(
+            "{}:{}",
+            receipt.output_digest,
+            receipt.search_trace_digest.clone().unwrap_or_default()
+        )
+        .as_bytes(),
     ));
     let receipt_id = receipt.receipt_id.clone();
     let cimage_digest = receipt.output_digest.clone();
@@ -1412,6 +1438,9 @@ impl CompilationOrchestrator {
         world.add_resource(SessionHandle(session));
         world.add_resource(VecEventSink::new());
         world.add_resource(EvolutionRuntime::global());
+        let trace = global_context();
+        world.add_resource(trace.clone());
+        world.add_resource(StateStream::global());
 
         Self { session, world }
     }
@@ -1509,7 +1538,7 @@ impl CompilationOrchestrator {
                     stage_results
                         .last()
                         .and_then(|stage| stage.error.clone())
-                    .unwrap_or_else(|| "pipeline failed".into()),
+                        .unwrap_or_else(|| "pipeline failed".into()),
                 );
             }
             let _ = sync_compilation_entity(&mut self.world);
@@ -1580,7 +1609,9 @@ impl CompilationOrchestrator {
             }
             CompilationStage::KernelGeneration => system_generate_kernels(&mut self.world),
             CompilationStage::CImageEmission => system_emit_cimage(&mut self.world),
-            CompilationStage::Certification | CompilationStage::Certify => system_certify(&mut self.world),
+            CompilationStage::Certification | CompilationStage::Certify => {
+                system_certify(&mut self.world)
+            }
             CompilationStage::ReceiptBuild => system_build_receipt(&mut self.world),
         };
         if result.is_ok() {
@@ -1915,7 +1946,10 @@ mod tests {
         let tensors = vec![
             TensorDescriptor {
                 name: "embed_tokens.weight".into(),
-                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 32000 * 4096 * 2,
+                shape: vec![32000, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "float16".into(),
                 data_offset: Some(0),
@@ -1924,7 +1958,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "lm_head.weight".into(),
-                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 262_144_000, byte_length: 32000 * 4096 * 2,
+                shape: vec![32000, 4096],
+                dtype: "f16".into(),
+                byte_offset: 262_144_000,
+                byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "float16".into(),
                 data_offset: Some(262_144_000),

@@ -24,8 +24,10 @@ pub fn vae_3d_decode(
                 let src_x = x * width / out_width;
                 for channel in 0..out_channels {
                     let source_channel = channel.min(_channels - 1);
-                    let source = (((frame * _channels + source_channel) * height + src_y) * width) + src_x;
-                    let target = (((frame * out_channels + channel) * out_height + y) * out_width) + x;
+                    let source =
+                        (((frame * _channels + source_channel) * height + src_y) * width) + src_x;
+                    let target =
+                        (((frame * out_channels + channel) * out_height + y) * out_width) + x;
                     output[target] = latent.get(source).copied().unwrap_or(0.0).tanh();
                 }
             }

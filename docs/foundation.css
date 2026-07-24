@@ -1,0 +1,22 @@
+@layer reset, tokens, base, utilities;
+@layer reset {
+  *,*::before,*::after{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0}
+  button,a,select{font:inherit}
+  :focus-visible{outline:2px solid var(--chapter-accent,var(--compiler));outline-offset:4px}
+}
+@layer tokens {
+  :root{--layout-content:min(100% - 40px,760px);--layout-wide:min(100% - 40px,1180px);--space-1:8px;--space-2:16px;--space-3:24px;--space-4:40px;--space-5:64px;--space-6:96px;--space-7:144px;--motion-fast:180ms;--motion-base:420ms;--motion-slow:900ms}
+}
+@layer base {
+  body{min-width:320px;overflow-x:hidden}
+  p,li{max-width:75ch}
+  .reading-column{width:var(--layout-content);margin-inline:auto}
+  .wide-stage{width:var(--layout-wide);margin-inline:auto}
+  .visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+}
+@layer utilities {
+  [hidden]{display:none!important}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}}
+}

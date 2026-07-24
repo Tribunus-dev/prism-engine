@@ -1,8 +1,8 @@
 //! prism-mcp-core: shared framework for the prism-mcpd multi-tool MCP daemon.
 
 pub mod artifact;
-pub mod db;
 pub mod coordination;
+pub mod db;
 pub mod evidence;
 pub mod file_lock;
 pub mod graph_query;
@@ -20,11 +20,11 @@ pub mod subprocess;
 pub mod work_journal;
 
 pub use artifact::{ArtifactId, ArtifactKind, ArtifactRecord};
-pub use db::DbManager;
 pub use coordination::{
     ClaimResult, CoordinationEvent, CoordinationSession, CoordinationStore, LockResult, PathLock,
     WorkItem,
 };
+pub use db::DbManager;
 pub use evidence::{EvidenceReceipt, EvidenceStatus, MetricSet, ToolInvocationId};
 pub use file_lock::{FileLock, FileLockGuard};
 pub use graph_query::{
@@ -40,8 +40,8 @@ pub use lease::{ResourceClass, ResourceLease, ResourceLeaseManager, ResourceRequ
 pub use log::init_logging;
 pub use protocol::{
     ConnectionId, DaemonState, McpError, McpHandler, McpRequest, McpResponse, McpStatus,
-    NormalizedToolCall, RequestContext, RequestEnvelope, ResponseFrame,
-    ToolCallNormalizationError, ToolCallNormalizationReceipt, ToolRequest, ToolResult,
+    NormalizedToolCall, RequestContext, RequestEnvelope, ResponseFrame, ToolCallNormalizationError,
+    ToolCallNormalizationReceipt, ToolRequest, ToolResult,
 };
 pub use provenance::{
     ProvenanceDomain, ProvenanceEdge, ProvenanceGraphStore, ProvenanceKind, ProvenanceNode,

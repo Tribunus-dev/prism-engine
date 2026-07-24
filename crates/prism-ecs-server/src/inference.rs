@@ -3,6 +3,7 @@
 //! Wraps the inference engine for the server, providing
 //! a thread-safe model registry and active session tracking.
 
+use prism_ecs_core::{global_context, StateStream, TraceContext};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use std::time::Instant;
 
 use crate::engine::model::Model;
 use crate::runtime::wire_runtime::WirePrefillDecodeRuntime;
+use crate::runtime::PrismInferenceServer;
 use prism_ecs_ir::model_graph::{ModelGraph, UnifiedConfig};
 
 /// Loaded model instance wrapping the runtime engine.
@@ -91,6 +93,9 @@ struct RegistryState {
     models: std::sync::Mutex<HashMap<String, Arc<ModelInstance>>>,
     usage: std::sync::Mutex<HashMap<String, ModelUsage>>,
     max_loaded: usize,
+    ecs_server: std::sync::RwLock<Option<Arc<PrismInferenceServer>>>,
+    trace: TraceContext,
+    state_stream: StateStream,
 }
 
 struct ModelUsage {
@@ -125,13 +130,33 @@ impl Default for ModelRegistry {
 
 impl ModelRegistry {
     pub fn new() -> Self {
+        let trace = global_context();
         Self {
             state: Arc::new(RegistryState {
                 models: std::sync::Mutex::new(HashMap::new()),
                 usage: std::sync::Mutex::new(HashMap::new()),
                 max_loaded: 4,
+                ecs_server: std::sync::RwLock::new(None),
+                state_stream: StateStream::global(),
+                trace,
             }),
         }
+    }
+
+    pub fn state_stream(&self) -> std::sync::mpsc::Receiver<prism_ecs_core::StateRecord> {
+        self.state.state_stream.subscribe()
+    }
+
+    pub fn state_snapshot(&self) -> prism_ecs_core::StateSnapshot {
+        self.state.state_stream.snapshot()
+    }
+
+    /// Bind this compatibility registry to the single ECS inference owner.
+    /// Subsequent model loads register the same artifact in the ECS server so
+    /// model metadata, KV ownership, and execution routing share one source.
+    pub fn attach_ecs_server(&self, server: Arc<PrismInferenceServer>) -> Result<(), String> {
+        *self.state.ecs_server.write().map_err(|e| e.to_string())? = Some(server);
+        Ok(())
     }
 
     /// Load a model from disk and register it under its file-stem name.
@@ -139,6 +164,30 @@ impl ModelRegistry {
         let instance = ModelInstance::load(path)?;
         let name = instance.name.clone();
         let instance = Arc::new(instance);
+        self.state.state_stream.emit(
+            &self.state.trace,
+            "model_registry",
+            "registration",
+            "requested",
+            "started",
+            std::collections::BTreeMap::from([
+                (String::from("model_id"), serde_json::json!(name)),
+                (
+                    String::from("path"),
+                    serde_json::json!(path.display().to_string()),
+                ),
+            ]),
+        );
+        if let Some(server) = self
+            .state
+            .ecs_server
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone()
+        {
+            server.register_model(&name, path)?;
+            server.register_live_runtime_instance(&name, instance.runtime.clone())?;
+        }
         let mut models = self.state.models.lock().map_err(|e| e.to_string())?;
         if models.len() >= self.state.max_loaded && !models.contains_key(&name) {
             let mut usage = self.state.usage.lock().map_err(|e| e.to_string())?;
@@ -161,10 +210,19 @@ impl ModelRegistry {
                 last_used: Instant::now(),
             },
         );
-        models
+        let loaded = models
             .get(&name)
             .cloned()
-            .ok_or_else(|| "model not found after insert".to_string())
+            .ok_or_else(|| "model not found after insert".to_string())?;
+        self.state.state_stream.emit(
+            &self.state.trace,
+            "model_registry",
+            "registration",
+            "completed",
+            "active",
+            std::collections::BTreeMap::from([(String::from("model_id"), serde_json::json!(name))]),
+        );
+        Ok(loaded)
     }
 
     /// Retrieve a loaded model by name.

@@ -1,6 +1,30 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="A progressive technical deep dive into Prism Engine architecture."><title>Prism Engine · Architecture</title><link rel="stylesheet" href="site.css"><link rel="stylesheet" href="architecture.css"><link rel="stylesheet" href="architecture-explainers.css"></head>
-<body><header class="nav"><a href="index.html" class="wordmark"><b>◢</b> PRISM ENGINE</a><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="heterogeneous.html">Heterogeneous first</a><a href="prism-ml.html">Prism ML</a><a href="roadmap.html">Roadmap</a><a href="general-compute.html">General Compute</a><a href="field-guide.html">Field guide</a><a href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a></nav></header><main>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A progressive technical deep dive into Prism Engine architecture."><title>Prism Engine · Architecture</title>
+  <link rel="stylesheet" href="foundation.css">
+  <link rel="stylesheet" href="components.css">
+  <link rel="stylesheet" href="instruments.css">
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body class="">
+  <header class="nav site-header component-header" data-observatory-shell>
+  <a class="brand" href="index.html" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
+  <span class="component-chapter" data-component="chapter">Architecture</span>
+  <div class="component-orientation" aria-label="Observatory orientation"><strong data-reading-chapter>Architecture</strong><span data-reading-count>Primary journey</span><span data-reading-time>6 min read</span><span class="reading-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+  <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span>Menu</span></button>
+  <nav id="primary-navigation" aria-label="Primary navigation" data-observatory-navigation>
+    <a href="architecture.html">Graph</a>
+    <a href="demo.html">Artifact</a>
+    <a href="heterogeneous.html">Execution</a>
+    <a href="roadmap.html">Evidence</a>
+    <a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a>
+  </nav>
+</header>
+
+  <main>
 <section class="arch-hero"><p class="kicker">VOLUME I / ARCHITECTURE DEEP DIVE</p><h1>How Prism turns<br><em>model bytes into execution.</em></h1><p class="lede">Start with the plain-language path. Open the technical layers when you want the compiler contracts, data structures, and runtime boundaries.</p><div class="reading-key"><span>● Start here</span><span>● Researcher detail</span></div></section>
 <section class="arch-section"><label>00 / OVERVIEW</label><div><h2>The short version</h2><p>Prism is an ECS-native compiler and runtime for local, heterogeneous AI deployment. A model artifact becomes a searchable representation plan, a target-aware spatial/execution plan, and a sealed ComputeImage; the runtime routes work across CPU, GPU, and NPU capabilities while preserving receipts and validation evidence.</p><div class="big-flow"><div><b>MODEL</b><small>GGUF / SafeTensors</small></div><span>→</span><div><b>ECS COMPILER</b><small>quantize · ternarize · lower · search</small></div><span>→</span><div><b>COMPUTEIMAGE</b><small>weights · views · plans · evidence</small></div><span>→</span><div><b>RUNTIME</b><small>CPU · Metal/ROCm GPU · XDNA NPU</small></div></div><aside class="plain-callout"><b>If you remember one thing</b><br>Prism searches representations and placement together, then makes the chosen deployment contract inspectable.</aside></div></section>
 <section class="arch-section"><label>01 / THREE LAYERS</label><div><h2>One tensor, three questions.</h2><p>Prism separates concerns that model formats and runtimes often blend together.</p><div class="layer-grid"><article><span>01</span><h3>LogicalTensor</h3><p>What does this tensor mean?</p><details><summary>For researchers</summary><p>Identity, class, shape, logical operation, orientation, data type, and graph boundary: the semantic contract.</p></details></article><article><span>02</span><h3>PhysicalTileLayout</h3><p>How are its bits stored?</p><details><summary>For researchers</summary><p>Codec, tile family, group axis, metadata, padding, alignment, and interleave: the storage and kernel ABI.</p></details></article><article><span>03</span><h3>ExecutionView</h3><p>How does a lane consume it?</p><details><summary>For researchers</summary><p>Lane, offsets, metadata ranges, repacking, and residency. Multiple views can derive from one physical layout.</p></details></article></div></div></section>
@@ -11,4 +35,41 @@
 <section class="arch-section"><label>05 / WHY IT EXISTS</label><div><h2>Why not extend an inference runtime?</h2><p>Existing engines can be excellent execution backends. Prism makes a different architectural choice: representation admission, layout planning, execution views, residency, scheduling metadata, validation, and artifact sealing happen once during compilation.</p><div class="compare"><div><span>TYPICAL RUNTIME</span><p>Load model → derive strategy dynamically → dispatch</p></div><div><span>PRISM</span><p>Compile policy → seal artifact → execute explicit plan</p></div></div><aside class="plain-callout"><b>Operational consequence</b><br>Two CImages from the same source can be compared, audited, and reproduced without reconstructing hidden runtime heuristics.</aside></div></section>
 <section class="arch-section final-arch"><label>06 / CURRENT BOUNDARY</label><div><h2>What the evidence supports today.</h2><p>Apple Silicon and MI300X ROCm/HIP validation paths are active. CPU execution and ECS-native compilation continue under hardening and migration gates. XDNA/XDNA2 spatial planning is compile-verified and resource/legalization tested, but general Ryzen AI hardware execution is not claimed without an XDNA-capable system and the matching userspace stack. Progressive quantization, ternarization, mixed precision, KV-cache search/compression, and CImages are real compiler/runtime concerns; a valid artifact or plan is not by itself proof of production readiness on every target.</p><a class="button" href="index.html#status">See current state ↗</a> <a class="link" href="field-guide.html">Open the field guide ↗</a></div></section>
 <section class="architecture-graph" aria-labelledby="architecture-graph-title"><div class="arch-section"><label>07 / INTERACTIVE SYSTEM MAP</label><div><h2 id="architecture-graph-title">Change one subsystem.<br><em>See the system respond.</em></h2><p>Click any subsystem to see what it owns, what it consumes, what it produces, and which neighboring contracts change when it evolves.</p><div class="system-map-layout"><div class="system-map" role="list" aria-label="Prism architecture subsystems"><button class="system-node active" type="button" data-system="graph" role="listitem"><b>01</b><span>Model graph</span></button><button class="system-node" type="button" data-system="search" role="listitem"><b>02</b><span>Evolution search</span></button><button class="system-node" type="button" data-system="layout" role="listitem"><b>03</b><span>Physical layout</span></button><button class="system-node" type="button" data-system="runtime" role="listitem"><b>04</b><span>Runtime scheduler</span></button><button class="system-node" type="button" data-system="residency" role="listitem"><b>05</b><span>Residency</span></button><button class="system-node" type="button" data-system="evidence" role="listitem"><b>06</b><span>Evidence</span></button><svg class="system-wires" viewBox="0 0 600 330" aria-hidden="true"><path d="M150 62 C260 20 350 20 450 62 M150 62 C250 115 350 115 450 62 M150 165 C250 115 350 115 450 165 M150 165 C250 220 350 220 450 165 M150 268 C250 220 350 220 450 268 M150 268 C260 315 350 315 450 268"/></svg></div><aside class="system-inspector" aria-live="polite"><div class="inspector-kicker" id="system-kind">MODEL / IR</div><h3 id="system-name">Model graph</h3><p id="system-description">Owns the semantic model: tensor identity, operator relationships, shape contracts, and graph boundaries.</p><div class="inspector-columns"><div><span>CONSUMES</span><strong id="system-input">Weights, tokenizer, metadata</strong></div><div><span>PRODUCES</span><strong id="system-output">Graph IR and tensor contracts</strong></div></div><div class="inspector-propagation"><span>PROPAGATES TO</span><div id="system-neighbors">Evolution search · Physical layout</div></div><p class="inspector-note" id="system-note">If the graph changes, candidate generation and every downstream execution view are re-evaluated.</p></aside></div></div></div></section></section>
-</main><footer class="site-footer">PRISM ENGINE / ARCHITECTURE · VOLUME I <span>JULY 2026</span></footer><script src="site.js"></script><script src="architecture-graph.js"></script></body></html>
+<section class="living-atlas" data-atlas-context="Architecture" aria-labelledby="living-atlas-title">
+  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from semantic input to physical execution and evidence.</p></div>
+  <div class="atlas-layout">
+    <div class="atlas-graph" role="list" aria-label="Prism living architecture">
+      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>meaning → candidates</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="image" role="listitem"><small>02</small><strong>ComputeImage</strong><span>views → sealed artifact</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="scheduler" role="listitem"><small>03</small><strong>Scheduler</strong><span>work → execution lanes</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="evidence" role="listitem"><small>04</small><strong>Evidence</strong><span>run → receipt</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="fabric" role="listitem"><small>05</small><strong>Fabric</strong><span>machine → fleet</span></button>
+      <svg class="atlas-wires" viewBox="0 0 700 360" aria-hidden="true"><path d="M140 70 C250 20 340 20 560 70 M140 70 C250 130 350 130 560 180 M140 180 C270 180 370 180 560 180 M140 290 C250 240 350 240 560 290 M140 290 C290 350 420 350 560 290"/><path d="M560 70 C600 120 600 230 560 290"/></svg>
+    </div>
+    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves semantic identity while searching representation, placement, and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
+  </div>
+</section>
+<aside class="shared-computeimage-observation" aria-labelledby="shared-computeimage-title">
+  <div>
+    <span class="eyebrow">Canonical object / shared observation</span>
+    <h2 id="shared-computeimage-title">The same computation, inspected from Architecture.</h2>
+    <p>Every instrument observes one ComputeImage identity. This surface changes its disclosure without creating a second artifact.</p>
+  </div>
+  <div class="shared-computeimage-specimen" data-computeimage-renderer data-subject-id="computational-subject:prism-model" role="img" aria-label="Shared canonical ComputeImage observation"></div>
+</aside>
+</main>
+  <footer class="site-footer component-footer">
+  <div class="continue-reading" aria-label="Continue reading">
+    <span class="eyebrow">Continue reading</span>
+    <a class="continue-reading-link" href="demo.html">Compilation <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="footer-meta">
+    <span>PRISM ENGINE / Architecture</span>
+    <span>AGPLv3 · commercial dual licensing</span>
+  </div>
+</footer>
+
+  <script type="module" src="site.js"></script>
+  <script src="architecture-graph.js" defer></script>
+</body>
+</html>

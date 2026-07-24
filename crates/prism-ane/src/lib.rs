@@ -15,6 +15,10 @@ pub mod mil_gen_full;
 pub mod mil_helpers;
 #[cfg(feature = "ane")]
 pub mod mlpackage;
+#[cfg(feature = "ane")]
+pub mod planar;
+#[cfg(feature = "ane")]
+pub mod ternary_tile;
 
 pub use arena::Arena;
 pub use arena_info::ArenaInfo;

@@ -529,20 +529,19 @@ fn compile_model_dir(dir: &Path, label: &str) {
 
     let out = dir.join("model.cimage");
     eprintln!("[prism:compile] Compiling to {}...", out.display());
-    match prism_ecs_quantization::compiler::compile_to_cimage(
-        &graph,
-        &safetensors_dir,
+    match prism_ecs_compile::compile_path_with_backend(
+        dir,
         &out,
-        has_metal(),
-        |_, _, _, _, _| {},
-        None,
-        CompilationBackend::Default,
+        true,
+        prism_ecs_compile::BackendKind::Metal,
     ) {
-        Ok(()) => {
+        Ok(result) => {
             let size = std::fs::metadata(&out)
                 .map(|m| m.len() / (1024 * 1024))
                 .unwrap_or(0);
             eprintln!("[prism:compile] Done — {label} ({size} MB)");
+            eprintln!("  status: {:?}", result.status);
+            eprintln!("  receipt: {}", result.receipt.output_digest);
             eprintln!("  Run: prism run {label}");
         }
         Err(e) => eprintln!("Compilation failed: {e}"),

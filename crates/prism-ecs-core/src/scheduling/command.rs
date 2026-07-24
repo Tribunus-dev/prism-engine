@@ -9,8 +9,8 @@
 use crate::entity::Entity;
 use crate::scheduling::error::CommandError;
 use crate::scheduling::metadata::{Stage, SystemId};
-use serde::Serialize;
 use crate::Component;
+use serde::Serialize;
 
 // ---------------------------------------------------------------------------
 // Command
@@ -107,8 +107,8 @@ impl<'a> CommandWriter<'a> {
         entity: Entity,
         value: &T,
     ) -> Result<(), CommandError> {
-        let payload_bytes = bincode::serialize(value)
-            .map_err(|e| CommandError::InvalidMutation {
+        let payload_bytes =
+            bincode::serialize(value).map_err(|e| CommandError::InvalidMutation {
                 detail: format!("failed to serialize component: {e}"),
             })?;
         self.buffer.push(StampedCommand {

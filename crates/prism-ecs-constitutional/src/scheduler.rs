@@ -1,5 +1,5 @@
-use crate::work::{Prerequisite, WorkKind, WorkState};
 use crate::types::*;
+use crate::work::{Prerequisite, WorkKind, WorkState};
 use serde::{Deserialize, Serialize};
 
 /// Resource claim — what resources this work item needs.

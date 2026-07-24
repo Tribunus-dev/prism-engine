@@ -280,11 +280,9 @@ mod tests {
     #[test]
     fn register_and_instantiate() {
         let mut registry = PassPipelineRegistry::new();
-        registry.register_named(
-            "erase-unused-ops",
-            "Remove dead ops",
-            || Box::new(EraseUnusedOpsPass),
-        );
+        registry.register_named("erase-unused-ops", "Remove dead ops", || {
+            Box::new(EraseUnusedOpsPass)
+        });
 
         assert!(registry.get("erase-unused-ops").is_some());
         assert!(registry.get("nonexistent").is_none());
@@ -307,11 +305,9 @@ mod tests {
     #[test]
     fn pipeline_runner_valid() {
         let mut registry = PassPipelineRegistry::new();
-        registry.register_named(
-            "erase-unused-ops",
-            "Remove dead ops",
-            || Box::new(EraseUnusedOpsPass),
-        );
+        registry.register_named("erase-unused-ops", "Remove dead ops", || {
+            Box::new(EraseUnusedOpsPass)
+        });
 
         let mut world = World::new();
         let mut runner = PipelineRunner::new(&registry);

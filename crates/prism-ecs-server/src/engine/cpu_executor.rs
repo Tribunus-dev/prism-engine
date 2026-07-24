@@ -15,7 +15,11 @@ impl CPUGraphExecutor {
         tensor_types: HashMap<String, String>,
         hidden_size: usize,
     ) -> Self {
-        Self { tensors, tensor_types, hidden_size }
+        Self {
+            tensors,
+            tensor_types,
+            hidden_size,
+        }
     }
 
     pub fn execute(&self, _graph: &ExecutionGraph, hidden: &[f32]) -> Result<Vec<f32>, String> {

@@ -673,14 +673,26 @@ impl DurableComponent for ModelArtifactRef {
     };
 }
 
-impl ClassifiedComponent for ModelName { type Class = DurableClass; }
+impl ClassifiedComponent for ModelName {
+    type Class = DurableClass;
+}
 impl DurableComponent for ModelName {
-    const SCHEMA_KEY: SchemaKey = SchemaKey { namespace: "prism.residency", id: SCHEMA_MODEL_NAME as u32, version: 1 };
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_MODEL_NAME as u32,
+        version: 1,
+    };
 }
 
-impl ClassifiedComponent for ModelFormat { type Class = DurableClass; }
+impl ClassifiedComponent for ModelFormat {
+    type Class = DurableClass;
+}
 impl DurableComponent for ModelFormat {
-    const SCHEMA_KEY: SchemaKey = SchemaKey { namespace: "prism.residency", id: SCHEMA_MODEL_FORMAT as u32, version: 1 };
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.residency",
+        id: SCHEMA_MODEL_FORMAT as u32,
+        version: 1,
+    };
 }
 
 impl ClassifiedComponent for ModelLifecycle {

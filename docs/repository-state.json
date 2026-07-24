@@ -1,0 +1,128 @@
+{
+  "schema": "prism-repository-state/v1",
+  "source": "local-worktree",
+  "evidenceBoundary": "file presence and repository documents; not hardware execution measurement",
+  "crates": [
+    "prism-amd-npu-runtime",
+    "prism-ane",
+    "prism-ane-runtime",
+    "prism-audio",
+    "prism-cuda-runtime",
+    "prism-dialect-gen",
+    "prism-ecs-agent",
+    "prism-ecs-artifact",
+    "prism-ecs-backend",
+    "prism-ecs-backend.legacy",
+    "prism-ecs-codec",
+    "prism-ecs-columnar",
+    "prism-ecs-compile",
+    "prism-ecs-constitutional",
+    "prism-ecs-core",
+    "prism-ecs-daemon",
+    "prism-ecs-data",
+    "prism-ecs-derive",
+    "prism-ecs-duckdb",
+    "prism-ecs-ir",
+    "prism-ecs-kernel",
+    "prism-ecs-protocol",
+    "prism-ecs-protocol-adapter",
+    "prism-ecs-quantization",
+    "prism-ecs-runtime",
+    "prism-ecs-search",
+    "prism-ecs-server",
+    "prism-ecs-source",
+    "prism-gguf",
+    "prism-igc-runtime",
+    "prism-image",
+    "prism-intel-npu-runtime",
+    "prism-kv-cache",
+    "prism-metal-runtime",
+    "prism-multimodal",
+    "prism-onnx-ingest",
+    "prism-plugin",
+    "prism-pytorch-ingest",
+    "prism-rocm-runtime",
+    "prism-spatial-ir",
+    "prism-tt-runtime",
+    "prism-video"
+  ],
+  "docs": [
+    "RELEASE_CHECKLIST.md",
+    "adr-001-resumable-ternary-distill-compiler.md",
+    "adr-002-progressive-tensor-update.md",
+    "adr-003-canonical-ecs-world.md",
+    "adr-005-ecs-native-compiler-absorption.md",
+    "adr-026-workspace-consolidation.md",
+    "adr-027-memory-model.md",
+    "adr-028-ntb-cluster-coordination.md",
+    "adr-029-prism-fabric-os-blackhole.md",
+    "adr-030-prism-fabric-os-strix-halo.md",
+    "adr-031-aiter-atom-rocm-provider.md",
+    "cimage-layout-abi-v1.md",
+    "current-capabilities.md",
+    "design-review-checklist.md",
+    "ecs-architecture.md",
+    "maturity-audit-2026-07-15.md",
+    "pareto-optimization.md",
+    "physics-of-prism.md",
+    "prism-bonsai-technical-brief.md",
+    "prism-constitution.md",
+    "prism-epistemology.md",
+    "prism-experience-architecture-v2.md",
+    "prism-experience-architecture.md",
+    "prism-interaction-runtime.md",
+    "prism-meaning-runtime.md",
+    "prism-observation-protocol.md",
+    "prism-ontology.md",
+    "prism-runtime.md",
+    "prism-semantics.md"
+  ],
+  "capabilities": [
+    {
+      "id": "ecs-native-compiler",
+      "label": "ECS-native compiler surfaces",
+      "sourceRefs": [
+        "crates/prism-ecs-compile",
+        "crates/prism-ecs-core",
+        "crates/prism-ecs-ir"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "computeimage",
+      "label": "ComputeImage assembly and inspection",
+      "sourceRefs": [
+        "docs/cimage-layout-abi-v1.md",
+        "crates/prism-ecs-artifact"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "metal",
+      "label": "Apple Silicon / Metal validation path",
+      "sourceRefs": [
+        "crates/prism-metal-runtime",
+        "docs/demo.html"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "rocm",
+      "label": "ROCm / HIP provider planning",
+      "sourceRefs": [
+        "docs/adr-031-aiter-atom-rocm-provider.md",
+        "crates/prism-amd-npu-runtime"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "xdna",
+      "label": "XDNA / XDNA2 spatial planning",
+      "sourceRefs": [
+        "crates/prism-intel-npu-runtime",
+        "docs/heterogeneous.html"
+      ],
+      "status": "repository-evidence"
+    }
+  ]
+}

@@ -345,12 +345,14 @@ impl InferenceEngine {
         // Try Metal first (feature-gated), fall back to CPU
         #[cfg(feature = "metal-dispatch")]
         {
-            let result = crate::engine::metal::dispatch_matmul(tensor_name,
-            input,
-            &weight_data,
-            dim_m,
-            dim_n,
-            &format,);
+            let result = crate::engine::metal::dispatch_matmul(
+                tensor_name,
+                input,
+                &weight_data,
+                dim_m,
+                dim_n,
+                &format,
+            );
             if result.is_ok() {
                 return result;
             }
@@ -695,13 +697,23 @@ impl InferenceEngine {
     ///
     /// # Returns
     /// Logits for the next token (vocab-sized float vector).
-    pub fn forward_embeddings(&self, embeddings: &[f32], kv_cache: &mut KvCache) -> Result<Vec<f32>, String> {
+    pub fn forward_embeddings(
+        &self,
+        embeddings: &[f32],
+        kv_cache: &mut KvCache,
+    ) -> Result<Vec<f32>, String> {
         let _ = kv_cache;
         Ok(embeddings.to_vec())
     }
 
-    pub fn project_modality<C: AsRef<str>>(&self, candidates: &[C], row: &[f32]) -> Result<Option<Vec<f32>>, String> {
-        if candidates.is_empty() { return Ok(None); }
+    pub fn project_modality<C: AsRef<str>>(
+        &self,
+        candidates: &[C],
+        row: &[f32],
+    ) -> Result<Option<Vec<f32>>, String> {
+        if candidates.is_empty() {
+            return Ok(None);
+        }
         Ok(Some(row.to_vec()))
     }
 

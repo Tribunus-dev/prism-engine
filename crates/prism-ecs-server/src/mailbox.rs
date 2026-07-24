@@ -170,7 +170,9 @@ impl MailboxSendSystem {
             if let Some(col) = world.component_store().column::<MailboxSender>() {
                 for (entity, _) in col.iter() {
                     // Check the entity also carries a MailboxMessage.
-                    if world.component_store().get::<MailboxMessage>(entity)
+                    if world
+                        .component_store()
+                        .get::<MailboxMessage>(entity)
                         .is_some()
                     {
                         out.push(entity);
@@ -202,7 +204,9 @@ impl MailboxSendSystem {
 
             // Push the message into the target mailbox.
             let waiters = {
-                let mailbox = match world.component_store_mut().column_mut::<Mailbox>()
+                let mailbox = match world
+                    .component_store_mut()
+                    .column_mut::<Mailbox>()
                     .get_mut(target_mailbox)
                 {
                     Some(m) => m,
@@ -218,11 +222,15 @@ impl MailboxSendSystem {
 
             // Signal each waiter.
             for waiter in &waiters {
-                let _ = world.component_store_mut().insert::<MailboxWaiterReady>(*waiter, MailboxWaiterReady);
+                let _ = world
+                    .component_store_mut()
+                    .insert::<MailboxWaiterReady>(*waiter, MailboxWaiterReady);
             }
 
             // Remove the consumed message from the sender.
-            let _ = world.component_store_mut().remove::<MailboxMessage>(*sender);
+            let _ = world
+                .component_store_mut()
+                .remove::<MailboxMessage>(*sender);
 
             dispatched += 1;
         }
@@ -238,7 +246,9 @@ impl MailboxSendSystem {
         };
         let mut count = 0;
         for (entity, _) in senders.iter() {
-            if world.component_store().get::<MailboxMessage>(entity)
+            if world
+                .component_store()
+                .get::<MailboxMessage>(entity)
                 .is_some()
             {
                 count += 1;
@@ -294,7 +304,9 @@ impl MailboxReceiveSystem {
             };
 
             // Pop from the mailbox (requires &mut access to the column).
-            let popped = world.component_store_mut().column_mut::<Mailbox>()
+            let popped = world
+                .component_store_mut()
+                .column_mut::<Mailbox>()
                 .get_mut(target_mailbox)
                 .and_then(|mailbox| {
                     if let Some(msg) = mailbox.pop() {
@@ -308,9 +320,13 @@ impl MailboxReceiveSystem {
                 });
 
             if let Some(payload) = popped {
-                let _ = world.component_store_mut().insert::<MailboxMessage>(*receiver, MailboxMessage(payload));
+                let _ = world
+                    .component_store_mut()
+                    .insert::<MailboxMessage>(*receiver, MailboxMessage(payload));
                 // Remove the waiter-ready marker if present.
-                let _ = world.component_store_mut().remove::<MailboxWaiterReady>(*receiver);
+                let _ = world
+                    .component_store_mut()
+                    .remove::<MailboxWaiterReady>(*receiver);
                 received += 1;
             }
         }
@@ -326,7 +342,9 @@ impl MailboxReceiveSystem {
         };
         let mut count = 0;
         for (entity, _) in receivers.iter() {
-            if world.component_store().get::<MailboxMessage>(entity)
+            if world
+                .component_store()
+                .get::<MailboxMessage>(entity)
                 .is_some()
             {
                 count += 1;
@@ -409,7 +427,9 @@ mod tests {
         assert_eq!(count, 1, "one message should be dispatched");
 
         // Sender should no longer carry the message.
-        assert!(world.component_store().get::<MailboxMessage>(sender)
+        assert!(world
+            .component_store()
+            .get::<MailboxMessage>(sender)
             .is_none());
     }
 
@@ -418,7 +438,9 @@ mod tests {
         let (mut world, mb, _sender, receiver) = setup_world();
 
         // Manually push a message into the mailbox.
-        let _ = world.component_store_mut().column_mut::<Mailbox>()
+        let _ = world
+            .component_store_mut()
+            .column_mut::<Mailbox>()
             .get_mut(mb)
             .unwrap()
             .push(b"pong".to_vec());
@@ -427,7 +449,9 @@ mod tests {
         assert_eq!(count, 1, "one message should be received");
 
         // Receiver should now carry the message.
-        let msg = world.component_store().get::<MailboxMessage>(receiver)
+        let msg = world
+            .component_store()
+            .get::<MailboxMessage>(receiver)
             .expect("receiver should have a message");
         assert_eq!(msg.0, b"pong");
     }
@@ -441,7 +465,9 @@ mod tests {
         assert_eq!(count, 0, "no message received");
 
         // Receiver should be registered as a waiter.
-        let mailbox = world.component_store().get::<Mailbox>(mb)
+        let mailbox = world
+            .component_store()
+            .get::<Mailbox>(mb)
             .expect("mailbox should exist");
         assert!(
             mailbox.waiters.contains(&receiver),
@@ -464,7 +490,9 @@ mod tests {
 
         // Waiter should now have MailboxWaiterReady.
         assert!(
-            world.component_store().get::<MailboxWaiterReady>(receiver)
+            world
+                .component_store()
+                .get::<MailboxWaiterReady>(receiver)
                 .is_some(),
             "waiter should be woken"
         );
@@ -472,7 +500,9 @@ mod tests {
         // Mailbox should have the message for the receiver.
         let count = MailboxReceiveSystem::run(&mut world);
         assert_eq!(count, 1, "receiver should now get the message");
-        let msg = world.component_store().get::<MailboxMessage>(receiver)
+        let msg = world
+            .component_store()
+            .get::<MailboxMessage>(receiver)
             .expect("receiver should have message");
         assert_eq!(msg.0, b"wake");
     }

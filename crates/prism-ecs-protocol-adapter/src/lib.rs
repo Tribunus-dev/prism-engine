@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Client-side protocol boundary implemented by a runtime-backed adapter.
-pub trait ApplicationClient: Send + Sync {
+pub trait ApplicationClient: Send {
     fn send(&self, request: ProtocolRequest) -> Event;
 }
 
@@ -297,6 +297,40 @@ impl<S: WorkflowStore + 'static, C: WorkflowCancellation + 'static> WorkflowClie
 
     pub fn runtime(&self) -> &RuntimeClient {
         &self.runtime
+    }
+
+    /// Append a runtime-owned execution observation to a user workflow.
+    /// Scheduler/backend code calls this hook after it has committed a
+    /// dispatch outcome; Swift only observes the resulting protocol event.
+    pub fn publish_runtime_observation(
+        &self,
+        thread_id: Uuid,
+        dispatch_id: u64,
+        session_id: u64,
+        model_id: String,
+        modality: String,
+        status: String,
+        output_digest: Option<String>,
+        output_units: u64,
+    ) -> Result<WorkflowEvent, String> {
+        let service = self
+            .service
+            .lock()
+            .map_err(|_| "workflow service lock poisoned".to_string())?;
+        let record = service.load(thread_id)?;
+        service.save_event(
+            record,
+            None,
+            WorkflowEventKind::RuntimeObservation {
+                dispatch_id,
+                session_id,
+                model_id,
+                modality,
+                status,
+                output_digest,
+                output_units,
+            },
+        )
     }
 }
 
@@ -749,6 +783,47 @@ mod tests {
         ));
         assert!(matches!(cancelled.body, EventBody::WorkflowEvent(_)));
         assert_eq!(calls.lock().unwrap().as_slice(), &[thread_id]);
+    }
+
+    #[test]
+    fn workflow_client_publishes_ecs_runtime_observation_with_session_identity() {
+        let thread_id = Uuid::from_u128(35);
+        let client = WorkflowClient::new(
+            RuntimeKernel::new().handle(),
+            InMemoryWorkflowStore::default(),
+            NoopWorkflowCancellation,
+        );
+        client.send(request(
+            Uuid::from_u128(36),
+            RequestBody::OpenThread { thread_id },
+        ));
+        let event = client
+            .publish_runtime_observation(
+                thread_id,
+                7,
+                19,
+                "audio/decoder".into(),
+                "audio".into(),
+                "completed".into(),
+                Some("digest".into()),
+                24_000,
+            )
+            .unwrap();
+        match event.kind {
+            WorkflowEventKind::RuntimeObservation {
+                dispatch_id,
+                session_id,
+                model_id,
+                output_units,
+                ..
+            } => {
+                assert_eq!(dispatch_id, 7);
+                assert_eq!(session_id, 19);
+                assert_eq!(model_id, "audio/decoder");
+                assert_eq!(output_units, 24_000);
+            }
+            other => panic!("expected runtime observation, got {other:?}"),
+        }
     }
 
     #[test]

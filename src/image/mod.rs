@@ -143,7 +143,7 @@ pub mod diffusion_gemma {
     pub struct DgCompiler;
     impl DgCompiler {
         pub fn compile(_gguf_path: &Path, _variant: DgVariant) -> Result<Metadata> {
-            Ok(Metadata {})
+            anyhow::bail!("diffusion_gemma compatibility compiler is retired; compile through the canonical ECS model pipeline")
         }
     }
 }
@@ -175,6 +175,7 @@ pub fn generate_image(
     model_path: &str,
     request: ImageGenerationRequest,
 ) -> Result<ImageGenerationResult, ImageGenerationError> {
+    crate::ecs_state::publish("image", "generation", "requested", "started", model_path);
     #[cfg(feature = "generation-image")]
     {
         let response = generate_via_admission_pipeline(model_path, request)?;
@@ -186,6 +187,13 @@ pub fn generate_image(
 
     #[cfg(not(feature = "generation-image"))]
     {
+        crate::ecs_state::publish(
+            "image",
+            "generation",
+            "completed",
+            "feature_unavailable",
+            model_path,
+        );
         let _ = (model_path, request);
         Err(ImageGenerationError::FeatureUnavailable {
             capability: "generation-image",
@@ -201,6 +209,7 @@ pub fn generate_image_with_receipt(
     model_path: &str,
     request: ImageGenerationRequest,
 ) -> Result<reliability::ImageGenerationResponse, ImageGenerationError> {
+    crate::ecs_state::publish("image", "generation", "requested", "started", model_path);
     generate_via_admission_pipeline(model_path, request)
 }
 

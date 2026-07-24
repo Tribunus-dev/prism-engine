@@ -86,7 +86,10 @@ impl AudioStreamState {
         }
         let mut output = Vec::with_capacity(chunk_size);
         for index in 0..chunk_size {
-            let sample = conditioning.get(index % conditioning.len().max(1)).copied().unwrap_or(0.0);
+            let sample = conditioning
+                .get(index % conditioning.len().max(1))
+                .copied()
+                .unwrap_or(0.0);
             let previous = self.ring_buffer[self.write_pos];
             let value = (sample * 0.75 + previous * 0.25).tanh();
             self.ring_buffer[self.write_pos] = value;

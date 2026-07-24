@@ -1,8 +1,30 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Prism Engine Apple Silicon Demo milestone: a reproducible local path from model source to inspectable ComputeImage and runtime evidence."><title>Prism Engine · Apple Silicon Demo</title><link rel="stylesheet" href="site.css"><link rel="stylesheet" href="demo.css"></head>
-<body><header class="nav"><a href="index.html" class="wordmark"><b>◢</b> PRISM ENGINE</a><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="demo.html" class="current">Demo</a><a href="roadmap.html">Roadmap</a><a href="field-guide.html">Docs</a></nav></header>
-<main>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Prism Engine Apple Silicon Demo milestone: a reproducible local path from model source to inspectable ComputeImage and runtime evidence."><title>Prism Engine · Apple Silicon Demo</title>
+  <link rel="stylesheet" href="foundation.css">
+  <link rel="stylesheet" href="components.css">
+  <link rel="stylesheet" href="instruments.css">
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body class="">
+  <header class="nav site-header component-header" data-observatory-shell>
+  <a class="brand" href="index.html" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
+  <span class="component-chapter" data-component="chapter">Compilation</span>
+  <div class="component-orientation" aria-label="Observatory orientation"><strong data-reading-chapter>Compilation</strong><span data-reading-count>Primary journey</span><span data-reading-time>3 min read</span><span class="reading-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+  <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span>Menu</span></button>
+  <nav id="primary-navigation" aria-label="Primary navigation" data-observatory-navigation>
+    <a href="architecture.html">Graph</a>
+    <a href="demo.html">Artifact</a>
+    <a href="heterogeneous.html">Execution</a>
+    <a href="roadmap.html">Evidence</a>
+    <a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a>
+  </nav>
+</header>
+
+  <main>
 <section class="demo-hero"><div><p class="kicker">MILESTONE / APPLE SILICON</p><h1>A demo that can be<br><em>reproduced.</em></h1><p class="lede">The Apple Silicon Demo is the next release gate for Prism: a self-contained local workflow that makes the model, ComputeImage, execution route, and evidence visible on one machine.</p><div class="demo-status"><span class="status-dot"></span><b>IN PREPARATION</b><small>Release surface · measurements pending</small></div></div><div class="release-card"><small>VERSIONED DEMO FIELDS</small><div><span>Demo</span><b>apple-silicon-local</b></div><div><span>Artifact</span><b>model.cimage</b></div><div><span>Backend</span><b>Metal · CPU fallback</b></div><div><span>Evidence</span><b>receipt attached at run</b></div><footer><span>Version: not released</span><span>Digest: generated at build</span></footer></div></section>
 <section class="demo-section"><label>01 / THE AGENDA</label><div><h2>Read first.<br><em>Run second.</em></h2><p>The demo is designed for a technical conversation. It should let another engineer move from a known model source to a visible execution result without reconstructing Prism’s development environment.</p><div class="agenda"><div><b>01</b><span>Load the source</span><small>Model identity and source digest are shown before compilation.</small></div><div><b>02</b><span>Compile the artifact</span><small>Representation, placement, and admission decisions remain inspectable.</small></div><div><b>03</b><span>Inspect the route</span><small>The ComputeImage records the selected execution view and fallback boundaries.</small></div><div><b>04</b><span>Run and observe</span><small>Runtime state and evidence are captured on the local Apple Silicon machine.</small></div></div></div></section>
 <section class="demo-section tinted"><label>02 / STAGED WORKFLOW</label><div><h2>One path.<br><em>Four gates.</em></h2><div class="workflow"><div><i>01</i><b>INGEST</b><small>GGUF or SafeTensors<br>identity + digest</small></div><span>→</span><div><i>02</i><b>COMPILE</b><small>PrismIR<br>representation search</small></div><span>→</span><div><i>03</i><b>REALIZE</b><small>ComputeImage<br>.cimage artifact</small></div><span>→</span><div><i>04</i><b>PROVE</b><small>Metal run<br>receipt + replay fields</small></div></div><aside class="callout"><b>Release principle</b><p>A demo milestone is complete only when a second engineer can reproduce the path and see which parts are measured, which are fallback behavior, and which remain unproven.</p></aside></div></section>
@@ -10,4 +32,41 @@
 <section class="demo-section tinted"><label>04 / WHY IT IS NOT AVAILABLE YET</label><div><h2>Confidence needs<br><em>a clean boundary.</em></h2><p>The architecture and local surfaces exist, but publishing a demo before the path is reproducible would turn a research interface into an ungrounded product claim.</p><div class="boundary-grid"><div><b>Not yet a release</b><span>No versioned application bundle or signed distribution is being claimed here.</span></div><div><b>No invented numbers</b><span>This page intentionally contains no throughput, latency, memory, or quality measurements.</span></div><div><b>Hardware scope</b><span>Apple Silicon + Metal is the primary validation path; other backends are not implied by this milestone.</span></div><div><b>Evidence first</b><span>Measurements belong to the executable run and its receipt, not to a static mock interface.</span></div></div></div></section>
 <section class="demo-section"><label>05 / CURRENT WORK</label><div><h2>Stabilize the path<br><em>before the meeting.</em></h2><div class="work-list"><div><span>01</span><b>Package the local runtime</b><small>Make the launch surface self-contained and repeatable.</small></div><div><span>02</span><b>Connect artifact inspection</b><small>Expose the ComputeImage fields that matter to a reader.</small></div><div><span>03</span><b>Capture a real receipt</b><small>Record the tested machine, build identity, route, and outcome.</small></div><div><span>04</span><b>Document the boundary</b><small>Separate runnable Apple Silicon behavior from development and planning surfaces.</small></div></div></div></section>
 <section class="demo-final"><p class="kicker">NEXT RELEASE GATE</p><h2>When another engineer<br>can run it, the architecture<br><em>becomes real.</em></h2><p>The demo will be published with its version, source digest, artifact identity, hardware context, and evidence fields. Until then, this page is a milestone definition—not a claim that the executable is available.</p><a class="button" href="field-guide.html">Read the technical brief ↗</a> <a class="link" href="architecture.html">Inspect the architecture ↗</a></section>
-</main><footer class="site-footer">PRISM ENGINE / APPLE SILICON DEMO <span>JULY 2026 · PRE-RELEASE</span></footer></body></html>
+<section class="living-atlas" data-atlas-context="Compilation" aria-labelledby="living-atlas-title">
+  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from semantic input to physical execution and evidence.</p></div>
+  <div class="atlas-layout">
+    <div class="atlas-graph" role="list" aria-label="Prism living architecture">
+      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>meaning → candidates</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="image" role="listitem"><small>02</small><strong>ComputeImage</strong><span>views → sealed artifact</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="scheduler" role="listitem"><small>03</small><strong>Scheduler</strong><span>work → execution lanes</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="evidence" role="listitem"><small>04</small><strong>Evidence</strong><span>run → receipt</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="fabric" role="listitem"><small>05</small><strong>Fabric</strong><span>machine → fleet</span></button>
+      <svg class="atlas-wires" viewBox="0 0 700 360" aria-hidden="true"><path d="M140 70 C250 20 340 20 560 70 M140 70 C250 130 350 130 560 180 M140 180 C270 180 370 180 560 180 M140 290 C250 240 350 240 560 290 M140 290 C290 350 420 350 560 290"/><path d="M560 70 C600 120 600 230 560 290"/></svg>
+    </div>
+    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves semantic identity while searching representation, placement, and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
+  </div>
+</section>
+<aside class="shared-computeimage-observation" aria-labelledby="shared-computeimage-title">
+  <div>
+    <span class="eyebrow">Canonical object / shared observation</span>
+    <h2 id="shared-computeimage-title">The same computation, inspected from Compilation.</h2>
+    <p>Every instrument observes one ComputeImage identity. This surface changes its disclosure without creating a second artifact.</p>
+  </div>
+  <div class="shared-computeimage-specimen" data-computeimage-renderer data-subject-id="computational-subject:prism-model" role="img" aria-label="Shared canonical ComputeImage observation"></div>
+</aside>
+</main>
+  <footer class="site-footer component-footer">
+  <div class="continue-reading" aria-label="Continue reading">
+    <span class="eyebrow">Continue reading</span>
+    <a class="continue-reading-link" href="heterogeneous.html">Runtime <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="footer-meta">
+    <span>PRISM ENGINE / Compilation</span>
+    <span>AGPLv3 · commercial dual licensing</span>
+  </div>
+</footer>
+
+  <script type="module" src="site.js"></script>
+
+</body>
+</html>

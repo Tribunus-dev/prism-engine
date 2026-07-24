@@ -276,7 +276,11 @@ impl<'a> SafeTensors<'a> {
     fn parse_json_header(
         header_bytes: &[u8],
     ) -> Result<(HashMap<String, String>, TensorMetadata), String> {
-        let end = header_bytes.iter().rposition(|byte| !matches!(byte, 0 | b' ' | b'\n' | b'\r' | b'\t')).map(|i| i + 1).unwrap_or(0);
+        let end = header_bytes
+            .iter()
+            .rposition(|byte| !matches!(byte, 0 | b' ' | b'\n' | b'\r' | b'\t'))
+            .map(|i| i + 1)
+            .unwrap_or(0);
         let header_bytes = &header_bytes[..end];
         let header: Value = serde_json::from_slice(header_bytes)
             .map_err(|e| format!("invalid JSON header: {e}"))?;

@@ -5,7 +5,7 @@
 //! systems, but the ownership boundary remains here.
 
 use prism_ecs_core::World;
-use prism_ecs_runtime::{KernelHealth, RuntimeKernel, RuntimeSchedule, RuntimeError};
+use prism_ecs_runtime::{KernelHealth, RuntimeError, RuntimeKernel, RuntimeSchedule};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -19,23 +19,41 @@ impl PrismDaemon {
     pub fn new(instance_id: impl Into<String>) -> Self {
         let world = Arc::new(std::sync::RwLock::new(World::new()));
         let kernel = RuntimeKernel::with_existing_world(world.clone());
-        Self { world, kernel: Arc::new(kernel), instance_id: Arc::from(instance_id.into()) }
+        Self {
+            world,
+            kernel: Arc::new(kernel),
+            instance_id: Arc::from(instance_id.into()),
+        }
     }
 
-    pub fn world(&self) -> Arc<std::sync::RwLock<World>> { self.world.clone() }
-    pub fn kernel(&self) -> Arc<RuntimeKernel> { self.kernel.clone() }
-    pub fn instance_id(&self) -> &str { &self.instance_id }
+    pub fn world(&self) -> Arc<std::sync::RwLock<World>> {
+        self.world.clone()
+    }
+    pub fn kernel(&self) -> Arc<RuntimeKernel> {
+        self.kernel.clone()
+    }
+    pub fn instance_id(&self) -> &str {
+        &self.instance_id
+    }
 
     pub fn install_schedule(&self, mut schedule: RuntimeSchedule) {
         schedule.bind(&self.kernel.handle());
         self.kernel.set_schedule(schedule);
     }
 
-    pub fn health(&self) -> KernelHealth { self.kernel.health() }
-    pub fn tick(&self) -> Result<(), RuntimeError> { self.kernel.run_kernel_tick(&self.instance_id) }
+    pub fn health(&self) -> KernelHealth {
+        self.kernel.health()
+    }
+    pub fn tick(&self) -> Result<(), RuntimeError> {
+        self.kernel.run_kernel_tick(&self.instance_id)
+    }
 }
 
-impl Default for PrismDaemon { fn default() -> Self { Self::new("prism-daemon") } }
+impl Default for PrismDaemon {
+    fn default() -> Self {
+        Self::new("prism-daemon")
+    }
+}
 
 #[cfg(test)]
 mod tests {

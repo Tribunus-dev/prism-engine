@@ -17,7 +17,6 @@ pub mod dynamic_tiling;
 pub mod projector;
 pub mod vision_encoder;
 
-
 pub struct ImageInput {
     // Basic representation of an image for the vision encoder
     pub width: u32,

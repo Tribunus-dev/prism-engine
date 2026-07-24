@@ -377,6 +377,10 @@ pub struct CImageHeader {
     /// recovery.  This is provenance only and does not certify promotion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joint_tiling_evidence: Option<crate::search::JointTilingEvidence>,
+    /// Workload profile grid and heterogeneous route evidence used for
+    /// realtime/batch execution selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heterogeneous_workload_evidence: Option<crate::search::HeterogeneousScheduleEvidence>,
     /// Promotion receipt for native ternary payloads.  The runtime preserves
     /// this evidence so an artifact cannot be admitted after a failed or
     /// incomplete backend validation pass.
@@ -569,6 +573,13 @@ impl CImageWriter {
     /// Set the execution plan JSON to embed in the CImage header.
     pub fn set_execution_plan(&mut self, plan_json: String) {
         self.header.execution_plan = Some(plan_json);
+    }
+
+    pub fn set_heterogeneous_workload_evidence(
+        &mut self,
+        evidence: crate::search::HeterogeneousScheduleEvidence,
+    ) {
+        self.header.heterogeneous_workload_evidence = Some(evidence);
     }
 
     /// Append a validated native XDNA artifact envelope and record its byte
@@ -1696,6 +1707,13 @@ impl UniversalCImageWriter {
         self.writer.header.execution_plan = Some(plan_json);
     }
 
+    pub fn set_heterogeneous_workload_evidence(
+        &mut self,
+        evidence: crate::search::HeterogeneousScheduleEvidence,
+    ) {
+        self.writer.header.heterogeneous_workload_evidence = Some(evidence);
+    }
+
     pub fn add_xdna_artifact(
         &mut self,
         name: &str,
@@ -2014,8 +2032,13 @@ impl UniversalCImageWriter {
     }
 
     pub fn add_tensor_payload(&mut self, entry: TensorPayloadEntry) -> Result<(), String> {
-        self.writer
-            .append(&entry.name, &entry.payload, entry.dim_m, entry.dim_n, entry.tensor_type)
+        self.writer.append(
+            &entry.name,
+            &entry.payload,
+            entry.dim_m,
+            entry.dim_n,
+            entry.tensor_type,
+        )
     }
 
     pub fn add_native_ternary_payload(
@@ -2473,7 +2496,10 @@ mod tests {
         let mut reader = CImageReader::open(&path).unwrap();
         let tuning = reader.uop_tuning_receipt().unwrap().unwrap();
         assert!(!tuning.production_ready);
-        assert_eq!(tuning.source, crate::uop::UOpMeasurementSource::SyntheticFallback);
+        assert_eq!(
+            tuning.source,
+            crate::uop::UOpMeasurementSource::SyntheticFallback
+        );
         let evidence = reader.uop_workload_evidence().unwrap();
         assert_eq!(evidence.len(), 1);
         assert_eq!(evidence[0].scenario, scenario);
@@ -2917,8 +2943,11 @@ mod tests {
             line!()
         ));
         write_unpromoted_native_test_image(&path);
-        let error = promote_cimage_after_replay(&path, promotion_evidence_without_behavioral_measurements())
-            .expect_err("missing behavioral measurements must reject promotion");
+        let error = promote_cimage_after_replay(
+            &path,
+            promotion_evidence_without_behavioral_measurements(),
+        )
+        .expect_err("missing behavioral measurements must reject promotion");
         assert!(error.contains("activation_error measurement is missing"));
         let _ = std::fs::remove_file(path);
     }
@@ -3097,6 +3126,57 @@ mod tests {
     }
 
     #[test]
+    fn heterogeneous_workload_evidence_round_trips_through_cimage_runtime() {
+        let path = std::env::temp_dir().join(format!(
+            "prism_compile_heterogeneous_workload_{}.cimage",
+            std::process::id()
+        ));
+        let profile = crate::workload_search::default_profile_grid()[0];
+        let evidence = crate::workload_search::WorkloadThroughputEvidence {
+            profile,
+            representation: "Ternary158".into(),
+            tiling_digest: "tile-test".into(),
+            tokens_per_second: 123.0,
+            latency_ms: 8.1,
+            measured: true,
+            evidence_source: "test-native".into(),
+            execution_fingerprint: "test-graph".into(),
+            projected: true,
+            projection_basis: "test".into(),
+            mixed_precision_graph: "ternary-expert-int8-attention".into(),
+        };
+        let schedule = crate::search::HeterogeneousScheduleEvidence {
+            steps: 2,
+            route_sequence: vec!["ane".into(), "metal".into()],
+            zero_copy_steps: 2,
+            estimated_latency_ns: 8100000,
+            residency_windows: 1,
+            supports_realtime_text: true,
+            supports_batched_text: true,
+            supports_batched_audio: false,
+            workload_profiles: vec![profile],
+            throughput_evidence: vec![evidence],
+            selected_execution_graph: crate::workload_search::SelectedExecutionGraph::default(),
+        };
+        let mut writer = CImageWriter::new(&path).unwrap();
+        writer.set_heterogeneous_workload_evidence(schedule.clone());
+        writer.finalize().unwrap();
+        let reader = CImageReader::open(&path).unwrap();
+        let stored = reader
+            .header
+            .heterogeneous_workload_evidence
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            stored.throughput_evidence[0].mixed_precision_graph,
+            "ternary-expert-int8-attention"
+        );
+        let runtime = crate::runtime::RuntimeModel::load_for_validation(&path).unwrap();
+        assert_eq!(runtime.heterogeneous_workload_evidence.unwrap().steps, 2);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn persistent_kv_requires_and_round_trips_evolutionary_policy() {
         let path = std::env::temp_dir().join(format!(
             "prism_compile_kv_policy_{}.cimage",
@@ -3140,6 +3220,8 @@ mod tests {
             selected_score: Some(0.75),
             both_backends_feasible: true,
             both_backends_measured: true,
+            all_backends_feasible: false,
+            all_backends_measured: false,
             profiles_evaluated: Vec::new(),
         };
         let mut writer = UniversalCImageWriter::new(&path);

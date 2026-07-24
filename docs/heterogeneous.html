@@ -1,6 +1,30 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="Prism Engine's heterogeneous-first deployment model, from edge devices to datacenter-scale AI systems."><title>Prism Engine · Heterogeneous First</title><link rel="stylesheet" href="site.css"><link rel="stylesheet" href="heterogeneous.css"></head>
-<body><header class="nav"><a href="index.html" class="wordmark"><b>◢</b> PRISM ENGINE</a><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="heterogeneous.html" class="current">Heterogeneous first</a><a href="prism-ml.html">Prism ML</a><a href="roadmap.html">Roadmap</a><a href="general-compute.html">General Compute</a><a href="field-guide.html">Field guide</a><a href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a></nav></header><main>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Prism Engine's heterogeneous-first deployment model, from edge devices to datacenter-scale AI systems."><title>Prism Engine · Heterogeneous First</title>
+  <link rel="stylesheet" href="foundation.css">
+  <link rel="stylesheet" href="components.css">
+  <link rel="stylesheet" href="instruments.css">
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body class="">
+  <header class="nav site-header component-header" data-observatory-shell>
+  <a class="brand" href="index.html" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
+  <span class="component-chapter" data-component="chapter">Runtime</span>
+  <div class="component-orientation" aria-label="Observatory orientation"><strong data-reading-chapter>Runtime</strong><span data-reading-count>Primary journey</span><span data-reading-time>4 min read</span><span class="reading-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+  <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span>Menu</span></button>
+  <nav id="primary-navigation" aria-label="Primary navigation" data-observatory-navigation>
+    <a href="architecture.html">Graph</a>
+    <a href="demo.html">Artifact</a>
+    <a href="heterogeneous.html">Execution</a>
+    <a href="roadmap.html">Evidence</a>
+    <a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a>
+  </nav>
+</header>
+
+  <main>
 <section class="hetero-hero"><p class="kicker">VOLUME I / DEPLOYMENT MODEL</p><h1>Heterogeneous<br><em>first.</em></h1><p class="lede">Prism is designed around one question: how do we deploy the same frontier model across machines that do not share the same memory, kernels, accelerators, or failure modes?</p><div class="hero-statement">A model should describe the work.<br><b>The deployment system should describe the machine.</b></div></section>
 <section class="hetero-section"><label>00 / THE IDEA</label><div><h2>One semantic workload.<br><em>Many physical homes.</em></h2><p>Prism separates the model's logical execution requirements from the hardware that will satisfy them. The ECS-native compiler preserves workload semantics while selecting mixed-precision representations, memory tiers, execution lanes, KV-cache policy, transfers, and validation gates for a particular target.</p><div class="scale-line"><div><b>CPU</b><small>portable fallback<br>reference + hardening</small></div><i>→</i><div><b>GPU</b><small>Metal or MI300X<br>ROCm / HIP execution</small></div><i>→</i><div><b>NPU</b><small>XDNA / XDNA2<br>spatial plan + legality</small></div><i>→</i><div><b>HANDOFF</b><small>KV ownership<br>residency + evidence</small></div></div></div></section>
 <section class="hetero-section tinted"><label>01 / SAME GRAPH</label><div><h2>Different machines.<br><em>Same requirement.</em></h2><p>The serving requirement can stay constant while the physical plan changes. Prefill may run on one provider, KV state may cross an explicit boundary, and decode or streaming may run on another provider. The planner chooses a legal composition from capability descriptions rather than baking one vendor into the workload.</p><div class="phase-flow"><div><span>WORKLOAD</span><b>Serve frontier model</b><small>latency · memory · quality policy</small></div><div><span>PHASE 01</span><b>Prefill</b><small>provider capability + admission</small></div><div><span>HANDOFF</span><b>KV transfer</b><small>explicit memory boundary</small></div><div><span>PHASE 02</span><b>Decode + stream</b><small>provider capability + receipt</small></div></div><details><summary>Researcher detail</summary><p>The heterogeneous-serving fixture expresses a fixed serving requirement and provider phase capabilities for prefill, KV handoff, decode, and token streaming. Replacing the capability descriptions changes the plan without changing the serving requirement or orchestration contract.</p></details></div></section>
@@ -8,4 +32,41 @@
 <section class="hetero-section tinted"><label>03 / PROVIDER BOUNDARY</label><div><h2>Prism does not pretend<br>to be the accelerator.</h2><p>Prism owns the deployment contract: workload identity, capabilities, admission, placement, residency, ownership, transfers, receipts, and recovery. A provider owns its physical topology, kernel implementation, queue mechanics, and transport primitives.</p><div class="ownership"><div><span>PRISM OWNS</span><p>semantic workload<br>physical plan<br>KV ownership<br>admission policy<br>execution receipts</p></div><div><span>PROVIDER OWNS</span><p>kernels<br>queues<br>memory handles<br>fabric transport<br>device topology</p></div></div><aside class="note"><b>Design constraint</b><br>Backend handles may execute work. They cannot silently become the authority for placement, lifecycle, or accepted outcome.</aside></div></section>
 <section class="hetero-section"><label>04 / WHAT THIS ENABLES</label><div><h2>Frontier models can travel<br>without becoming identical.</h2><p>A single model family can have multiple deployment identities: a mixed-precision or ternarized CImage, a Metal or MI300X GPU image, an XDNA/XDNA2 spatial plan, or a heterogeneous composition with explicit KV-cache ownership. The logical model remains comparable while the physical artifact reflects the machine.</p><div class="enables"><div><b>Representation</b><span>FP16/BF16 · INT8/NF4<br>progressive ternarization</span></div><div><b>GPU</b><span>Metal or ROCm/HIP<br>MI300X validation</span></div><div><b>NPU</b><span>XDNA/XDNA2<br>spatial legality</span></div><div><b>State</b><span>KV search/compression<br>ownership + receipts</span></div></div><details><summary>What is implemented today?</summary><p>Apple Silicon and MI300X validation paths are active. ECS-native compilation, mixed-precision and ternary search, CImage assembly, and heterogeneous capability modeling are implemented across the repository. XDNA/XDNA2 planning is compile-verified and resource/legalization tested; general Ryzen AI hardware execution remains dependent on access to a matching XDNA-capable system and runtime stack.</p></details></div></section>
 <section class="hetero-final"><p class="kicker">THE PRISM PAPERS / VOLUME I</p><h2>Heterogeneous hardware<br><em>should be a planning input.</em></h2><p>Prism's long-term claim is not that every device executes the same way. It is that a coherent compiler and evidence contract can make those differences explicit enough to plan, compare, and recover.</p><a class="button" href="architecture.html">Read the architecture ↗</a> <a class="link" href="index.html">Back to Prism Engine ↗</a></section>
-</main><footer class="site-footer">PRISM ENGINE / HETEROGENEOUS FIRST <span>JULY 2026</span></footer><script src="site.js"></script></body></html>
+<section class="living-atlas" data-atlas-context="Runtime" aria-labelledby="living-atlas-title">
+  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from semantic input to physical execution and evidence.</p></div>
+  <div class="atlas-layout">
+    <div class="atlas-graph" role="list" aria-label="Prism living architecture">
+      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>meaning → candidates</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="image" role="listitem"><small>02</small><strong>ComputeImage</strong><span>views → sealed artifact</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="scheduler" role="listitem"><small>03</small><strong>Scheduler</strong><span>work → execution lanes</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="evidence" role="listitem"><small>04</small><strong>Evidence</strong><span>run → receipt</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="fabric" role="listitem"><small>05</small><strong>Fabric</strong><span>machine → fleet</span></button>
+      <svg class="atlas-wires" viewBox="0 0 700 360" aria-hidden="true"><path d="M140 70 C250 20 340 20 560 70 M140 70 C250 130 350 130 560 180 M140 180 C270 180 370 180 560 180 M140 290 C250 240 350 240 560 290 M140 290 C290 350 420 350 560 290"/><path d="M560 70 C600 120 600 230 560 290"/></svg>
+    </div>
+    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves semantic identity while searching representation, placement, and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
+  </div>
+</section>
+<aside class="shared-computeimage-observation" aria-labelledby="shared-computeimage-title">
+  <div>
+    <span class="eyebrow">Canonical object / shared observation</span>
+    <h2 id="shared-computeimage-title">The same computation, inspected from Runtime.</h2>
+    <p>Every instrument observes one ComputeImage identity. This surface changes its disclosure without creating a second artifact.</p>
+  </div>
+  <div class="shared-computeimage-specimen" data-computeimage-renderer data-subject-id="computational-subject:prism-model" role="img" aria-label="Shared canonical ComputeImage observation"></div>
+</aside>
+</main>
+  <footer class="site-footer component-footer">
+  <div class="continue-reading" aria-label="Continue reading">
+    <span class="eyebrow">Continue reading</span>
+    <a class="continue-reading-link" href="general-compute.html">ComputeImages <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="footer-meta">
+    <span>PRISM ENGINE / Runtime</span>
+    <span>AGPLv3 · commercial dual licensing</span>
+  </div>
+</footer>
+
+  <script type="module" src="site.js"></script>
+
+</body>
+</html>

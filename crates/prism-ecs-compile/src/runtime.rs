@@ -141,6 +141,10 @@ pub struct RuntimeModel {
     pub native_ternary_promotion: Option<NativeTernaryPromotionEvidence>,
     /// Joint ANE/Metal tiling evidence retained by the CImage.
     pub joint_tiling_evidence: Option<crate::search::JointTilingEvidence>,
+    pub heterogeneous_workload_evidence: Option<crate::search::HeterogeneousScheduleEvidence>,
+    /// Validated per-tensor representation policy produced by evolutionary
+    /// family selection, including fallback formats.
+    pub format_plan: Option<prism_ecs_ir::evolution::compile_plan::FormatPlan>,
     /// AOT heterogeneous schedule and residency contract emitted by the
     /// compiler.
     pub execution_plan: Option<ExecutionPlan>,
@@ -154,6 +158,21 @@ pub struct RuntimeModel {
     pub tensor_offsets: HashMap<String, (u64, u64)>,
     /// Read-only mapping of the CImage file for zero-copy backend views.
     pub mapped_cimage: Option<memmap2::Mmap>,
+}
+
+impl RuntimeModel {
+    /// Resolve the compiler-selected representation for a tensor. Missing
+    /// assignments are conservative FP16 rather than an accidental ternary
+    /// fallback, which is important for family outliers.
+    pub fn tensor_format(
+        &self,
+        tensor_name: &str,
+    ) -> prism_ecs_ir::evolution::mutation_table::TensorFormat {
+        self.format_plan
+            .as_ref()
+            .and_then(|plan| plan.get(tensor_name))
+            .unwrap_or(prism_ecs_ir::evolution::mutation_table::TensorFormat::Fp16)
+    }
 }
 
 /// Header-only view used to admit production-scale artifacts without copying
@@ -946,7 +965,11 @@ impl RuntimeModel {
             .len();
         let tensor_bytes = reader.header.tensors.values().map(|r| r.size).sum();
         if let Some(catalog) = reader.header.source_catalog.as_ref() {
-            if catalog.tensors.iter().any(|tensor| !reader.header.tensors.contains_key(&tensor.name)) {
+            if catalog
+                .tensors
+                .iter()
+                .any(|tensor| !reader.header.tensors.contains_key(&tensor.name))
+            {
                 return Err(RuntimeError::InvalidCImage(
                     "source catalog references a tensor without an embedded payload".into(),
                 ));
@@ -958,9 +981,11 @@ impl RuntimeModel {
             })?;
         }
         if let Some(report) = reader.header.legalization_report.as_deref() {
-            serde_json::from_str::<crate::legalize::LegalizationReport>(report).map_err(|error| {
-                RuntimeError::InvalidCImage(format!("invalid legalization report: {error}"))
-            })?;
+            serde_json::from_str::<crate::legalize::LegalizationReport>(report).map_err(
+                |error| {
+                    RuntimeError::InvalidCImage(format!("invalid legalization report: {error}"))
+                },
+            )?;
         }
         if let Some(events) = reader.header.compilation_events.as_deref() {
             serde_json::from_str::<Vec<crate::CompilationEvent>>(events).map_err(|error| {
@@ -1148,16 +1173,15 @@ impl RuntimeModel {
         let tuning_receipt = reader.uop_tuning_receipt().map_err(|error| {
             RuntimeError::InvalidCImage(format!("invalid UOp tuning receipt: {error}"))
         })?;
-        let uop_workload_evidence = if tuning_receipt
-            .is_some_and(|receipt| receipt.production_ready)
-        {
-            uop_workload_evidence
-        } else {
-            // Legacy timing tables and explicitly synthetic receipts remain
-            // inspectable in CImage metadata, but cannot silently become
-            // runtime selection authority.
-            Vec::new()
-        };
+        let uop_workload_evidence =
+            if tuning_receipt.is_some_and(|receipt| receipt.production_ready) {
+                uop_workload_evidence
+            } else {
+                // Legacy timing tables and explicitly synthetic receipts remain
+                // inspectable in CImage metadata, but cannot silently become
+                // runtime selection authority.
+                Vec::new()
+            };
         let normalize_plan = |mut plan: ExecutionPlan| {
             for window in &mut plan.residency_windows {
                 // A zero value in compiler output means “the complete
@@ -1201,7 +1225,9 @@ impl RuntimeModel {
                                 model.id, projector.tensor_name
                             ))
                         })?;
-                    if record.dim_m as usize != projector.output_dim || record.dim_n as usize != projector.input_dim {
+                    if record.dim_m as usize != projector.output_dim
+                        || record.dim_n as usize != projector.input_dim
+                    {
                         return Err(RuntimeError::InvalidCImage(format!(
                             "model {:?} projector {:?} has shape {}x{}, expected {}x{}",
                             model.id,
@@ -1232,14 +1258,18 @@ impl RuntimeModel {
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()
-                .map_err(|e| RuntimeError::InvalidCImage(format!("invalid legalization report: {e}")))?,
+                .map_err(|e| {
+                    RuntimeError::InvalidCImage(format!("invalid legalization report: {e}"))
+                })?,
             compilation_events: reader
                 .header
                 .compilation_events
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()
-                .map_err(|e| RuntimeError::InvalidCImage(format!("invalid compilation events: {e}")))?,
+                .map_err(|e| {
+                    RuntimeError::InvalidCImage(format!("invalid compilation events: {e}"))
+                })?,
             manifest: CImageManifest {
                 schema_version: "TRB_CIMG/1".into(),
                 source_digest: String::new(),
@@ -1258,9 +1288,17 @@ impl RuntimeModel {
             ane_programs,
             xdna_artifacts,
             kv_compression_policy: reader.header.kv_compression_policy,
+            format_plan: reader
+                .header
+                .format_plan
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(|e| RuntimeError::InvalidCImage(format!("invalid format plan: {e}")))?,
             model_manifest: reader.header.model_manifest,
             native_ternary_promotion: reader.header.native_ternary_promotion,
             joint_tiling_evidence: reader.header.joint_tiling_evidence,
+            heterogeneous_workload_evidence: reader.header.heterogeneous_workload_evidence,
             execution_plan,
             realtime_execution_plan,
             tensor_offsets,
@@ -1297,6 +1335,49 @@ impl RuntimeModel {
     /// contains measured KV compression evidence.
     pub fn kv_compression_policy(&self) -> Option<&str> {
         self.kv_compression_policy.as_deref()
+    }
+
+    pub fn heterogeneous_workload_evidence(
+        &self,
+    ) -> Option<&crate::search::HeterogeneousScheduleEvidence> {
+        self.heterogeneous_workload_evidence.as_ref()
+    }
+
+    /// Return the best measured throughput evidence for one workload profile,
+    /// preferring the highest measured tokens-per-second evidence. This is the
+    /// metadata-only bridge between compilation and runtime telemetry.
+    pub fn best_throughput_evidence_for_profile(
+        &self,
+        profile: &crate::workload_search::WorkloadProfile,
+    ) -> Option<&crate::workload_search::WorkloadThroughputEvidence> {
+        self.heterogeneous_workload_evidence
+            .as_ref()
+            .and_then(|evidence| {
+                evidence
+                    .throughput_evidence
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.profile.phase == profile.phase
+                            && candidate.profile.batch_size == profile.batch_size
+                            && candidate.profile.concurrency == profile.concurrency
+                            && candidate.profile.service_class == profile.service_class
+                    })
+                    .max_by(|left, right| {
+                        left.tokens_per_second
+                            .partial_cmp(&right.tokens_per_second)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+            })
+    }
+
+    /// Return the compact mixed-precision execution graph selected for the
+    /// artifact-level heterogeneous search.
+    pub fn selected_execution_graph(
+        &self,
+    ) -> Option<&crate::workload_search::SelectedExecutionGraph> {
+        self.heterogeneous_workload_evidence
+            .as_ref()
+            .map(|evidence| &evidence.selected_execution_graph)
     }
 
     /// Return the validated MoE placement descriptor for a tensor.
@@ -1516,6 +1597,9 @@ pub struct UnifiedRuntime {
     /// workload without mutating the sealed CImage artifact.
     measured_strategy_overrides: HashMap<WorkloadScenario, String>,
     requested_batch_size: Option<u32>,
+    /// Last selected heterogeneous workload profile applied at dispatch time,
+    /// retained for correlated runtime observability and debugging.
+    last_workload_selection: Option<crate::workload_search::WorkloadThroughputEvidence>,
 }
 
 impl UnifiedRuntime {
@@ -1538,7 +1622,105 @@ impl UnifiedRuntime {
             mode: ExecutionMode::Batch,
             measured_strategy_overrides,
             requested_batch_size: None,
+            last_workload_selection: None,
         }
+    }
+
+    /// Return the latest dispatch workload decision, when available.
+    pub fn last_workload_selection(
+        &self,
+    ) -> Option<&crate::workload_search::WorkloadThroughputEvidence> {
+        self.last_workload_selection.as_ref()
+    }
+
+    fn workload_profile_for_dispatch(
+        &self,
+        sequence_length: u32,
+    ) -> Option<&crate::workload_search::WorkloadThroughputEvidence> {
+        let evidence = self.model.heterogeneous_workload_evidence.as_ref()?;
+        let phase = match self.mode {
+            ExecutionMode::Batch => crate::workload_search::InferenceWorkloadPhase::Decode,
+            ExecutionMode::RealtimePrefill => {
+                crate::workload_search::InferenceWorkloadPhase::Prefill
+            }
+            ExecutionMode::RealtimeDecode => crate::workload_search::InferenceWorkloadPhase::Decode,
+        };
+        let service_class = match self.mode {
+            ExecutionMode::Batch => crate::workload_search::ServiceClass::Batch,
+            ExecutionMode::RealtimePrefill | ExecutionMode::RealtimeDecode => {
+                crate::workload_search::ServiceClass::Realtime
+            }
+        };
+        let batch_size = match self.mode {
+            ExecutionMode::Batch => self
+                .requested_batch_size
+                .unwrap_or_else(|| sequence_length.max(1)),
+            ExecutionMode::RealtimePrefill | ExecutionMode::RealtimeDecode => 1,
+        };
+        let selected_graph = self.model.selected_execution_graph();
+            let matches_selected_graph =
+            |sample: &&crate::workload_search::WorkloadThroughputEvidence| -> bool {
+                let Some(graph) = selected_graph else {
+                    return true;
+                };
+                if graph.route_sequence.is_empty() {
+                    return true;
+                }
+                if !graph.route_sequence.contains(&sample.profile.primary_lane) {
+                    return false;
+                }
+                if !graph.route_sequence.contains(&sample.profile.attention_lane) {
+                    return false;
+                }
+                if graph.fused_interleaved_metal && !sample.profile.interleaved_metal {
+                    return false;
+                }
+                if graph.stateless_ane
+                    && sample.profile.primary_lane == crate::workload_search::ExecutionLane::Ane
+                    && !sample.profile.stateless_shared_arena
+                {
+                    return false;
+                }
+                if graph.ane_int8_planar_boundaries
+                    && sample.profile.primary_lane == crate::workload_search::ExecutionLane::Ane
+                    && (!sample.profile.ane_compute_int8
+                        || !sample.profile.planar_input_conversion
+                        || !sample.profile.planar_output_conversion)
+                {
+                    return false;
+                }
+                true
+            };
+
+        let exact = evidence
+            .throughput_evidence
+            .iter()
+            .filter(|sample| {
+                sample.profile.phase == phase
+                    && sample.profile.service_class == service_class
+                    && sample.profile.batch_size == batch_size.max(1)
+                    && sample.valid()
+                    && matches_selected_graph(sample)
+            })
+            .max_by(|left, right| {
+                left.tokens_per_second
+                    .partial_cmp(&right.tokens_per_second)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        if exact.is_some() {
+            return exact;
+        }
+
+        evidence
+            .throughput_evidence
+            .iter()
+            .filter(|sample| sample.profile.phase == phase && sample.valid())
+            .filter(matches_selected_graph)
+            .max_by(|left, right| {
+                left.tokens_per_second
+                    .partial_cmp(&right.tokens_per_second)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
     }
 
     /// Install a measured strategy choice for one validated workload shape.
@@ -1581,6 +1763,44 @@ impl UnifiedRuntime {
     pub fn selected_measured_strategy(&self, scenario: WorkloadScenario) -> Option<&str> {
         self.measured_strategy_for_scenario(scenario)
             .map(String::as_str)
+    }
+
+    /// Return the compiler-sealed mixed-precision strategy that best matches the
+    /// requested runtime shape. This method does not alter execution policy; it
+    /// exposes metadata for downstream diagnostics and dispatch orchestration.
+    pub fn preferred_mixed_precision_profile(
+        &self,
+        profile: &crate::workload_search::WorkloadProfile,
+    ) -> Option<&crate::workload_search::WorkloadThroughputEvidence> {
+        self.model.best_throughput_evidence_for_profile(profile)
+    }
+
+    /// Return the canonical selected mixed-precision route for a concrete
+    /// workload profile, if it exists.
+    pub fn preferred_mixed_precision_graph_for_profile(
+        &self,
+        profile: &crate::workload_search::WorkloadProfile,
+    ) -> Option<&str> {
+        self.preferred_mixed_precision_profile(profile)
+            .map(|evidence| evidence.mixed_precision_graph.as_str())
+    }
+
+    /// Return the mixed-precision graph selected for the active dispatch
+    /// profile, if one was selected during evidence compilation.
+    pub fn active_mixed_precision_graph(&self) -> Option<&str> {
+        self.last_workload_selection
+            .as_ref()
+            .map(|selection| selection.mixed_precision_graph.as_str())
+    }
+
+    /// Return the canonical mixed-precision graph selected during compile-time
+    /// scheduling. This can be used to report cross-lane routing decisions
+    /// even when runtime workload selection falls back to nearest-shape
+    /// matching.
+    pub fn selected_execution_graph(
+        &self,
+    ) -> Option<&crate::workload_search::SelectedExecutionGraph> {
+        self.model.selected_execution_graph()
     }
 
     fn measured_strategy_for_scenario(&self, scenario: WorkloadScenario) -> Option<&String> {
@@ -2268,7 +2488,7 @@ impl UnifiedRuntime {
         Ok(logits)
     }
 
-    fn dispatch_tokens(&self, input_tokens: &[u32]) -> Result<Vec<f32>, RuntimeError> {
+    fn dispatch_tokens(&mut self, input_tokens: &[u32]) -> Result<Vec<f32>, RuntimeError> {
         let sequence_length = if self.mode == ExecutionMode::Batch {
             self.requested_batch_size
                 .map(|batch_size| (input_tokens.len() / batch_size.max(1) as usize).max(1) as u32)
@@ -2276,6 +2496,33 @@ impl UnifiedRuntime {
         } else {
             input_tokens.len().max(1) as u32
         };
+        self.last_workload_selection = self.workload_profile_for_dispatch(sequence_length).cloned();
+        let scenario = WorkloadScenario {
+            realtime: matches!(
+                self.mode,
+                ExecutionMode::RealtimePrefill | ExecutionMode::RealtimeDecode
+            ),
+            batch_size: if matches!(
+                self.mode,
+                ExecutionMode::RealtimePrefill | ExecutionMode::RealtimeDecode
+            ) {
+                1
+            } else {
+                self.requested_batch_size.unwrap_or(1).max(1)
+            },
+            sequence_length: sequence_length.max(1),
+        };
+
+        if self
+            .active_execution_plan()
+            .is_some_and(|plan| !plan.fused_steps.is_empty())
+        {
+            if let Ok(output) = self.dispatch_heterogeneous_plan_for_tokens(&scenario, input_tokens)
+            {
+                return Ok(output);
+            }
+        }
+
         if let Some(program) = self.selected_uop_program(sequence_length) {
             if self.uop_program_accepts_tokens(program, input_tokens.len()) {
                 return self.dispatch_uop_tokens(program, input_tokens);
@@ -2472,6 +2719,159 @@ impl UnifiedRuntime {
             .collect())
     }
 
+    fn dispatch_heterogeneous_plan_for_tokens(
+        &self,
+        scenario: &WorkloadScenario,
+        input_tokens: &[u32],
+    ) -> Result<Vec<f32>, RuntimeError> {
+        let plan = self
+            .active_execution_plan()
+            .ok_or_else(|| {
+                RuntimeError::UnsupportedMode("CImage has no AOT execution plan".into())
+            })?
+            .try_specialize_for_workload(*scenario)
+            .map_err(RuntimeError::UnsupportedMode)?;
+        if plan.fused_steps.is_empty() {
+            return Err(RuntimeError::UnsupportedMode(
+                "AOT execution plan is empty for this workload".into(),
+            ));
+        }
+        let mut resolver = CImageBindingResolver {
+            model: &self.model,
+            runtime_outputs: self.preseed_plan_inputs(&plan.fused_steps, input_tokens)?,
+        };
+
+        let mut ane = EmbeddedAneRouteBackend {
+            runtime: self,
+            outputs: HashMap::new(),
+        };
+        let accelerate = prism_ecs_kernel::AccelerateBackend;
+        let metal = prism_ecs_kernel::MetalBackend::new();
+        let cpu = prism_ecs_kernel::CpuBackend;
+        let routes = KernelRouteDispatcher {
+            model: &self.model,
+            ane: &mut ane,
+            accelerate: &accelerate,
+            metal: &metal,
+            cpu: &cpu,
+            xdna: None,
+        };
+        let mut routed = RoutedExecutor { routes };
+        AotScheduler::replay_resolved(&plan, &mut resolver, &mut routed)
+            .map_err(RuntimeError::ExecutionFailed)?;
+        Self::extract_plan_logits(&plan.fused_steps, resolver.runtime_outputs)
+            .map_err(RuntimeError::InvalidCImage)
+    }
+
+    fn preseed_plan_inputs(
+        &self,
+        steps: &[FusedScheduleStep],
+        input_tokens: &[u32],
+    ) -> Result<HashMap<String, ResolvedBuffer>, RuntimeError> {
+        let mut seeded: HashMap<String, ResolvedBuffer> = HashMap::new();
+        for step in steps {
+            for binding in &step.input_tensors {
+                if self.model.tensors.contains_key(&binding.name) {
+                    continue;
+                }
+                if seeded.contains_key(&binding.name) {
+                    continue;
+                }
+                let payload = decode_dispatch_tokens(binding, input_tokens).map_err(|error| {
+                    RuntimeError::InvalidCImage(format!(
+                        "failed to bind runtime input '{}' for heterogeneous plan: {error}",
+                        binding.name
+                    ))
+                })?;
+                let element_size = match binding.element_type.as_str() {
+                    "fp32" | "int32" => 4usize,
+                    "fp16" => 2usize,
+                    "int8" => 1usize,
+                    _ => {
+                        return Err(RuntimeError::UnsupportedMode(format!(
+                            "unsupported plan input element type {:?}",
+                            binding.element_type
+                        )))
+                    }
+                };
+                let expected_elements = if binding.shape.is_empty() {
+                    input_tokens.len()
+                } else {
+                    binding
+                        .shape
+                        .iter()
+                        .fold(1u64, |size, extent| size.saturating_mul(*extent))
+                        as usize
+                };
+                if payload.len() != expected_elements.saturating_mul(element_size) {
+                    return Err(RuntimeError::InvalidCImage(format!(
+                        "plan input '{}' payload size mismatch: has {} bytes, expected {} bytes",
+                        binding.name,
+                        payload.len(),
+                        expected_elements.saturating_mul(element_size)
+                    )));
+                }
+                seeded.insert(
+                    binding.name.clone(),
+                    ResolvedBuffer {
+                        name: binding.name.clone(),
+                        element_type: binding.element_type.clone(),
+                        region: "unified-memory".into(),
+                        byte_length: payload.len(),
+                        zero_copy: false,
+                        file_offset: None,
+                        storage: BufferStorage::RuntimeOwned,
+                        shape: binding.shape.clone(),
+                        payload: Some(payload),
+                    },
+                );
+            }
+        }
+        Ok(seeded)
+    }
+
+    fn extract_plan_logits(
+        _steps: &[FusedScheduleStep],
+        outputs: HashMap<String, ResolvedBuffer>,
+    ) -> Result<Vec<f32>, String> {
+        if outputs.is_empty() {
+            return Err("AOT plan produced no runtime outputs".into());
+        }
+        let mut final_step: Option<&FusedScheduleStep> = None;
+        for step in _steps {
+            if final_step
+                .as_ref()
+                .is_none_or(|best| step.step_id > best.step_id)
+            {
+                final_step = Some(step);
+            }
+        }
+        let Some(step) = final_step else {
+            return Err("AOT plan has no execution steps to derive output tensor".into());
+        };
+        let mut logits = Vec::new();
+        for output in &step.output_tensors {
+            if let Some(buffer) = outputs.get(&output.name) {
+                let payload = buffer
+                    .payload
+                    .as_ref()
+                    .ok_or_else(|| format!("AOT output buffer '{}' has no payload", output.name))?;
+                logits.extend(decode_tensor_payload(
+                    payload,
+                    output.element_type.as_str(),
+                    output.name.as_str(),
+                )?);
+            }
+        }
+        if logits.is_empty() {
+            return Err(format!(
+                "AOT plan produced no output from step {}",
+                step.step_id
+            ));
+        }
+        Ok(logits)
+    }
+
     fn selected_uop_program(&self, sequence_length: u32) -> Option<&UOpCompiledProgram> {
         let fallback = self.model.uop_program.as_ref();
         let Some(plan) = self.active_execution_plan() else {
@@ -2594,6 +2994,72 @@ fn argmax_token(logits: &[f32]) -> u32 {
         .max_by(|(_, a), (_, b)| a.total_cmp(b))
         .map(|(index, _)| index as u32)
         .unwrap_or(0)
+}
+
+fn decode_dispatch_tokens(
+    binding: &prism_spatial_ir::execution_plan::TensorBinding,
+    input_tokens: &[u32],
+) -> Result<Vec<u8>, String> {
+    match binding.element_type.as_str() {
+        "fp32" => Ok(input_tokens
+            .iter()
+            .flat_map(|token| (*token as f32).to_le_bytes())
+            .collect()),
+        "fp16" => Ok(input_tokens
+            .iter()
+            .flat_map(|token| half::f16::from_f32(*token as f32).to_le_bytes())
+            .collect()),
+        "int32" => Ok(input_tokens
+            .iter()
+            .flat_map(|token| (*token as i32).to_le_bytes())
+            .collect()),
+        "int8" => Ok(input_tokens
+            .iter()
+            .map(|token| *token as i8 as u8)
+            .collect()),
+        other => Err(format!("unsupported plan input element type '{other}'")),
+    }
+}
+
+fn decode_tensor_payload(
+    payload: &[u8],
+    element_type: &str,
+    name: &str,
+) -> Result<Vec<f32>, String> {
+    match element_type {
+        "fp32" => {
+            if payload.len() % 4 != 0 {
+                return Err(format!("AOT output '{name}' is not FP32 aligned"));
+            }
+            Ok(payload
+                .chunks_exact(4)
+                .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+                .collect())
+        }
+        "fp16" => {
+            if payload.len() % 2 != 0 {
+                return Err(format!("AOT output '{name}' is not FP16 aligned"));
+            }
+            let mut output = Vec::with_capacity(payload.len() / 2);
+            for chunk in payload.chunks_exact(2) {
+                output.push(half::f16::from_le_bytes([chunk[0], chunk[1]]).to_f32());
+            }
+            Ok(output)
+        }
+        "int32" => {
+            if payload.len() % 4 != 0 {
+                return Err(format!("AOT output '{name}' is not int32 aligned"));
+            }
+            Ok(payload
+                .chunks_exact(4)
+                .map(|bytes| i32::from_le_bytes(bytes.try_into().unwrap()) as f32)
+                .collect())
+        }
+        "int8" => Ok(payload.iter().map(|value| (*value as i8) as f32).collect()),
+        other => Err(format!(
+            "unsupported AOT output element type '{other}' for '{name}'"
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3008,6 +3474,8 @@ mod tests {
             model_manifest: None,
             native_ternary_promotion: None,
             joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: None,
             execution_plan: None,
             realtime_execution_plan: None,
             tensor_offsets: HashMap::new(),
@@ -3042,9 +3510,18 @@ mod tests {
 
         let cpu_names = kernel_names_for_backend(&descriptors, BackendKind::CPU);
         let metal_names = kernel_names_for_backend(&descriptors, BackendKind::Metal);
-        assert_eq!(cpu_names.iter().map(|name| name.as_str()).collect::<Vec<_>>(), ["cpu_step"]);
         assert_eq!(
-            metal_names.iter().map(|name| name.as_str()).collect::<Vec<_>>(),
+            cpu_names
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>(),
+            ["cpu_step"]
+        );
+        assert_eq!(
+            metal_names
+                .iter()
+                .map(|name| name.as_str())
+                .collect::<Vec<_>>(),
             ["metal_step"]
         );
     }
@@ -3076,6 +3553,8 @@ mod tests {
             model_manifest: None,
             native_ternary_promotion: None,
             joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: None,
             execution_plan: None,
             realtime_execution_plan: None,
             tensor_offsets: HashMap::new(),
@@ -3213,6 +3692,8 @@ mod tests {
             model_manifest: None,
             native_ternary_promotion: None,
             joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: None,
             execution_plan: Some(plan),
             realtime_execution_plan: None,
             tensor_offsets: HashMap::new(),
@@ -3294,6 +3775,643 @@ mod tests {
     }
 
     #[test]
+    fn runtime_best_throughput_selection_respects_service_class() {
+        use crate::workload_search::{
+            ExecutionLane, InferenceWorkloadPhase, ServiceClass, WorkloadProfile,
+            WorkloadThroughputEvidence,
+        };
+
+        let selected_graph = crate::search::HeterogeneousScheduleEvidence {
+            steps: 0,
+            route_sequence: Vec::new(),
+            zero_copy_steps: 0,
+            estimated_latency_ns: 0,
+            residency_windows: 0,
+            supports_realtime_text: true,
+            supports_batched_text: true,
+            supports_batched_audio: true,
+            workload_profiles: Vec::new(),
+            selected_execution_graph: crate::workload_search::SelectedExecutionGraph::default(),
+            throughput_evidence: vec![
+                WorkloadThroughputEvidence {
+                    profile: WorkloadProfile {
+                        phase: InferenceWorkloadPhase::Decode,
+                        service_class: ServiceClass::Batch,
+                        batch_size: 4,
+                        concurrency: 4,
+                        primary_lane: ExecutionLane::Metal,
+                        attention_lane: ExecutionLane::Metal,
+                        interleaved_metal: true,
+                        stateless_shared_arena: false,
+                        ane_compute_int8: false,
+                        planar_input_conversion: false,
+                        planar_output_conversion: false,
+                    },
+                    representation: "Int8".into(),
+                    tiling_digest: "batch".into(),
+                    tokens_per_second: 80.0,
+                    latency_ms: 1.0,
+                    measured: true,
+                    evidence_source: "test".into(),
+                    execution_fingerprint: "batch".into(),
+                    projected: false,
+                    projection_basis: "test".into(),
+                    mixed_precision_graph: "batch-only".into(),
+                },
+                WorkloadThroughputEvidence {
+                    profile: WorkloadProfile {
+                        phase: InferenceWorkloadPhase::Decode,
+                        service_class: ServiceClass::Realtime,
+                        batch_size: 1,
+                        concurrency: 1,
+                        primary_lane: ExecutionLane::Ane,
+                        attention_lane: ExecutionLane::Ane,
+                        interleaved_metal: false,
+                        stateless_shared_arena: true,
+                        ane_compute_int8: true,
+                        planar_input_conversion: true,
+                        planar_output_conversion: true,
+                    },
+                    representation: "Int8".into(),
+                    tiling_digest: "realtime".into(),
+                    tokens_per_second: 20.0,
+                    latency_ms: 1.0,
+                    measured: true,
+                    evidence_source: "test".into(),
+                    execution_fingerprint: "realtime".into(),
+                    projected: false,
+                    projection_basis: "test".into(),
+                    mixed_precision_graph: "realtime-only".into(),
+                },
+            ],
+        };
+
+        let target = RuntimeModel {
+            cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
+            manifest: CImageManifest::default(),
+            tensors: HashMap::new(),
+            tensor_records: HashMap::new(),
+            tensor_scales: HashMap::new(),
+            kernels: HashMap::new(),
+            kernel_descriptors: HashMap::new(),
+            uop_capture: None,
+            uop_program: None,
+            uop_strategy_programs: HashMap::new(),
+            uop_workload_evidence: Vec::new(),
+            ane_programs: HashMap::new(),
+            xdna_artifacts: HashMap::new(),
+            kv_compression_policy: None,
+            model_manifest: None,
+            native_ternary_promotion: None,
+            joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: Some(selected_graph),
+            execution_plan: None,
+            realtime_execution_plan: None,
+            tensor_offsets: HashMap::new(),
+            mapped_cimage: None,
+        };
+
+        let runtime = UnifiedRuntime::new(target);
+        let profile = WorkloadProfile {
+            phase: InferenceWorkloadPhase::Decode,
+            service_class: ServiceClass::Realtime,
+            batch_size: 1,
+            concurrency: 1,
+            primary_lane: ExecutionLane::Ane,
+            attention_lane: ExecutionLane::Ane,
+            interleaved_metal: false,
+            stateless_shared_arena: true,
+            ane_compute_int8: true,
+            planar_input_conversion: true,
+            planar_output_conversion: true,
+        };
+        let evidence = runtime
+            .model
+            .best_throughput_evidence_for_profile(&profile)
+            .expect("realtime evidence should be visible");
+        assert_eq!(evidence.mixed_precision_graph, "realtime-only");
+    }
+
+    #[test]
+    fn runtime_selected_execution_graph_is_round_tripped_from_heterogeneous_evidence() {
+        use crate::workload_search::{
+            ExecutionLane, InferenceWorkloadPhase, MixedPrecisionExecutionGraph,
+            PrecisionSensitiveOp, SelectedExecutionGraph, ServiceClass, WorkloadProfile,
+            WorkloadThroughputEvidence,
+        };
+        use std::collections::BTreeMap;
+
+        let selected_graph = SelectedExecutionGraph {
+            profiles: vec![WorkloadThroughputEvidence {
+                profile: WorkloadProfile {
+                    phase: InferenceWorkloadPhase::Decode,
+                    service_class: ServiceClass::Realtime,
+                    batch_size: 1,
+                    concurrency: 2,
+                    primary_lane: ExecutionLane::Ane,
+                    attention_lane: ExecutionLane::Metal,
+                    interleaved_metal: true,
+                    stateless_shared_arena: true,
+                    ane_compute_int8: true,
+                    planar_input_conversion: true,
+                    planar_output_conversion: true,
+                },
+                representation: "Ternary158".into(),
+                tiling_digest: "tile-x".into(),
+                tokens_per_second: 42.0,
+                latency_ms: 0.75,
+                measured: true,
+                evidence_source: "runtime-test".into(),
+                execution_fingerprint: "test-fingerprint".into(),
+                projected: false,
+                projection_basis: "test".into(),
+                mixed_precision_graph: "ternary-expert-int8-attention".into(),
+            }],
+            route_sequence: vec![
+                ExecutionLane::Ane,
+                ExecutionLane::Metal,
+                ExecutionLane::Accelerate,
+            ],
+            fused_interleaved_metal: true,
+            stateless_ane: true,
+            ane_int8_planar_boundaries: true,
+            mixed_precision_graphs: vec![MixedPrecisionExecutionGraph {
+                graph_id: "ternary-expert-int8-attention".into(),
+                assignments: BTreeMap::from([
+                    (PrecisionSensitiveOp::ExpertProjection, "Ternary158".into()),
+                    (PrecisionSensitiveOp::Attention, "Int8".into()),
+                    (PrecisionSensitiveOp::Router, "Int8".into()),
+                    (PrecisionSensitiveOp::Norm, "Bf16".into()),
+                    (PrecisionSensitiveOp::OutputHead, "Int8".into()),
+                ]),
+                ternary_native_ops: vec![PrecisionSensitiveOp::ExpertProjection],
+                conversion_boundaries: vec![
+                    "ane-planar-int8-in".into(),
+                    "ane-planar-int8-out".into(),
+                ],
+            }],
+        };
+
+        let selected_graph_evidence = crate::search::HeterogeneousScheduleEvidence {
+            steps: 8,
+            route_sequence: vec!["ane".into(), "metal".into(), "accelerate".into()],
+            zero_copy_steps: 4,
+            estimated_latency_ns: 1_234_567,
+            residency_windows: 2,
+            supports_realtime_text: true,
+            supports_batched_text: true,
+            supports_batched_audio: false,
+            workload_profiles: vec![WorkloadProfile {
+                phase: InferenceWorkloadPhase::Decode,
+                service_class: ServiceClass::Realtime,
+                batch_size: 1,
+                concurrency: 2,
+                primary_lane: ExecutionLane::Ane,
+                attention_lane: ExecutionLane::Metal,
+                interleaved_metal: true,
+                stateless_shared_arena: true,
+                ane_compute_int8: true,
+                planar_input_conversion: true,
+                planar_output_conversion: true,
+            }],
+            selected_execution_graph: selected_graph.clone(),
+            throughput_evidence: selected_graph.profiles.clone(),
+        };
+
+        let model = RuntimeModel {
+            cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
+            manifest: CImageManifest::default(),
+            tensors: HashMap::new(),
+            tensor_records: HashMap::new(),
+            tensor_scales: HashMap::new(),
+            kernels: HashMap::new(),
+            kernel_descriptors: HashMap::new(),
+            uop_capture: None,
+            uop_program: None,
+            uop_strategy_programs: HashMap::new(),
+            uop_workload_evidence: Vec::new(),
+            ane_programs: HashMap::new(),
+            xdna_artifacts: HashMap::new(),
+            kv_compression_policy: None,
+            model_manifest: None,
+            native_ternary_promotion: None,
+            joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: Some(selected_graph_evidence),
+            execution_plan: None,
+            realtime_execution_plan: None,
+            tensor_offsets: HashMap::new(),
+            mapped_cimage: None,
+        };
+
+        let runtime = UnifiedRuntime::new(model);
+        let graph = runtime
+            .selected_execution_graph()
+            .expect("selected execution graph should be present");
+        assert_eq!(graph.route_sequence, selected_graph.route_sequence);
+        assert!(graph.fused_interleaved_metal);
+        assert!(graph.stateless_ane);
+        assert!(graph.ane_int8_planar_boundaries);
+        assert_eq!(graph.profiles.len(), selected_graph.profiles.len());
+        assert_eq!(
+            graph.mixed_precision_graphs[0].graph_id,
+            "ternary-expert-int8-attention"
+        );
+        let profile = WorkloadProfile {
+            phase: InferenceWorkloadPhase::Decode,
+            service_class: ServiceClass::Realtime,
+            batch_size: 1,
+            concurrency: 2,
+            primary_lane: ExecutionLane::Ane,
+            attention_lane: ExecutionLane::Metal,
+            interleaved_metal: true,
+            stateless_shared_arena: true,
+            ane_compute_int8: true,
+            planar_input_conversion: true,
+            planar_output_conversion: true,
+        };
+        let runtime_profile = runtime
+            .model
+            .best_throughput_evidence_for_profile(&profile)
+            .expect("best profile should resolve through evidence");
+        assert_eq!(
+            runtime_profile.mixed_precision_graph,
+            "ternary-expert-int8-attention"
+        );
+    }
+
+    #[test]
+    fn workload_selection_obeys_selected_execution_graph_route() {
+        use crate::workload_search::{
+            ExecutionLane, InferenceWorkloadPhase, SelectedExecutionGraph, ServiceClass,
+            WorkloadProfile, WorkloadThroughputEvidence,
+        };
+
+        let selected_graph = SelectedExecutionGraph {
+            profiles: Vec::new(),
+            route_sequence: vec![ExecutionLane::Ane, ExecutionLane::Metal],
+            fused_interleaved_metal: false,
+            stateless_ane: true,
+            ane_int8_planar_boundaries: false,
+            mixed_precision_graphs: Vec::new(),
+        };
+        let throughput_evidence = vec![
+            WorkloadThroughputEvidence {
+                profile: WorkloadProfile {
+                    phase: InferenceWorkloadPhase::Decode,
+                    service_class: ServiceClass::Batch,
+                    batch_size: 4,
+                    concurrency: 2,
+                    primary_lane: ExecutionLane::Accelerate,
+                    attention_lane: ExecutionLane::Metal,
+                    interleaved_metal: false,
+                    stateless_shared_arena: false,
+                    ane_compute_int8: false,
+                    planar_input_conversion: false,
+                    planar_output_conversion: false,
+                },
+                representation: "Fp16".into(),
+                tiling_digest: "t-accel".into(),
+                tokens_per_second: 500.0,
+                latency_ms: 1.0,
+                measured: true,
+                evidence_source: "test".into(),
+                execution_fingerprint: "accel-only".into(),
+                projected: false,
+                projection_basis: "test".into(),
+                mixed_precision_graph: "fp16-only".into(),
+            },
+            WorkloadThroughputEvidence {
+                profile: WorkloadProfile {
+                    phase: InferenceWorkloadPhase::Decode,
+                    service_class: ServiceClass::Batch,
+                    batch_size: 4,
+                    concurrency: 2,
+                    primary_lane: ExecutionLane::Ane,
+                    attention_lane: ExecutionLane::Metal,
+                    interleaved_metal: false,
+                    stateless_shared_arena: true,
+                    ane_compute_int8: true,
+                    planar_input_conversion: true,
+                    planar_output_conversion: true,
+                },
+                representation: "Ternary158".into(),
+                tiling_digest: "t-ane".into(),
+                tokens_per_second: 120.0,
+                latency_ms: 4.2,
+                measured: true,
+                evidence_source: "test".into(),
+                execution_fingerprint: "ane-metal".into(),
+                projected: false,
+                projection_basis: "test".into(),
+                mixed_precision_graph: "ternary-attention".into(),
+            },
+        ];
+
+        let model = RuntimeModel {
+            cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
+            manifest: CImageManifest::default(),
+            tensors: HashMap::new(),
+            tensor_records: HashMap::new(),
+            tensor_scales: HashMap::new(),
+            kernels: HashMap::new(),
+            kernel_descriptors: HashMap::new(),
+            uop_capture: None,
+            uop_program: None,
+            uop_strategy_programs: HashMap::new(),
+            uop_workload_evidence: Vec::new(),
+            ane_programs: HashMap::new(),
+            xdna_artifacts: HashMap::new(),
+            kv_compression_policy: None,
+            model_manifest: None,
+            native_ternary_promotion: None,
+            joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: Some(crate::search::HeterogeneousScheduleEvidence {
+                steps: 4,
+                route_sequence: vec!["ane".into(), "metal".into()],
+                zero_copy_steps: 1,
+                estimated_latency_ns: 1_000_000,
+                residency_windows: 2,
+                supports_realtime_text: true,
+                supports_batched_text: true,
+                supports_batched_audio: false,
+                workload_profiles: Vec::new(),
+                throughput_evidence: throughput_evidence.clone(),
+                selected_execution_graph: selected_graph,
+            }),
+            execution_plan: None,
+            realtime_execution_plan: None,
+            tensor_offsets: HashMap::new(),
+            mapped_cimage: None,
+        };
+
+        let mut runtime = UnifiedRuntime::new(model);
+        runtime.requested_batch_size = Some(4);
+        let selected = runtime
+            .workload_profile_for_dispatch(4)
+            .expect("should select profile through selected graph route");
+        assert_eq!(selected.profile.primary_lane, ExecutionLane::Ane);
+        assert_eq!(selected.mixed_precision_graph, "ternary-attention");
+    }
+
+    #[test]
+    fn workload_selection_requires_fused_interleaved_metal_when_graph_requires_it() {
+        use crate::workload_search::{
+            ExecutionLane, InferenceWorkloadPhase, ServiceClass, WorkloadProfile, WorkloadThroughputEvidence,
+            SelectedExecutionGraph,
+        };
+
+        let selected_graph = SelectedExecutionGraph {
+            profiles: Vec::new(),
+            route_sequence: vec![ExecutionLane::Metal],
+            fused_interleaved_metal: true,
+            stateless_ane: false,
+            ane_int8_planar_boundaries: false,
+            mixed_precision_graphs: Vec::new(),
+        };
+        let profile_non_interleaved = WorkloadThroughputEvidence {
+            profile: WorkloadProfile {
+                phase: InferenceWorkloadPhase::Decode,
+                service_class: ServiceClass::Batch,
+                batch_size: 4,
+                concurrency: 2,
+                primary_lane: ExecutionLane::Metal,
+                attention_lane: ExecutionLane::Metal,
+                interleaved_metal: false,
+                stateless_shared_arena: false,
+                ane_compute_int8: false,
+                planar_input_conversion: false,
+                planar_output_conversion: false,
+            },
+            representation: "Fp16".into(),
+            tiling_digest: "metal".into(),
+            tokens_per_second: 5.0,
+            latency_ms: 1.0,
+            measured: true,
+            evidence_source: "test".into(),
+            execution_fingerprint: "metal-non-interleaved".into(),
+            projected: false,
+            projection_basis: "test".into(),
+            mixed_precision_graph: "fp16-only".into(),
+        };
+        let profile_interleaved = WorkloadThroughputEvidence {
+            profile: WorkloadProfile {
+                interleaved_metal: true,
+                ..profile_non_interleaved.profile
+            },
+            representation: "Fp16".into(),
+            tiling_digest: "metal".into(),
+            tokens_per_second: 7.0,
+            latency_ms: 1.0,
+            measured: true,
+            evidence_source: "test".into(),
+            execution_fingerprint: "metal-interleaved".into(),
+            projected: false,
+            projection_basis: "test".into(),
+            mixed_precision_graph: "fp16-only".into(),
+        };
+
+        let model = RuntimeModel {
+            cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
+            manifest: CImageManifest::default(),
+            tensors: HashMap::new(),
+            tensor_records: HashMap::new(),
+            tensor_scales: HashMap::new(),
+            kernels: HashMap::new(),
+            kernel_descriptors: HashMap::new(),
+            uop_capture: None,
+            uop_program: None,
+            uop_strategy_programs: HashMap::new(),
+            uop_workload_evidence: Vec::new(),
+            ane_programs: HashMap::new(),
+            xdna_artifacts: HashMap::new(),
+            kv_compression_policy: None,
+            model_manifest: None,
+            native_ternary_promotion: None,
+            joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: Some(crate::search::HeterogeneousScheduleEvidence {
+                steps: 1,
+                route_sequence: vec!["metal".into()],
+                zero_copy_steps: 1,
+                estimated_latency_ns: 500,
+                residency_windows: 1,
+                supports_realtime_text: true,
+                supports_batched_text: true,
+                supports_batched_audio: false,
+                workload_profiles: Vec::new(),
+                throughput_evidence: vec![profile_non_interleaved, profile_interleaved],
+                selected_execution_graph: selected_graph,
+            }),
+            execution_plan: None,
+            realtime_execution_plan: None,
+            tensor_offsets: HashMap::new(),
+            mapped_cimage: None,
+        };
+
+        let runtime = UnifiedRuntime::new(model);
+        let selected = runtime
+            .workload_profile_for_dispatch(4)
+            .expect("interleaved requirement should force valid candidate");
+        assert!(selected.profile.interleaved_metal);
+        assert_eq!(selected.tokens_per_second, 7.0);
+    }
+
+    #[test]
+    fn workload_selection_filters_to_shared_arena_and_ane_planar_boundaries() {
+        use crate::workload_search::{
+            ExecutionLane, InferenceWorkloadPhase, ServiceClass, WorkloadProfile, WorkloadThroughputEvidence,
+            SelectedExecutionGraph,
+        };
+
+        let selected_graph = SelectedExecutionGraph {
+            profiles: Vec::new(),
+            route_sequence: vec![ExecutionLane::Ane],
+            fused_interleaved_metal: false,
+            stateless_ane: true,
+            ane_int8_planar_boundaries: true,
+            mixed_precision_graphs: Vec::new(),
+        };
+
+        let valid_profile = WorkloadThroughputEvidence {
+            profile: WorkloadProfile {
+                phase: InferenceWorkloadPhase::Decode,
+                service_class: ServiceClass::Batch,
+                batch_size: 4,
+                concurrency: 2,
+                primary_lane: ExecutionLane::Ane,
+                attention_lane: ExecutionLane::Ane,
+                interleaved_metal: false,
+                stateless_shared_arena: true,
+                ane_compute_int8: true,
+                planar_input_conversion: true,
+                planar_output_conversion: true,
+            },
+            representation: "Int8".into(),
+            tiling_digest: "ane".into(),
+            tokens_per_second: 3.0,
+            latency_ms: 1.0,
+            measured: true,
+            evidence_source: "test".into(),
+            execution_fingerprint: "ane-valid".into(),
+            projected: false,
+            projection_basis: "test".into(),
+            mixed_precision_graph: "int8-only".into(),
+        };
+        let missing_planar = WorkloadThroughputEvidence {
+            profile: WorkloadProfile {
+                interleaved_metal: false,
+                stateless_shared_arena: true,
+                ane_compute_int8: true,
+                planar_input_conversion: false,
+                planar_output_conversion: false,
+                ..valid_profile.profile
+            },
+            representation: "Int8".into(),
+            tiling_digest: "ane".into(),
+            tokens_per_second: 6.0,
+            latency_ms: 1.0,
+            measured: true,
+            evidence_source: "test".into(),
+            execution_fingerprint: "ane-missing-planar".into(),
+            projected: false,
+            projection_basis: "test".into(),
+            mixed_precision_graph: "int8-only".into(),
+        };
+        let invalid_profile = WorkloadThroughputEvidence {
+            profile: WorkloadProfile {
+                stateless_shared_arena: false,
+                ane_compute_int8: false,
+                ..valid_profile.profile
+            },
+            representation: "Int8".into(),
+            tiling_digest: "ane".into(),
+            tokens_per_second: 99.0,
+            latency_ms: 1.0,
+            measured: true,
+            evidence_source: "test".into(),
+            execution_fingerprint: "ane-invalid".into(),
+            projected: false,
+            projection_basis: "test".into(),
+            mixed_precision_graph: "int8-only".into(),
+        };
+
+        let model = RuntimeModel {
+            cimage_path: PathBuf::from("test.cimage"),
+            source_identity: None,
+            source_catalog: None,
+            search_trace: None,
+            legalization_report: None,
+            compilation_events: None,
+            manifest: CImageManifest::default(),
+            tensors: HashMap::new(),
+            tensor_records: HashMap::new(),
+            tensor_scales: HashMap::new(),
+            kernels: HashMap::new(),
+            kernel_descriptors: HashMap::new(),
+            uop_capture: None,
+            uop_program: None,
+            uop_strategy_programs: HashMap::new(),
+            uop_workload_evidence: Vec::new(),
+            ane_programs: HashMap::new(),
+            xdna_artifacts: HashMap::new(),
+            kv_compression_policy: None,
+            model_manifest: None,
+            native_ternary_promotion: None,
+            joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: Some(crate::search::HeterogeneousScheduleEvidence {
+                steps: 1,
+                route_sequence: vec!["ane".into()],
+                zero_copy_steps: 1,
+                estimated_latency_ns: 900,
+                residency_windows: 1,
+                supports_realtime_text: true,
+                supports_batched_text: true,
+                supports_batched_audio: false,
+                workload_profiles: Vec::new(),
+                throughput_evidence: vec![invalid_profile, missing_planar, valid_profile],
+                selected_execution_graph: selected_graph,
+            }),
+            execution_plan: None,
+            realtime_execution_plan: None,
+            tensor_offsets: HashMap::new(),
+            mapped_cimage: None,
+        };
+
+        let runtime = UnifiedRuntime::new(model);
+        let selected = runtime
+            .workload_profile_for_dispatch(4)
+            .expect("should select only valid shared-arena + planar boundary profile");
+        assert!(selected.profile.stateless_shared_arena);
+        assert!(selected.profile.ane_compute_int8);
+        assert!(selected.profile.planar_input_conversion);
+        assert!(selected.profile.planar_output_conversion);
+    }
+
+    #[test]
     fn validation_load_binds_native_ternary_scales() {
         let path = std::env::temp_dir().join(format!(
             "prism_runtime_native_scales_{}.cimage",
@@ -3354,6 +4472,8 @@ mod tests {
             model_manifest: None,
             native_ternary_promotion: None,
             joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: None,
             execution_plan: None,
             realtime_execution_plan: None,
             tensor_offsets: HashMap::new(),
@@ -3499,6 +4619,8 @@ mod tests {
             model_manifest: None,
             native_ternary_promotion: None,
             joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: None,
             execution_plan: Some(plan),
             realtime_execution_plan: None,
             tensor_offsets: HashMap::new(),
@@ -3542,6 +4664,8 @@ mod tests {
             model_manifest: None,
             native_ternary_promotion: None,
             joint_tiling_evidence: None,
+            format_plan: None,
+            heterogeneous_workload_evidence: None,
             execution_plan: None,
             realtime_execution_plan: None,
             tensor_offsets: HashMap::new(),

@@ -334,9 +334,8 @@ impl Drop for BrowserSession {
     }
 }
 
-static SESSION: LazyLock<Arc<Mutex<BrowserSession>>> = LazyLock::new(|| {
-    Arc::new(Mutex::new(BrowserSession::new(BrowserConfig::default())))
-});
+static SESSION: LazyLock<Arc<Mutex<BrowserSession>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(BrowserSession::new(BrowserConfig::default()))));
 fn session(_state: &DaemonState) -> Result<Arc<Mutex<BrowserSession>>> {
     Ok(SESSION.clone())
 }

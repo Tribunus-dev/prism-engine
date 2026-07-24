@@ -1,7 +1,5 @@
 use crate::types::*;
-use crate::world_txn::{
-    ClassifiedComponent, DurableClass, DurableComponent,
-};
+use crate::world_txn::{ClassifiedComponent, DurableClass, DurableComponent};
 use prism_ecs_core::Component;
 use serde::{Deserialize, Serialize};
 

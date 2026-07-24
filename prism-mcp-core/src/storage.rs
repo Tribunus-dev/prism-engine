@@ -125,6 +125,10 @@ pub trait KnowledgeStore: Send + Sync {
 }
 
 pub trait ConversationStore: Send + Sync {
-    fn append(&self, _conversation_id: &str, _role: &str, _content: &str) -> Result<()> { Ok(()) }
-    fn list(&self, _conversation_id: &str) -> Result<Vec<(String, String)>> { Ok(Vec::new()) }
+    fn append(&self, _conversation_id: &str, _role: &str, _content: &str) -> Result<()> {
+        Ok(())
+    }
+    fn list(&self, _conversation_id: &str) -> Result<Vec<(String, String)>> {
+        Ok(Vec::new())
+    }
 }

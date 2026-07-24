@@ -9,7 +9,9 @@
 use prism_ecs_core::{Entity, World};
 
 use crate::backend_dispatch::HalFormat;
-use crate::evolution::{get_assigned_format, resolve_matmul_tile, TensorFormat, CompilePlanRef, FormatAssignment};
+use crate::evolution::{
+    get_assigned_format, resolve_matmul_tile, CompilePlanRef, FormatAssignment, TensorFormat,
+};
 use crate::ir_types::{FloatKind, Signedness, TensorType, Type};
 use crate::op::{op_name, operands};
 use crate::value::ValueType;
@@ -348,7 +350,8 @@ pub fn lower_matmul_to_metal(world: &World, matmul_op: Entity) -> Result<String,
 
     // Prefer the weight operand (B) for format selection; fall back to A.
     let fmt = assigned_b.or(assigned_a).map(|(fmt, _op)| fmt).or_else(|| {
-        world.get_component::<CompilePlanRef>(matmul_op)
+        world
+            .get_component::<CompilePlanRef>(matmul_op)
             .and_then(|r| world.get_component::<FormatAssignment>(r.0).map(|f| f.0))
     });
 

@@ -140,7 +140,9 @@ impl SystemResult {
 
     /// Convenience constructor for error.
     pub fn error(msg: impl Into<String>) -> Self {
-        SystemResult::Err { message: msg.into() }
+        SystemResult::Err {
+            message: msg.into(),
+        }
     }
 }
 
@@ -181,16 +183,10 @@ pub trait SystemSpec: Send {
             order: Self::order(),
             execution_class: Self::execution_class(),
             reads: Self::Reads::mask().unwrap_or_else(|e| {
-                panic!(
-                    "System {}: invalid reads mask: {e}",
-                    Self::system_name()
-                )
+                panic!("System {}: invalid reads mask: {e}", Self::system_name())
             }),
             writes: Self::Writes::mask().unwrap_or_else(|e| {
-                panic!(
-                    "System {}: invalid writes mask: {e}",
-                    Self::system_name()
-                )
+                panic!("System {}: invalid writes mask: {e}", Self::system_name())
             }),
             reads_resources: Self::ReadsResources::mask().unwrap_or_else(|e| {
                 panic!(

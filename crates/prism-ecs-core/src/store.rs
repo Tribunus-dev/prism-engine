@@ -1,11 +1,11 @@
+#[cfg(feature = "lmdb")]
+use lmdb::{Cursor, Transaction};
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 #[cfg(feature = "lmdb")]
 use std::path::Path;
 #[cfg(feature = "lmdb")]
 use std::sync::Arc;
-#[cfg(feature = "lmdb")]
-use lmdb::{Cursor, Transaction};
 
 use crate::column::Column;
 use crate::component::Component;

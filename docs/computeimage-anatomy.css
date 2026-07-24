@@ -12,3 +12,4 @@
 
 /* Scroll advances the artifact state in place; layers do not travel. */
 .computeimage-layer{transform:none!important}
+.computeimage-sticky{display:flex;flex-direction:column}.computeimage-sticky .computeimage-frame{order:-1;margin-bottom:clamp(28px,5vw,64px)}.computeimage-sticky .section-heading{order:0}.computeimage-sticky .computeimage-progress{order:1}.computeimage-sticky .computeimage-caption{order:2}.computeimage-frame{box-shadow:0 36px 110px #0008;border-color:color-mix(in srgb,var(--chapter-accent,var(--compiler)) 38%,var(--line))}.computeimage-frame:after{content:"OBJECT / REVEAL";position:absolute;left:24px;bottom:18px;color:var(--chapter-accent,var(--compiler));font:9px var(--mono);letter-spacing:.14em;opacity:.6}@media(max-width:800px){.computeimage-sticky .computeimage-frame{margin-bottom:26px}}

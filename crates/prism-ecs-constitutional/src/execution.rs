@@ -79,6 +79,11 @@ pub struct KvSlot {
 pub struct KvOwnership {
     pub session_id: u64,
     pub kv_slot_id: u64,
+    /// The concrete KV epoch whose pages are owned by this inference session.
+    pub epoch_id: u64,
+    /// Concrete page identities held by the slot; ranges alone are not
+    /// sufficient to fence stale dispatches after retention or refresh.
+    pub page_ids: Vec<u64>,
     pub valid_range_start: u64,
     pub valid_range_end: u64,
 }
@@ -602,6 +607,8 @@ mod tests {
         let ownership = KvOwnership {
             session_id: 1,
             kv_slot_id: 10,
+            epoch_id: 7,
+            page_ids: vec![0, 1, 2],
             valid_range_start: 0,
             valid_range_end: 4096,
         };

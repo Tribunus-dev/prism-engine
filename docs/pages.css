@@ -1,0 +1,23 @@
+@layer pages {
+  .reading-column{max-width:760px}
+  .wide-stage{max-width:1180px}
+  .split-observation{display:grid;grid-template-columns:minmax(0,1fr) minmax(280px,.72fr);gap:clamp(32px,6vw,96px);align-items:start}
+  .full-bleed-instrument{width:100vw;margin-inline:calc(50% - 50vw)}
+  .evidence-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:var(--space-3)}
+  .chapter-transition{min-height:30vh;display:grid;place-items:center}
+  @media(max-width:760px){.split-observation{grid-template-columns:1fr}.full-bleed-instrument{width:auto;margin-inline:0}}
+}
+@import url("site.css");
+@import url("architecture.css");
+@import url("architecture-explainers.css");
+@import url("demo.css");
+@import url("field-guide.css");
+@import url("general-compute.css");
+@import url("heterogeneous.css");
+@import url("home.css");
+@import url("prism-ml.css");
+@import url("roadmap.css");
+@import url("site-system.css");
+@import url("mythology.css");
+/* Partnership contracts keep the request, deliverable, duration, and evidence visible together. */
+.partner-grid dl{display:grid;grid-template-columns:minmax(110px,.6fr) minmax(0,1.4fr);gap:8px 16px;margin-top:22px;border-top:1px solid var(--line);padding-top:16px}.partner-grid dt{color:var(--muted);font:10px var(--mono);letter-spacing:.08em;text-transform:uppercase}.partner-grid dd{margin:0;color:var(--ink);font-size:14px;line-height:1.55}@media(max-width:560px){.partner-grid dl{grid-template-columns:1fr}.partner-grid dd{margin-bottom:8px}}

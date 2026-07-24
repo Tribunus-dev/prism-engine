@@ -75,7 +75,11 @@ impl ComponentMask {
 
 impl std::fmt::Debug for ComponentMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ComponentMask(0x{:016x}{:016x}{:016x}{:016x})", self.0[0], self.0[1], self.0[2], self.0[3])
+        write!(
+            f,
+            "ComponentMask(0x{:016x}{:016x}{:016x}{:016x})",
+            self.0[0], self.0[1], self.0[2], self.0[3]
+        )
     }
 }
 
@@ -135,7 +139,11 @@ impl ResourceMask {
 
 impl std::fmt::Debug for ResourceMask {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ResourceMask(0x{:016x}{:016x}{:016x}{:016x})", self.0[0], self.0[1], self.0[2], self.0[3])
+        write!(
+            f,
+            "ResourceMask(0x{:016x}{:016x}{:016x}{:016x})",
+            self.0[0], self.0[1], self.0[2], self.0[3]
+        )
     }
 }
 
@@ -324,7 +332,11 @@ mod tests {
         }
         let err = reg.register::<OtherComponent>().unwrap_err();
         match err {
-            RegistryError::ComponentIdCollision { id: 0, existing: "dummy", incoming: "other" } => {}
+            RegistryError::ComponentIdCollision {
+                id: 0,
+                existing: "dummy",
+                incoming: "other",
+            } => {}
             other => panic!("unexpected error: {other}"),
         }
     }

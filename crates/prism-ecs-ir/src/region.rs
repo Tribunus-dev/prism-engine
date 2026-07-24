@@ -44,9 +44,7 @@ pub fn is_region(world: &prism_ecs_core::World, entity: Entity) -> bool {
 
 /// Get the kind of a region.
 pub fn region_kind(world: &prism_ecs_core::World, entity: Entity) -> Option<RegionKind> {
-    world
-        .get_component::<RegionKindComp>(entity)
-        .map(|k| k.0)
+    world.get_component::<RegionKindComp>(entity).map(|k| k.0)
 }
 
 /// Get the blocks in a region.

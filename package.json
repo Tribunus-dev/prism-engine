@@ -1,0 +1,12 @@
+{
+  "name": "prism-engine-site-audit",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Prism website diagnostics and reproduction tooling",
+  "scripts": {
+    "matrix:check": "playwright test prism-matrix.spec.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1"
+  }
+}

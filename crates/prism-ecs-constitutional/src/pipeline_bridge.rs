@@ -64,9 +64,7 @@ impl PipelineBridge {
             type_name: "Pipeline".into(),
             description: "Multimodal generation pipeline".into(),
             durability: ComponentDurability::Durable,
-            type_id: Some(std::any::TypeId::of::<
-                crate::multimodal::Pipeline,
-            >()),
+            type_id: Some(std::any::TypeId::of::<crate::multimodal::Pipeline>()),
         });
         reg.register(SchemaEntry {
             schema_id: ComponentSchemaId(SCHEMA_PIPELINE_STAGE),
@@ -90,9 +88,7 @@ impl PipelineBridge {
             type_name: "InputArtifactRef".into(),
             description: "Input artifact reference".into(),
             durability: ComponentDurability::Durable,
-            type_id: Some(std::any::TypeId::of::<
-                crate::multimodal::InputArtifactRef,
-            >()),
+            type_id: Some(std::any::TypeId::of::<crate::multimodal::InputArtifactRef>()),
         });
         reg.register(SchemaEntry {
             schema_id: ComponentSchemaId(SCHEMA_OUTPUT_ARTIFACT),
@@ -100,9 +96,7 @@ impl PipelineBridge {
             type_name: "OutputArtifactRef".into(),
             description: "Output artifact reference".into(),
             durability: ComponentDurability::Durable,
-            type_id: Some(std::any::TypeId::of::<
-                crate::multimodal::OutputArtifactRef,
-            >()),
+            type_id: Some(std::any::TypeId::of::<crate::multimodal::OutputArtifactRef>()),
         });
         reg.register(SchemaEntry {
             schema_id: ComponentSchemaId(SCHEMA_PIPELINE_LIFECYCLE),
@@ -110,9 +104,7 @@ impl PipelineBridge {
             type_name: "PipelineLifecycle".into(),
             description: "Pipeline lifecycle".into(),
             durability: ComponentDurability::Durable,
-            type_id: Some(std::any::TypeId::of::<
-                crate::multimodal::PipelineLifecycle,
-            >()),
+            type_id: Some(std::any::TypeId::of::<crate::multimodal::PipelineLifecycle>()),
         });
         reg.register(SchemaEntry {
             schema_id: ComponentSchemaId(SCHEMA_WORK_LEASE_REF),
@@ -120,9 +112,7 @@ impl PipelineBridge {
             type_name: "WorkLeaseRef".into(),
             description: "Work lease reference".into(),
             durability: ComponentDurability::Durable,
-            type_id: Some(std::any::TypeId::of::<
-                crate::multimodal::WorkLeaseRef,
-            >()),
+            type_id: Some(std::any::TypeId::of::<crate::multimodal::WorkLeaseRef>()),
         });
         reg
     }
@@ -142,10 +132,7 @@ impl PipelineBridge {
         world: &mut World,
         target_modality: PipelineModality,
         stages: Vec<PipelineStage>,
-    ) -> Result<
-        (CommittedEpoch, DomainEvent),
-        crate::multimodal::MultimodalError,
-    > {
+    ) -> Result<(CommittedEpoch, DomainEvent), crate::multimodal::MultimodalError> {
         let cmd = CreatePipelineCommand {
             id: MessageId::compute(
                 format!(

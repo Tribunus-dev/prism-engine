@@ -284,6 +284,16 @@ pub struct KernelDispatchRequest {
     pub bindings: Vec<BindingSlot>,
 }
 
+/// Borrowed dispatch request for buffers owned by an active ECS layer window.
+/// Backends that support resident dispatch must consume these slices without
+/// cloning them. The default implementation is an explicit compatibility
+/// fallback for legacy backends.
+pub struct ResidentKernelDispatchRequest<'a> {
+    pub artifact: &'a KernelArtifact,
+    pub inputs: &'a [&'a [u8]],
+    pub bindings: &'a [BindingSlot],
+}
+
 /// Output from a single kernel dispatch.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KernelOutput {
@@ -392,6 +402,18 @@ pub trait KernelBackend: Send + Sync {
     ///
     /// Returns the output buffers and wall-clock dispatch time.
     fn dispatch(&self, request: &KernelDispatchRequest) -> Result<KernelOutput, KernelError>;
+
+    fn dispatch_resident<'a>(
+        &self,
+        request: ResidentKernelDispatchRequest<'a>,
+    ) -> Result<KernelOutput, KernelError> {
+        let owned = KernelDispatchRequest {
+            artifact: request.artifact.clone(),
+            inputs: request.inputs.iter().map(|input| input.to_vec()).collect(),
+            bindings: request.bindings.to_vec(),
+        };
+        self.dispatch(&owned)
+    }
 
     /// Benchmark a compiled kernel artifact over the specified number of
     /// iterations.

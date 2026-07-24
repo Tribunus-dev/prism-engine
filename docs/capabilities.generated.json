@@ -1,0 +1,51 @@
+{
+  "schema": "prism-capabilities/v1",
+  "capabilities": [
+    {
+      "id": "ecs-native-compiler",
+      "label": "ECS-native compiler surfaces",
+      "sourceRefs": [
+        "crates/prism-ecs-compile",
+        "crates/prism-ecs-core",
+        "crates/prism-ecs-ir"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "computeimage",
+      "label": "ComputeImage assembly and inspection",
+      "sourceRefs": [
+        "docs/cimage-layout-abi-v1.md",
+        "crates/prism-ecs-artifact"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "metal",
+      "label": "Apple Silicon / Metal validation path",
+      "sourceRefs": [
+        "crates/prism-metal-runtime",
+        "docs/demo.html"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "rocm",
+      "label": "ROCm / HIP provider planning",
+      "sourceRefs": [
+        "docs/adr-031-aiter-atom-rocm-provider.md",
+        "crates/prism-amd-npu-runtime"
+      ],
+      "status": "repository-evidence"
+    },
+    {
+      "id": "xdna",
+      "label": "XDNA / XDNA2 spatial planning",
+      "sourceRefs": [
+        "crates/prism-intel-npu-runtime",
+        "docs/heterogeneous.html"
+      ],
+      "status": "repository-evidence"
+    }
+  ]
+}

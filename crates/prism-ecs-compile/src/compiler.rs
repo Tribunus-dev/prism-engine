@@ -7,18 +7,18 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use prism_ecs_core::identity::TensorProvider;
 use prism_ecs_core::identity::CompilerIdentity;
+use prism_ecs_core::identity::TensorProvider;
 use prism_ecs_core::world::World;
 use prism_ecs_core::Entity;
 use prism_ecs_ir::evolution::EvolutionRuntime;
 #[cfg(test)]
 use prism_ecs_kernel::BackendKind;
 #[cfg(test)]
+use prism_ecs_source::SourceIdentity;
+#[cfg(test)]
 use prism_ecs_source::TensorDataProvider;
 use prism_ecs_source::{CanonicalSource, CanonicalSourceAdapter, SourceError};
-#[cfg(test)]
-use prism_ecs_source::SourceIdentity;
 
 use crate::cimage::{
     MoeTensorDescriptor, TensorPayloadEntry, TensorType, UniversalCImageWriter,
@@ -27,14 +27,15 @@ use crate::cimage::{
 use crate::compilation_entity::CompilationEntity;
 use crate::compilation_systems::*;
 use crate::ecs::{
-    system_build_graph, system_build_receipt, system_detect_source, system_emit_cimage,
-    system_certify, system_generate_kernels, system_legalize, system_run_search,
+    system_build_graph, system_build_receipt, system_certify, system_detect_source,
+    system_emit_cimage, system_generate_kernels, system_legalize, system_run_search,
     CompilationReceipt, CompilationSession, CurrentSource, SessionHandle, SessionStatus,
     SourceAdapterList,
 };
 use crate::forensic::FileEventSink;
 use crate::graph::CanonicalGraphBuilder;
 use crate::legalize::CompilerLegalizer;
+use crate::observability::{EcsCorrelation, EcsStateStream};
 use crate::search::SearchCoordinator;
 use crate::{
     CompilationEvent, CompilationEventSink, CompilationStage, CompileConfig, CompileError,
@@ -282,6 +283,21 @@ pub fn compile_path(
     )
 }
 
+/// Source-compatible names retained at the canonical compiler boundary.
+pub fn compile_gguf_compat(source: &Path, output: &Path) -> Result<(), String> {
+    compile_path_with_backend(source, output, true, prism_ecs_kernel::BackendKind::Metal)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+pub fn compile_to_cimage_compat(source: &Path, output: &Path) -> Result<(), String> {
+    compile_gguf_compat(source, output)
+}
+
+pub fn compile_with_autodetect(source: &Path, output: &Path) -> Result<(), String> {
+    compile_gguf_compat(source, output)
+}
+
 /// Compile a model while explicitly selecting the native target backend.
 /// This is the programmatic entry point for AMD XDNA deployment; the legacy
 /// `compile_path` wrapper retains Metal as its default.
@@ -291,6 +307,19 @@ pub fn compile_path_with_backend(
     production_mode: bool,
     backend: prism_ecs_kernel::BackendKind,
 ) -> Result<CompileResult, CompileError> {
+    let correlation = EcsCorrelation::new();
+    let stream = EcsStateStream::with_jsonl(
+        &output_path.with_extension("cimage.events.jsonl"),
+        &correlation,
+    )
+    .map_err(CompileError::SourceIngestionFailed)?;
+    stream.stage(
+        &correlation,
+        CompilationStage::SourceDetection,
+        EventKind::StageStarted,
+        "compilation started",
+        std::collections::BTreeMap::new(),
+    );
     let mut compiler = crate::CanonicalCompiler::new(CompileConfig {
         production_mode,
         max_candidates: 100,
@@ -335,9 +364,15 @@ pub fn compile_path_with_backend(
             .map_err(CompileError::SourceIngestionFailed)?;
         compiler.qwen36_config = qwen36_config;
         let shard_cache = source_path.join(".prism-shard-cache");
-        if let Ok(provider) =
+        let ternary_cache_complete = shard_cache.join("ternary-manifest.json").is_file();
+        if ternary_cache_complete {
+            eprintln!(
+                "[prism:compile] progressive ternary cache complete: reusing existing payloads"
+            );
+        } else if let Ok(provider) =
             prism_ecs_quantization::safetensors_provider::SafeTensorProvider::new(source_path)
         {
+            eprintln!("[prism:compile] validating safetensors inventory...");
             if let Some(config) = compiler.qwen36_config.as_ref() {
                 let summaries = provider
                     .shard_summaries()
@@ -360,23 +395,50 @@ pub fn compile_path_with_backend(
                     .validate_inventory(&names)
                     .map_err(CompileError::SourceIngestionFailed)?;
             }
-            let shard_records = provider
-                .write_preprocess_cache(&shard_cache)
-                .map_err(CompileError::SourceIngestionFailed)?;
-            // This is resumable: rerunning it fills missing tensor records and
-            // skips payloads that already have valid cache files.
-            provider
-                .write_ternary_preprocess_cache_from_records(&shard_cache, shard_records)
-                .map_err(CompileError::SourceIngestionFailed)?;
+            let manifest_path = shard_cache.join("ternary-manifest.json");
+            let cached_records = std::fs::read(&manifest_path)
+                .ok()
+                .and_then(|bytes| {
+                    serde_json::from_slice::<
+                        Vec<prism_ecs_quantization::safetensors_provider::TernaryPreprocessRecord>,
+                    >(&bytes)
+                    .ok()
+                })
+                .filter(|records| !records.is_empty());
+            if let Some(records) = cached_records {
+                eprintln!(
+                    "[prism:compile] progressive ternary cache complete: {} records (reusing existing payloads)",
+                    records.len()
+                );
+            } else {
+                let shard_records = provider
+                    .write_preprocess_cache(&shard_cache)
+                    .map_err(CompileError::SourceIngestionFailed)?;
+                eprintln!(
+                    "[prism:compile] shard preprocessing complete: {} records",
+                    shard_records.len()
+                );
+                // This is resumable: rerunning it fills missing tensor records and
+                // skips payloads that already have valid cache files.
+                provider
+                    .write_ternary_preprocess_cache_from_records(&shard_cache, shard_records)
+                    .map_err(CompileError::SourceIngestionFailed)?;
+                eprintln!("[prism:compile] progressive ternary cache complete");
+            }
         }
         compiler.model_adapter = model_adapter.map(std::sync::Arc::from);
     }
 
     let adapter = detect_source(source_path)
         .map_err(|e| CompileError::SourceDetectionFailed(e.to_string()))?;
+    eprintln!("[prism:compile] opening canonical source...");
     let source = adapter
         .open(source_path)
         .map_err(|e| CompileError::SourceIngestionFailed(e.to_string()))?;
+    eprintln!(
+        "[prism:compile] source opened: {} tensors",
+        source.catalog.len()
+    );
     if let Some(config) = compiler.qwen36_config.as_ref() {
         let names = source.catalog.iter().map(|tensor| tensor.name.as_str());
         config
@@ -384,7 +446,39 @@ pub fn compile_path_with_backend(
             .map_err(CompileError::SourceIngestionFailed)?;
     }
 
-    compile_source(&mut compiler, source)
+    eprintln!("[prism:compile] entering ECS compilation stages...");
+    stream.stage(
+        &correlation,
+        CompilationStage::SourceIngestion,
+        EventKind::StageCompleted,
+        "source opened",
+        std::collections::BTreeMap::from([(
+            String::from("tensor_count"),
+            serde_json::json!(source.catalog.len()),
+        )]),
+    );
+    let result = compile_source(&mut compiler, source);
+    let mut state = std::collections::BTreeMap::new();
+    state.insert(
+        "status".into(),
+        serde_json::json!(if result.is_ok() {
+            "completed"
+        } else {
+            "failed"
+        }),
+    );
+    stream.stage(
+        &correlation,
+        CompilationStage::ReceiptBuild,
+        if result.is_ok() {
+            EventKind::StageCompleted
+        } else {
+            EventKind::Error
+        },
+        "compilation terminal state",
+        state,
+    );
+    result
 }
 
 /// Run the full compilation pipeline on an already-opened CanonicalSource.
@@ -455,6 +549,9 @@ pub fn compile_source(
 
     // Stage 2: Search (if enabled)
     let mut selected_format_plan: Option<prism_ecs_ir::evolution::compile_plan::FormatPlan> = None;
+    let mut selected_heterogeneous_workload_evidence: Option<
+        crate::search::HeterogeneousScheduleEvidence,
+    > = None;
     let mut search_trace = None;
     let mut selection_receipt = None;
     let (candidate_count, generations_count) = if compiler.config.enable_search {
@@ -502,11 +599,54 @@ pub fn compile_source(
             )
             .map_err(|e| CompileError::SearchFailed(e.to_string()))?;
         search_trace = Some(search_result.trace.clone());
+        selected_heterogeneous_workload_evidence = search_result.heterogeneous_schedule.clone();
         selection_receipt = Some(search_result.selection_receipt.clone());
         selected_format_plan = search_result
             .format_plan
             .as_deref()
             .and_then(|json| serde_json::from_str(json).ok());
+        if let (Some(model_dir), Some(plan)) =
+            (compiler.source_path.as_ref(), selected_format_plan.as_mut())
+        {
+            if let Err(error) = crate::representation_cache::record_promoted_profiles(
+                model_dir,
+                plan,
+                &source.catalog,
+            ) {
+                eprintln!("[prism:compile] representation reuse index unavailable: {error}");
+            }
+            let mut family_policies =
+                crate::representation_cache::cluster_tensor_families(&source.catalog);
+            for policy in family_policies.values_mut() {
+                if let Some(format) = policy
+                    .members
+                    .iter()
+                    .find_map(|name| plan.per_tensor.get(name))
+                {
+                    policy.format = format!("{format:?}");
+                }
+            }
+            if let Ok(probe) =
+                crate::evaluator::MappedTensorBehavioralProbe::try_new_real(model_dir.clone())
+            {
+                if let Err(error) = probe.evaluate_family_canaries(
+                    &mut family_policies,
+                    &prism_ecs_ir::evolution::progressive::TernaryAdmissionLimits::default(),
+                ) {
+                    eprintln!("[prism:compile] family canary verification unavailable: {error}");
+                }
+            }
+            crate::representation_cache::apply_family_formats(
+                plan,
+                &source.catalog,
+                &family_policies,
+            );
+            if let Err(error) =
+                crate::representation_cache::persist_family_policy_map(model_dir, &family_policies)
+            {
+                eprintln!("[prism:compile] tensor family policy unavailable: {error}");
+            }
+        }
         let search_duration = search_t0.elapsed().as_millis() as u64;
         emit_event(
             &mut events,
@@ -657,6 +797,9 @@ pub fn compile_source(
         })?;
         writer.set_execution_plan(plan_json);
     }
+    if let Some(evidence) = selected_heterogeneous_workload_evidence {
+        writer.set_heterogeneous_workload_evidence(evidence);
+    }
     if let Some(format_plan) = selected_format_plan.as_ref() {
         let plan_json = serde_json::to_string(format_plan)
             .map_err(|e| CompileError::CImageEmitFailed(format!("serialize format plan: {e}")))?;
@@ -792,19 +935,27 @@ pub fn compile_source(
                 }
             }
         }
-        if let Some(provider) = source.provider.as_ref() { if let Ok(payload) = provider.read_tensor(tensor) {
-            writer.add_tensor_payload(TensorPayloadEntry {
-                name: tensor.name.clone(),
-                payload,
-                representation: tensor.original_dtype.clone(),
-                effective_bpp: 16.0,
-                dim_m: tensor.shape.first().copied().unwrap_or(0) as u32,
-                dim_n: tensor.shape.get(1).copied().unwrap_or(0) as u32,
-                tensor_type: TensorType::Blob,
-            }).map_err(CompileError::CImageEmitFailed)?;
-            annotate_tensor_for_model(&mut writer, compiler.qwen36_config.as_ref(), &tensor.name)
+        if let Some(provider) = source.provider.as_ref() {
+            if let Ok(payload) = provider.read_tensor(tensor) {
+                writer
+                    .add_tensor_payload(TensorPayloadEntry {
+                        name: tensor.name.clone(),
+                        payload,
+                        representation: tensor.original_dtype.clone(),
+                        effective_bpp: 16.0,
+                        dim_m: tensor.shape.first().copied().unwrap_or(0) as u32,
+                        dim_n: tensor.shape.get(1).copied().unwrap_or(0) as u32,
+                        tensor_type: TensorType::Blob,
+                    })
+                    .map_err(CompileError::CImageEmitFailed)?;
+                annotate_tensor_for_model(
+                    &mut writer,
+                    compiler.qwen36_config.as_ref(),
+                    &tensor.name,
+                )
                 .map_err(CompileError::CImageEmitFailed)?;
-        } }
+            }
+        }
     }
 
     // Materialize stateless ANE programs for admitted Tile640 candidates in
@@ -1189,20 +1340,27 @@ pub fn compile_source_ecs(
         SessionStatus::Complete => {
             let receipt = world
                 .component::<CompilationReceipt>(session_entity)
-                .map_err(|e| CompileError::CompilationFailed(format!("receipt component missing: {e}")))?
+                .map_err(|e| {
+                    CompileError::CompilationFailed(format!("receipt component missing: {e}"))
+                })?
                 .0
                 .clone();
             Ok(CompileResult {
                 status: CompileStatus::Completed,
                 request_id: receipt.request_id,
-                events: world.get_resource::<VecEventSink>().map(|s| s.events()).unwrap_or_default(),
+                events: world
+                    .get_resource::<VecEventSink>()
+                    .map(|s| s.events())
+                    .unwrap_or_default(),
                 output_digest: receipt.output_digest.clone(),
                 output_path: receipt.output_path.clone(),
                 receipt,
             })
         }
         SessionStatus::Failed(error) => Err(CompileError::CompilationFailed(error.clone())),
-        _ => Err(CompileError::CompilationFailed("pipeline did not complete".into())),
+        _ => Err(CompileError::CompilationFailed(
+            "pipeline did not complete".into(),
+        )),
     }
 }
 
@@ -1269,7 +1427,10 @@ mod tests {
         let tensors = vec![
             TensorDescriptor {
                 name: "model.embed_tokens.weight".into(),
-                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 32000 * 4096 * 2,
+                shape: vec![32000, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1278,7 +1439,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "lm_head.weight".into(),
-                shape: vec![32000, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 32000 * 4096 * 2,
+                shape: vec![32000, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 32000 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1287,7 +1451,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.q_proj.weight".into(),
-                shape: vec![4096, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 4096 * 4096 * 2,
+                shape: vec![4096, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 4096 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1296,7 +1463,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.k_proj.weight".into(),
-                shape: vec![1024, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 1024 * 4096 * 2,
+                shape: vec![1024, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 1024 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1305,7 +1475,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.v_proj.weight".into(),
-                shape: vec![1024, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 1024 * 4096 * 2,
+                shape: vec![1024, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 1024 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1314,7 +1487,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.self_attn.o_proj.weight".into(),
-                shape: vec![4096, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 4096 * 4096 * 2,
+                shape: vec![4096, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 4096 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1323,7 +1499,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.mlp.gate_proj.weight".into(),
-                shape: vec![11008, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 11008 * 4096 * 2,
+                shape: vec![11008, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 11008 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1332,7 +1511,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.mlp.up_proj.weight".into(),
-                shape: vec![11008, 4096], dtype: "f16".into(), byte_offset: 0, byte_length: 11008 * 4096 * 2,
+                shape: vec![11008, 4096],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 11008 * 4096 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1341,7 +1523,10 @@ mod tests {
             },
             TensorDescriptor {
                 name: "model.layers.0.mlp.down_proj.weight".into(),
-                shape: vec![4096, 11008], dtype: "f16".into(), byte_offset: 0, byte_length: 4096 * 11008 * 2,
+                shape: vec![4096, 11008],
+                dtype: "f16".into(),
+                byte_offset: 0,
+                byte_length: 4096 * 11008 * 2,
                 element_size: 2,
                 original_dtype: "F16".into(),
                 data_offset: None,
@@ -1361,7 +1546,10 @@ mod tests {
             capabilities: SourceCapabilities {
                 supports_streaming: false,
                 supports_random_access: false,
-                supports_dequantize: false, random_access: false, mmap: false, writable: false,
+                supports_dequantize: false,
+                random_access: false,
+                mmap: false,
+                writable: false,
             },
         }
     }

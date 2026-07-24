@@ -90,9 +90,9 @@ impl ModalityCapabilities {
     /// Probe the active feature flags to determine which modalities are compiled in.
     pub fn current() -> Self {
         Self {
-            image: true,
-            audio: true,
-            video: true,
+            image: cfg!(feature = "generation-image"),
+            audio: cfg!(feature = "generation-audio"),
+            video: cfg!(feature = "generation-video"),
 
             embeddings: false,
             multimodal: cfg!(feature = "prism-backend"),
@@ -233,12 +233,18 @@ use super::PrismInferenceServer;
 impl ModalityProvider for PrismInferenceServer {
     fn generate_image(
         &self,
-        _model_path: &str,
+        model_path: &str,
         request: ImageGenerationRequest,
     ) -> Result<ImageGenerationResult, ImageGenerationError> {
         if request.prompt.trim().is_empty() {
-            return Err(ImageGenerationError("image prompt must not be empty".into()));
+            return Err(ImageGenerationError(
+                "image prompt must not be empty".into(),
+            ));
         }
+        let (_, dispatch_id) = self
+            .scheduler
+            .schedule_modality(model_path)
+            .map_err(ImageGenerationError)?;
         let width = request.width.clamp(1, 4096);
         let height = request.height.clamp(1, 4096);
         let mut hasher = blake3::Hasher::new();
@@ -258,6 +264,14 @@ impl ModalityProvider for PrismInferenceServer {
             }
         }
         let digest = blake3::hash(&data).to_hex().to_string();
+        self.scheduler
+            .complete_modality(
+                dispatch_id,
+                "image",
+                Some(digest.clone()),
+                data.len() as u64,
+            )
+            .map_err(ImageGenerationError)?;
         Ok(ImageGenerationResult {
             image: ImageData {
                 width,
@@ -266,19 +280,26 @@ impl ModalityProvider for PrismInferenceServer {
                 digest: super::server_types::ArtifactDigest(digest),
                 data,
             },
-            receipt: ImageGenerationReceipt { compute_ms: 0.0, peak_memory_bytes: (width * height * 4) as u64 },
+            receipt: ImageGenerationReceipt {
+                compute_ms: 0.0,
+                peak_memory_bytes: (width * height * 4) as u64,
+            },
         })
     }
 
     fn generate_audio(
         &self,
-        _model_path: &str,
+        model_path: &str,
         text: &str,
         _params: AudioParams,
     ) -> Result<AudioGenerationReceipt, PrismAudioError> {
         if text.trim().is_empty() {
             return Err(PrismAudioError("audio text must not be empty".into()));
         }
+        let (_, dispatch_id) = self
+            .scheduler
+            .schedule_modality(model_path)
+            .map_err(PrismAudioError)?;
         let sample_rate = 24_000u32;
         let samples = (sample_rate as usize * text.chars().count().max(1) / 8).max(256);
         let mut pcm = Vec::with_capacity(samples);
@@ -286,20 +307,40 @@ impl ModalityProvider for PrismInferenceServer {
             let phase = index as f32 / sample_rate as f32;
             pcm.push((phase * 2.0 * std::f32::consts::PI * 220.0).sin() * 0.15);
         }
-        let digest = blake3::hash(bytemuck::cast_slice(&pcm)).to_hex().to_string();
-        Ok(AudioGenerationReceipt { sample_rate, pcm_samples: pcm.len() as u64, compute_ms: 0.0, output_digest: digest })
+        let digest = blake3::hash(bytemuck::cast_slice(&pcm))
+            .to_hex()
+            .to_string();
+        self.scheduler
+            .complete_modality(dispatch_id, "audio", Some(digest.clone()), pcm.len() as u64)
+            .map_err(PrismAudioError)?;
+        Ok(AudioGenerationReceipt {
+            sample_rate,
+            pcm_samples: pcm.len() as u64,
+            compute_ms: 0.0,
+            output_digest: digest,
+        })
     }
 
     fn generate_video(
         &self,
-        _model_path: &str,
+        model_path: &str,
         prompt: &str,
         params: VideoParams,
     ) -> Result<VideoGenerationReceipt, PrismVideoError> {
         if prompt.trim().is_empty() || params.num_frames == 0 || params.fps == 0 {
             return Err(PrismVideoError("video request is invalid".into()));
         }
-        Ok(VideoGenerationReceipt { frames: params.num_frames, compute_ms: 0.0 })
+        let (_, dispatch_id) = self
+            .scheduler
+            .schedule_modality(model_path)
+            .map_err(PrismVideoError)?;
+        self.scheduler
+            .complete_modality(dispatch_id, "video", None, params.num_frames as u64)
+            .map_err(PrismVideoError)?;
+        Ok(VideoGenerationReceipt {
+            frames: params.num_frames,
+            compute_ms: 0.0,
+        })
     }
 
     fn generate_embeddings(&self, _model_path: &str, _text: &str) -> Result<Vec<f32>, String> {
@@ -322,8 +363,8 @@ impl ModalityProvider for PrismInferenceServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::{PrismInferenceServer, ServerConfig};
     use crate::runtime::server_types::InferenceExecutionPolicy;
+    use crate::runtime::{PrismInferenceServer, ServerConfig};
 
     fn server() -> PrismInferenceServer {
         PrismInferenceServer::new(ServerConfig {
@@ -332,7 +373,10 @@ mod tests {
             execution_policy: InferenceExecutionPolicy::PreferMetalDecode,
             max_concurrent_sessions: 1,
             http_listen: None,
-            receipt_store_path: std::env::temp_dir().join("prism-modality-test.receipts").display().to_string(),
+            receipt_store_path: std::env::temp_dir()
+                .join("prism-modality-test.receipts")
+                .display()
+                .to_string(),
             memory_elevated_threshold_bytes: u64::MAX,
             memory_critical_threshold_bytes: u64::MAX,
         })
@@ -353,7 +397,11 @@ mod tests {
             .generate_video(
                 "model",
                 "sunrise",
-                VideoParams { num_frames: 3, fps: 24, seed: 7 },
+                VideoParams {
+                    num_frames: 3,
+                    fps: 24,
+                    seed: 7,
+                },
             )
             .expect("video output");
         assert_eq!(video.frames, 3);

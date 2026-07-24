@@ -143,12 +143,20 @@ pub fn generate_speech(
     text: &str,
     params: AudioParams,
 ) -> Result<AudioGenerationReceipt, PrismAudioError> {
+    crate::ecs_state::publish("audio", "generation", "requested", "started", model_path);
     #[cfg(feature = "generation-audio")]
     {
         generate_via_compute_core(model_path, text, params)
     }
     #[cfg(not(feature = "generation-audio"))]
     {
+        crate::ecs_state::publish(
+            "audio",
+            "generation",
+            "completed",
+            "feature_unavailable",
+            model_path,
+        );
         let _ = (model_path, text, params);
         Err(PrismAudioError::MissingFeature)
     }

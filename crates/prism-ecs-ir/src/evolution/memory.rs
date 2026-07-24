@@ -194,9 +194,21 @@ impl ReceiptSurrogate {
     fn features(genome: &CandidateGenome) -> Vec<f64> {
         let chromosomes = GenomeChromosomes::from(genome);
         vec![
-            chromosomes.chromosomes.first().map(|c| c.allele.len()).unwrap_or_default() as f64,
-            chromosomes.chromosomes.get(1).map(|c| c.allele.len()).unwrap_or_default() as f64,
-            chromosomes.chromosomes.get(2).map(|c| c.allele.len()).unwrap_or_default() as f64,
+            chromosomes
+                .chromosomes
+                .first()
+                .map(|c| c.allele.len())
+                .unwrap_or_default() as f64,
+            chromosomes
+                .chromosomes
+                .get(1)
+                .map(|c| c.allele.len())
+                .unwrap_or_default() as f64,
+            chromosomes
+                .chromosomes
+                .get(2)
+                .map(|c| c.allele.len())
+                .unwrap_or_default() as f64,
             genome.metal_geometry.grid_tile_m as f64 / 256.0,
             genome.metal_geometry.grid_tile_n as f64 / 256.0,
             genome.metal_geometry.grid_tile_k as f64 / 128.0,

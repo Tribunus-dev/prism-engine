@@ -36,6 +36,15 @@ extern "C" {
         output_name: *const i8,
         output_arena: *const ArenaInfo,
     ) -> i32;
+    fn tribunus_coreml_predict_two(
+        model: *mut std::ffi::c_void,
+        input_name_a: *const i8,
+        input_a: *const ArenaInfo,
+        input_name_b: *const i8,
+        input_b: *const ArenaInfo,
+        output_name: *const i8,
+        output_arena: *mut ArenaInfo,
+    ) -> i32;
     fn tribunus_coreml_predict_pixelbuffer(
         model: *mut std::ffi::c_void,
         input_name: *const i8,
@@ -73,6 +82,92 @@ impl CoreMlModel {
             return Err("tribunus_coreml_load_model returned null pointer".to_string());
         }
         Ok(CoreMlModel { ptr })
+    }
+
+    pub fn predict(
+        &self,
+        input_name: &str,
+        input: &ArenaInfo,
+        output_name: &str,
+        output: &mut ArenaInfo,
+    ) -> Result<(), String> {
+        let input_name = std::ffi::CString::new(input_name).map_err(|e| e.to_string())?;
+        let output_name = std::ffi::CString::new(output_name).map_err(|e| e.to_string())?;
+        let status = unsafe {
+            tribunus_coreml_predict(
+                self.ptr,
+                input_name.as_ptr(),
+                input,
+                output_name.as_ptr(),
+                output,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!("Core ML prediction failed: {status}"))
+        }
+    }
+
+    pub fn predict_two(
+        &self,
+        a_name: &str,
+        a: &ArenaInfo,
+        b_name: &str,
+        b: &ArenaInfo,
+        output_name: &str,
+        output: &mut ArenaInfo,
+    ) -> Result<(), String> {
+        let a_name = std::ffi::CString::new(a_name).map_err(|e| e.to_string())?;
+        let b_name = std::ffi::CString::new(b_name).map_err(|e| e.to_string())?;
+        let output_name = std::ffi::CString::new(output_name).map_err(|e| e.to_string())?;
+        let status = unsafe {
+            tribunus_coreml_predict_two(
+                self.ptr,
+                a_name.as_ptr(),
+                a,
+                b_name.as_ptr(),
+                b,
+                output_name.as_ptr(),
+                output,
+            )
+        };
+        if status == 0 {
+            Ok(())
+        } else {
+            Err(format!("Core ML two-input prediction failed: {status}"))
+        }
+    }
+
+    pub fn predict_two_int8(
+        &self,
+        a_name: &str,
+        a: &crate::Arena,
+        b_name: &str,
+        b: &crate::Arena,
+        output_name: &str,
+        output: &mut crate::Arena,
+    ) -> Result<(), String> {
+        self.predict_two(
+            a_name,
+            &a.info,
+            b_name,
+            &b.info,
+            output_name,
+            &mut output.info,
+        )
+    }
+
+    pub fn predict_two_int8_planar(
+        &self,
+        a_name: &str,
+        a: &crate::Arena,
+        b_name: &str,
+        b: &crate::Arena,
+        output_name: &str,
+        output: &mut crate::Arena,
+    ) -> Result<(), String> {
+        self.predict_two_int8(a_name, a, b_name, b, output_name, output)
     }
 }
 

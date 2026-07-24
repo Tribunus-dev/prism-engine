@@ -76,8 +76,11 @@ pub use qwen3_6_moe::{
     Qwen36TensorDescriptor, Qwen36TensorRole,
 };
 
+pub mod active_window;
 pub mod evaluator;
+pub mod representation_cache;
 pub mod search;
+pub mod workload_search;
 pub use search::{
     EvaluationStrategy, SearchCoordinator, SearchError, SearchResult, SearchSelectionReceipt,
 };
@@ -107,21 +110,21 @@ pub use model_manifest::{
 pub mod compiler;
 pub use cimage::{emit_int8_ane_program, CImageError, TensorPayloadEntry, UniversalCImageWriter};
 pub use compiler::{
-    compile_ecs_op_to_xdna_cimage, compile_int8_ane_tile_to_cimage, compile_path,
-    compile_path_with_backend, compile_source, compile_source_ecs, detect_source,
+    compile_ecs_op_to_xdna_cimage, compile_gguf_compat, compile_int8_ane_tile_to_cimage,
+    compile_path, compile_path_with_backend, compile_source, compile_source_ecs,
+    compile_to_cimage_compat, compile_with_autodetect, detect_source,
 };
 pub use uop::{
     benchmark_uop_graph_strategies, benchmark_uop_graph_strategies_with_runner,
     benchmark_uop_graph_workloads, benchmark_uop_graph_workloads_with_runner,
-    benchmark_uop_strategy_candidates,
-    classify_custom_operation, compile_and_validate_uop_capture,
+    benchmark_uop_strategy_candidates, classify_custom_operation, compile_and_validate_uop_capture,
     compile_and_validate_uop_graph_strategies, compile_spatial_graph,
     compile_spatial_graph_strategies, compile_spatial_matmul, compile_spatial_node,
     compile_spatial_node_with_metadata, compile_uop_capture, compile_uop_graph_strategies,
     compile_uop_graph_with_strategy, execute_uop_reference, select_measured_uop_strategy,
     select_measured_uop_workloads, validate_and_classify_custom_operation, CustomOperationClass,
-    UOpCompileCache, UOpCompiledProgram, UOpDispatchResult, UOpWorkloadMeasurement,
-    UOpMeasurementSource, UOpTuningCandidate, UOpTuningReceipt, UOpTuningScenario,
+    UOpCompileCache, UOpCompiledProgram, UOpDispatchResult, UOpMeasurementSource,
+    UOpTuningCandidate, UOpTuningReceipt, UOpTuningScenario, UOpWorkloadMeasurement,
     UOpWorkloadSelection, CUSTOM_OPERATION_CANDIDATES, VALIDATED_CUSTOM_OPERATIONS,
 };
 
@@ -138,8 +141,9 @@ pub use forensic::{build_forensic_receipt, create_event, load_events_from_file, 
 
 pub mod ecs;
 pub use ecs::{
-    CImageArtifact, CompilationOrchestrator, CompilationReceipt, CompilationSession, KernelCollection, LegalizedPlan,
-    SearchStateComponent, SessionStatus, SourceModel, SpatialGraphComponent, TensorCollection,
+    CImageArtifact, CompilationOrchestrator, CompilationReceipt, CompilationSession,
+    KernelCollection, LegalizedPlan, SearchStateComponent, SessionStatus, SourceModel,
+    SpatialGraphComponent, TensorCollection,
 };
 
 pub mod compilation_entity;
@@ -154,13 +158,12 @@ pub use compilation_systems::*;
 
 pub mod runtime;
 pub use runtime::{CImageXdnaRouteDispatcher, ExecutionMode, RuntimeError, RuntimeModel};
+pub mod observability;
+pub use observability::{EcsCorrelation, EcsStateEvent, EcsStateSnapshot, EcsStateStream};
 
 // ---------------------------------------------------------------------------
 // Legacy compatibility layer
 // ---------------------------------------------------------------------------
-
-pub mod legacy;
-pub use legacy::{compile_gguf_compat, compile_to_cimage_compat, compile_with_autodetect};
 
 // ---------------------------------------------------------------------------
 // Top-level types
@@ -288,7 +291,11 @@ pub enum CalibrationPolicy {
     FromFile(String),
     Auto,
 }
-impl Default for CalibrationPolicy { fn default() -> Self { Self::Auto } }
+impl Default for CalibrationPolicy {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
 
 /// Validation policy for compilation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -296,7 +303,11 @@ pub enum ValidationPolicy {
     Structural,
     Production,
 }
-impl Default for ValidationPolicy { fn default() -> Self { Self::Structural } }
+impl Default for ValidationPolicy {
+    fn default() -> Self {
+        Self::Structural
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct CompilationPolicy {
@@ -445,7 +456,11 @@ pub enum CompileStatus {
     Failed(String),
     Partial(Vec<StageResult>),
 }
-impl Default for CompileStatus { fn default() -> Self { Self::Pending } }
+impl Default for CompileStatus {
+    fn default() -> Self {
+        Self::Pending
+    }
+}
 
 /// Compilation result.
 #[derive(Debug, Clone, Serialize, Deserialize)]

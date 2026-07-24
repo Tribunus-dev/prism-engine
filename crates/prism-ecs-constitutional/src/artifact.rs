@@ -256,7 +256,10 @@ pub fn replay_artifact_loaded(
         .unwrap_or("");
     let mut txn = WorldTxn::new(world);
     if !world.has_entity(Entity::new(entity_id, 0)) {
-        txn.stage_spawn(Entity::new(entity_id, 0), prism_ecs_core::EntityKind::Artifact);
+        txn.stage_spawn(
+            Entity::new(entity_id, 0),
+            prism_ecs_core::EntityKind::Artifact,
+        );
     }
     let file_length = event
         .payload

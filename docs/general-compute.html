@@ -1,6 +1,30 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="How Prism Engine can compose General Compute and SambaNova accelerator capabilities into a heterogeneous deployment plan."><title>Prism Engine · General Compute</title><link rel="stylesheet" href="site.css"><link rel="stylesheet" href="general-compute.css"></head>
-<body><header class="nav"><a href="index.html" class="wordmark"><b>◢</b> PRISM ENGINE</a><nav><a href="index.html">Home</a><a href="architecture.html">Architecture</a><a href="heterogeneous.html">Heterogeneous first</a><a href="prism-ml.html">Prism ML</a><a href="roadmap.html">Roadmap</a><a href="general-compute.html" class="current">General Compute</a><a href="field-guide.html">Field guide</a></nav></header><main>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="How Prism Engine can compose General Compute and SambaNova accelerator capabilities into a heterogeneous deployment plan."><title>Prism Engine · General Compute</title>
+  <link rel="stylesheet" href="foundation.css">
+  <link rel="stylesheet" href="components.css">
+  <link rel="stylesheet" href="instruments.css">
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body class="">
+  <header class="nav site-header component-header" data-observatory-shell>
+  <a class="brand" href="index.html" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
+  <span class="component-chapter" data-component="chapter">ComputeImages</span>
+  <div class="component-orientation" aria-label="Observatory orientation"><strong data-reading-chapter>ComputeImages</strong><span data-reading-count>Primary journey</span><span data-reading-time>3 min read</span><span class="reading-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+  <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span>Menu</span></button>
+  <nav id="primary-navigation" aria-label="Primary navigation" data-observatory-navigation>
+    <a href="architecture.html">Graph</a>
+    <a href="demo.html">Artifact</a>
+    <a href="heterogeneous.html">Execution</a>
+    <a href="roadmap.html">Evidence</a>
+    <a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a>
+  </nav>
+</header>
+
+  <main>
 <section class="gc-hero"><p class="kicker">PRISM ENGINE × GENERAL COMPUTE</p><h1>Make unusual<br><em>hardware legible.</em></h1><p class="lede">SambaNova is a useful test of Prism’s heterogeneous-first architecture: the accelerator is not treated like a generic GPU, and the model is not forced to pretend every phase has the same physical home.</p><div class="gc-thesis"><span>GENERAL COMPUTE</span><b>Specialized accelerator capability</b><i>+</i><span>PRISM ENGINE</span><b>Deployment plan and evidence</b></div></section>
 <section class="gc-section"><label>00 / THE RELATIONSHIP</label><div><h2>A provider and a planner.</h2><p>General Compute brings the physical execution system: SambaNova accelerators, their memory behavior, kernels, queues, and provider-specific capabilities. Prism brings the layer that turns a workload requirement into a legal, inspectable composition across those capabilities.</p><div class="boundary"><div><span>GENERAL COMPUTE / SAMBANOVA</span><b>Physical execution</b><small>accelerator · memory · kernels · queues · transport</small></div><i>capability contract →</i><div><span>PRISM ENGINE</span><b>Deployment planning</b><small>admission · phase placement · handoff · receipt</small></div></div></div></section>
 <section class="gc-section tinted"><label>01 / SERVING PHASES</label><div><h2>One serving request.<br><em>Several physical phases.</em></h2><p>A frontier-model serving path does not have to assign prefill, KV state, decode, and streaming to the same provider. Prism can represent the phase requirements and ask the capability model for the lowest-latency legal composition.</p><div class="phase-map"><div><span>PHASE 01</span><b>PREFILL</b><small>process prompt<br>produce KV state</small></div><div><span>BOUNDARY</span><b>KV HANDOFF</b><small>explicit transfer<br>ownership + cost</small></div><div><span>PHASE 02</span><b>DECODE</b><small>token generation<br>state residency</small></div><div><span>PHASE 03</span><b>STREAM</b><small>observable output<br>terminal receipt</small></div></div><details><summary>Researcher detail</summary><p>The repository’s heterogeneous-serving fixture models provider capabilities for prefill, KV handoff, decode, and token streaming. The serving requirement remains fixed while changing capability descriptions changes the physical plan. The SambaNova path is a planning and integration surface, not a claim of general production support.</p></details></div></section>
@@ -8,4 +32,41 @@
 <section class="gc-section tinted"><label>03 / OWNERSHIP</label><div><h2>Clear boundaries prevent fake portability.</h2><div class="ownership"><div><span>GENERAL COMPUTE OWNS</span><b>Provider reality</b><p>SambaNova topology<br>Accelerator execution<br>Memory and queues<br>Provider transport<br>Kernel behavior</p></div><div><span>PRISM ENGINE OWNS</span><b>Deployment reality</b><p>Workload semantics<br>Capability matching<br>Phase placement<br>KV ownership<br>Receipts and recovery</p></div></div><aside class="note"><b>Design constraint</b><br>A provider may reject a plan, but it cannot silently redefine the workload or publish an unaccounted outcome.</aside></div></section>
 <section class="gc-section"><label>04 / VALIDATION</label><div><h2>Compare plans, not slogans.</h2><p>The useful question is not whether a provider behaves like a GPU. It is whether Prism can represent its capabilities, produce a legal ECS-native plan, execute the selected phases, and compare the resulting evidence against another deployment.</p><div class="validation"><div><b>INPUT</b><span>same model<br>same workload<br>same quality policy</span></div><div><b>PLAN A</b><span>MI300X / ROCm-HIP<br>GPU validation path</span></div><div><b>PLAN B</b><span>XDNA/XDNA2<br>spatial planning path</span></div><div><b>OUTPUT</b><span>latency<br>memory · KV<br>quality · receipts</span></div></div><p class="note"><b>Current boundary</b><br>General Compute and provider integrations remain bounded by backend, driver, device, and conformance evidence. A legal plan or compiled CImage does not by itself claim production execution on every provider.</p></div></section>
 <section class="gc-final"><p class="kicker">GENERAL COMPUTE × PRISM ENGINE</p><h2>Different hardware<br><em>should improve the plan.</em></h2><p>SambaNova gives Prism a concrete non-mainstream accelerator boundary. Prism gives General Compute a way to express where that accelerator is strongest in a larger deployment system.</p><a class="button" href="heterogeneous.html">Read Heterogeneous First ↗</a> <a class="link" href="index.html">Back to Prism Engine ↗</a></section>
-</main><footer class="site-footer">PRISM ENGINE / GENERAL COMPUTE <span>JULY 2026</span></footer><script src="site.js"></script></body></html>
+<section class="living-atlas" data-atlas-context="ComputeImages" aria-labelledby="living-atlas-title">
+  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from semantic input to physical execution and evidence.</p></div>
+  <div class="atlas-layout">
+    <div class="atlas-graph" role="list" aria-label="Prism living architecture">
+      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>meaning → candidates</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="image" role="listitem"><small>02</small><strong>ComputeImage</strong><span>views → sealed artifact</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="scheduler" role="listitem"><small>03</small><strong>Scheduler</strong><span>work → execution lanes</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="evidence" role="listitem"><small>04</small><strong>Evidence</strong><span>run → receipt</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="fabric" role="listitem"><small>05</small><strong>Fabric</strong><span>machine → fleet</span></button>
+      <svg class="atlas-wires" viewBox="0 0 700 360" aria-hidden="true"><path d="M140 70 C250 20 340 20 560 70 M140 70 C250 130 350 130 560 180 M140 180 C270 180 370 180 560 180 M140 290 C250 240 350 240 560 290 M140 290 C290 350 420 350 560 290"/><path d="M560 70 C600 120 600 230 560 290"/></svg>
+    </div>
+    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves semantic identity while searching representation, placement, and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
+  </div>
+</section>
+<aside class="shared-computeimage-observation" aria-labelledby="shared-computeimage-title">
+  <div>
+    <span class="eyebrow">Canonical object / shared observation</span>
+    <h2 id="shared-computeimage-title">The same computation, inspected from ComputeImages.</h2>
+    <p>Every instrument observes one ComputeImage identity. This surface changes its disclosure without creating a second artifact.</p>
+  </div>
+  <div class="shared-computeimage-specimen" data-computeimage-renderer data-subject-id="computational-subject:prism-model" role="img" aria-label="Shared canonical ComputeImage observation"></div>
+</aside>
+</main>
+  <footer class="site-footer component-footer">
+  <div class="continue-reading" aria-label="Continue reading">
+    <span class="eyebrow">Continue reading</span>
+    <a class="continue-reading-link" href="prism-ml.html">Research <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="footer-meta">
+    <span>PRISM ENGINE / ComputeImages</span>
+    <span>AGPLv3 · commercial dual licensing</span>
+  </div>
+</footer>
+
+  <script type="module" src="site.js"></script>
+
+</body>
+</html>

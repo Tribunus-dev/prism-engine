@@ -1,12 +1,12 @@
 use crate::command::DomainEvent;
 use crate::schema::SchemaRegistry;
 use crate::types::*;
+use crate::world_txn::WorldTransitExt;
 use crate::world_txn::{
     ClassifiedComponent, CommittedEpoch, DurableClass, DurableComponent, WorldTxn, WorldTxnError,
 };
 use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
-use crate::world_txn::WorldTransitExt;
 
 // ── Component Schema IDs (63-68) ──────────────────────────────────────────
 // Session: 13-17, Work: 18-23, Execution: 24-29, Compilation: 31-38,
@@ -314,7 +314,10 @@ impl ResolveIngressCommand {
         let mut txn = WorldTxn::new(world);
 
         // Update lifecycle
-        txn.put_durable(Entity::new(self.ingress_entity, 0), IngressLifecycle::Resolved);
+        txn.put_durable(
+            Entity::new(self.ingress_entity, 0),
+            IngressLifecycle::Resolved,
+        );
 
         // Update the resolved_command field by replacing IngressRequest
         if let Some(ingress_req) =

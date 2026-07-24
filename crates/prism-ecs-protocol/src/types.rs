@@ -333,6 +333,11 @@ impl WorkflowSnapshot {
                 };
                 approval.resolved_sequence = Some(event.sequence);
             }
+            WorkflowEventKind::RuntimeObservation { .. } => {
+                // Runtime observations are provenance events. They do not
+                // mutate the user-facing thread projection, but they remain
+                // sequence-checked and replayable in the workflow log.
+            }
             WorkflowEventKind::ThreadCancelled => {
                 if self.status == ThreadStatus::Cancelled {
                     return Err("thread is already cancelled".into());
@@ -386,6 +391,16 @@ pub enum WorkflowEventKind {
     ToolApprovalResolved {
         approval_id: Uuid,
         decision: ToolApprovalDecision,
+    },
+    /// Runtime-owned execution observation forwarded to application clients.
+    RuntimeObservation {
+        dispatch_id: u64,
+        session_id: u64,
+        model_id: String,
+        modality: String,
+        status: String,
+        output_digest: Option<String>,
+        output_units: u64,
     },
     ThreadCancelled,
 }

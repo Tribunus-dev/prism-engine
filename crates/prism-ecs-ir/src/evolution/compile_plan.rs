@@ -11,10 +11,35 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct JointTilingPlan { pub ane_unit: crate::evolution::foundation::AneUnitAxis, pub ane_tile_m:u32,pub ane_tile_n:u32,pub ane_tile_k:u32,pub metal_tile_m:u32,pub metal_tile_n:u32,pub metal_tile_k:u32,pub metal_threadgroup_width:u32,pub metal_threadgroup_height:u32 }
+pub struct JointTilingPlan {
+    pub ane_unit: crate::evolution::foundation::AneUnitAxis,
+    pub ane_tile_m: u32,
+    pub ane_tile_n: u32,
+    pub ane_tile_k: u32,
+    pub metal_tile_m: u32,
+    pub metal_tile_n: u32,
+    pub metal_tile_k: u32,
+    pub metal_threadgroup_width: u32,
+    pub metal_threadgroup_height: u32,
+}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PerTensorFormat { pub format: TensorFormat }
-pub fn classify_tensor(name:&str)->String { let n=name.to_ascii_lowercase(); if n.contains("norm"){"norm".into()} else if n.contains("embed"){"embed".into()} else if n.contains("attn"){"attention".into()} else if n.contains("mlp")||n.contains("ffn"){"mlp".into()} else {"other".into()} }
+pub struct PerTensorFormat {
+    pub format: TensorFormat,
+}
+pub fn classify_tensor(name: &str) -> String {
+    let n = name.to_ascii_lowercase();
+    if n.contains("norm") {
+        "norm".into()
+    } else if n.contains("embed") {
+        "embed".into()
+    } else if n.contains("attn") {
+        "attention".into()
+    } else if n.contains("mlp") || n.contains("ffn") {
+        "mlp".into()
+    } else {
+        "other".into()
+    }
+}
 
 // ── Components ──────────────────────────────────────────────────────────────
 
@@ -123,14 +148,16 @@ pub struct FormatPlan {
     /// Per-tensor format assignment, keyed by tensor key
     /// (e.g. "model.layers.0.self_attn.q_proj.weight").
     pub per_tensor: HashMap<String, TensorFormat>,
-    #[serde(default)] pub joint_tiling: Option<JointTilingPlan>,
+    #[serde(default)]
+    pub joint_tiling: Option<JointTilingPlan>,
 }
 
 impl FormatPlan {
     /// Create an empty format plan.
     pub fn new() -> Self {
         Self {
-            per_tensor: HashMap::new(), joint_tiling: None,
+            per_tensor: HashMap::new(),
+            joint_tiling: None,
         }
     }
 
@@ -144,7 +171,10 @@ impl FormatPlan {
         for key in tensor_keys {
             per_tensor.insert(key.clone(), format);
         }
-        Self { per_tensor, joint_tiling: None }
+        Self {
+            per_tensor,
+            joint_tiling: None,
+        }
     }
 
     /// Convert a `RepresentationAxis` to the corresponding `TensorFormat`.
@@ -171,7 +201,12 @@ impl FormatPlan {
     }
 }
 
-impl FormatPlan { pub fn with_joint_tiling(mut self, joint: JointTilingPlan)->Self { self.joint_tiling=Some(joint); self } }
+impl FormatPlan {
+    pub fn with_joint_tiling(mut self, joint: JointTilingPlan) -> Self {
+        self.joint_tiling = Some(joint);
+        self
+    }
+}
 
 impl Default for FormatPlan {
     fn default() -> Self {

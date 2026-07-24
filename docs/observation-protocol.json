@@ -1,0 +1,8 @@
+{
+  "version": "1",
+  "primitive": "Observation",
+  "systems": ["Observation", "Semantic", "Evidence", "Interaction", "Optical", "Rendering", "Accessibility"],
+  "protocols": ["Subject", "Observation", "Knowledge", "Evidence", "Receipt", "Capability", "ComputeImage"],
+  "inspect": ["identity", "state", "knowledge", "belief", "evidence", "history", "relationships", "capabilities"],
+  "uncertainty": ["unknown", "partial", "deferred", "rejected", "experimental"]
+}

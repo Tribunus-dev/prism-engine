@@ -9,7 +9,7 @@ pub mod projection;
 pub mod types;
 
 pub use aggregate::{avg, count, filtered_rows, histogram, max, min, quantile, sum, FilterExpr};
-pub use columnar::{append_row, create_table, Column, ColumnDef, ColumnarTable, AnyColumn};
+pub use columnar::{append_row, create_table, AnyColumn, Column, ColumnDef, ColumnarTable};
 pub use projection::{
     materialize, refresh_projections, AggExpr, Projection, ProjectionEngine, ProjectionQuery,
 };

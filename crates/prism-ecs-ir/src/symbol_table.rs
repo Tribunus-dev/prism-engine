@@ -35,7 +35,6 @@ pub struct SymbolTable {
     symbols: HashMap<String, Entity>,
 }
 
-
 impl Default for SymbolTable {
     fn default() -> Self {
         Self {

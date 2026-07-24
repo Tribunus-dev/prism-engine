@@ -150,7 +150,9 @@ pub enum AneUnitAxis {
 }
 
 impl Default for AneUnitAxis {
-    fn default() -> Self { Self::Auto }
+    fn default() -> Self {
+        Self::Auto
+    }
 }
 
 /// Packing strategy axis.

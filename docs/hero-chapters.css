@@ -6,7 +6,7 @@
   .chapter-timeline-spacer{height:100svh;display:block}
   .scroll-chapter.computeimage-anatomy{min-height:100svh;height:100svh}
   .scroll-chapter.computeimage-anatomy .computeimage-sticky{position:relative;top:auto;min-height:0;height:100%;padding-top:0;padding-bottom:0}
-  .scroll-chapter>.shell,.scroll-chapter>.section-heading,.scroll-chapter>.working-path-grid,.scroll-chapter>.working-path-note,.scroll-chapter>.lab-window,.scroll-chapter>.caption-row,.scroll-chapter>.journey-frame,.scroll-chapter>.signature-track,.scroll-chapter>.figure-link,.scroll-chapter>.reality-bands{width:min(1160px,calc(100% - 48px));margin-left:auto;margin-right:auto}
+  .scroll-chapter>.shell,.scroll-chapter>.section-heading,.scroll-chapter>.working-path-grid,.scroll-chapter>.working-path-note,.scroll-chapter>.lab-window,.scroll-chapter>.caption-row,.scroll-chapter>.journey-frame,.scroll-chapter>.signature-track,.scroll-chapter>.figure-link,.scroll-chapter>.reality-bands,.scroll-chapter.illumination-constellation{width:min(1160px,calc(100% - 48px));margin-left:auto;margin-right:auto}
   .scroll-chapter .section-heading{width:min(1160px,calc(100% - 48px));margin-bottom:clamp(18px,3vh,34px)}
   .scroll-chapter .section-heading h2{font-size:clamp(32px,4.1vw,58px)}
   .scroll-chapter .section-heading>p{padding-top:10px}

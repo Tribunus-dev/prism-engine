@@ -20,7 +20,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum SourceFormat { Raw, Gguf, SafeTensors, Onnx, Pytorch, Mlx }
+pub enum SourceFormat {
+    Raw,
+    Gguf,
+    SafeTensors,
+    Onnx,
+    Pytorch,
+    Mlx,
+}
 
 /// Digest of the original model source and relevant sidecars.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -52,14 +59,30 @@ pub struct HardwareProfileId(pub String);
 pub struct Timestamp(pub String);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TensorInfo { pub name: String, pub shape: Vec<usize>, pub dtype: String, pub size_bytes: u64 }
+pub struct TensorInfo {
+    pub name: String,
+    pub shape: Vec<usize>,
+    pub dtype: String,
+    pub size_bytes: u64,
+}
 
-pub trait TensorReader: Send { fn read_chunk(&mut self, buffer: &mut [u8]) -> Result<usize, String>; fn shape(&self) -> &[usize]; fn size_bytes(&self) -> u64; }
-pub trait TensorProvider: Send + Sync { fn list_tensors(&self) -> Result<Vec<TensorInfo>, String>; fn open_tensor(&self, name: &str) -> Result<Box<dyn TensorReader>, String>; }
+pub trait TensorReader: Send {
+    fn read_chunk(&mut self, buffer: &mut [u8]) -> Result<usize, String>;
+    fn shape(&self) -> &[usize];
+    fn size_bytes(&self) -> u64;
+}
+pub trait TensorProvider: Send + Sync {
+    fn list_tensors(&self) -> Result<Vec<TensorInfo>, String>;
+    fn open_tensor(&self, name: &str) -> Result<Box<dyn TensorReader>, String>;
+}
 
 pub trait GraphProvider: Send + Sync {
     fn import_graph(&self, world: &mut crate::world::World) -> Result<(), String>;
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SourceManifest { pub source_id: ModelSourceId, pub format: SourceFormat, pub path: Option<String> }
+pub struct SourceManifest {
+    pub source_id: ModelSourceId,
+    pub format: SourceFormat,
+    pub path: Option<String>,
+}

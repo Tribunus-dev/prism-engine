@@ -1,1 +1,3 @@
-fn main(){println!("prism-workload-manifest: workload manifest utility");}
+fn main() {
+    println!("prism-workload-manifest: workload manifest utility");
+}

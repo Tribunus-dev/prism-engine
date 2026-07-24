@@ -15,6 +15,8 @@ use prism_ecs_runtime::RuntimeKernel;
 use prism_ecs_runtime::RuntimeSchedule;
 use prism_ecs_protocol_adapter::{NoopWorkflowCancellation, ProjectionWorkflowStore, WorkflowClient};
 use prism_ecs_server::inference::ModelRegistry;
+use prism_ecs_server::runtime::{PrismInferenceServer, ServerConfig};
+use prism_ecs_server::runtime::server_types::InferenceExecutionPolicy;
 use prism_mcp_core::{
     ConnectionId, DaemonState, FileLock, ProcessCache, RequestEnvelope, ResponseFrame, Scheduler,
     SchedulerHandle, WorkJournal,
@@ -134,7 +136,19 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
     let work_tx_for_handler = work_tx.clone();
 
     // Create shared model registry
-    let model_registry = Arc::new(Mutex::new(ModelRegistry::new()));
+    let ecs_inference = Arc::new(PrismInferenceServer::new(ServerConfig {
+        cimage_path: artifact_dir.to_string(),
+        context_profiles: Vec::new(),
+        execution_policy: InferenceExecutionPolicy::HybridMetalAccelerate,
+        max_concurrent_sessions: 64,
+        http_listen: None,
+        receipt_store_path: format!("{state_dir}/ecs-receipts.jsonl"),
+        memory_elevated_threshold_bytes: 8 * 1024 * 1024 * 1024,
+        memory_critical_threshold_bytes: 12 * 1024 * 1024 * 1024,
+    }));
+    let registry = ModelRegistry::new();
+    registry.attach_ecs_server(ecs_inference.clone())?;
+    let model_registry = Arc::new(Mutex::new(registry));
 
     // ── Production kernel with durable adapters ──────────────────────
 
@@ -384,6 +398,10 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
         let dashboard_provenance_store = provenance_store.clone();
         let dashboard_graph_projection = graph_projection.clone();
         let workflow_store = projection_store.clone();
+        let session_threads = Arc::new(parking_lot::Mutex::new(
+            std::collections::HashMap::<u64, uuid::Uuid>::new(),
+        ));
+        let observation_server = ecs_inference.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("dashboard tokio runtime");
             rt.block_on(async move {
@@ -402,8 +420,32 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
                     })
                     .filter(|v| !v.is_empty())
                     .unwrap_or_else(|| "local-prism-demo".to_string());
+                let workflow_client = Arc::new(parking_lot::Mutex::new(WorkflowClient::new(
+                    kh.clone(),
+                    ProjectionWorkflowStore::new(workflow_store),
+                    NoopWorkflowCancellation,
+                )));
+                let workflow_for_observation = workflow_client.clone();
+                let threads_for_observation = session_threads.clone();
+                observation_server.scheduler.set_observation_sink(move |receipt| {
+                    let Some(thread_id) = threads_for_observation.lock().get(&receipt.session_id.0).copied() else {
+                        return;
+                    };
+                    let _ = workflow_for_observation.lock().publish_runtime_observation(
+                        thread_id,
+                        receipt.dispatch_id.0,
+                        receipt.session_id.0,
+                        receipt.model_id,
+                        receipt.modality,
+                        receipt.status,
+                        receipt.output_digest,
+                        receipt.output_units,
+                    );
+                }).expect("install ECS workflow observation sink");
                 let state = crate::daemon::dashboard::DashboardState {
                     registry,
+                    ecs_inference,
+                    session_threads,
                     model_tx,
                     compiler_lab_tx,
                     has_compiler_dispatcher: true,
@@ -415,11 +457,7 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
                     projection_store: dashboard_projection_store,
                     provenance_store: dashboard_provenance_store,
                     graph_projection: dashboard_graph_projection,
-                    workflow_client: Arc::new(WorkflowClient::new(
-                        kh.clone(),
-                        ProjectionWorkflowStore::new(workflow_store),
-                        NoopWorkflowCancellation,
-                    )),
+                    workflow_client,
                     authorized: Arc::new(AtomicBool::new(auth_path.exists())),
                     auth_token: Arc::new(auth_token),
                 };

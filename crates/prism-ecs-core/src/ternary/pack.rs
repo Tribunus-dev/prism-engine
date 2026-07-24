@@ -10,7 +10,9 @@ pub enum TernaryPackError {
 impl std::fmt::Display for TernaryPackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidWeight(w) => write!(f, "invalid ternary weight: {w} (must be -1, 0, or +1)"),
+            Self::InvalidWeight(w) => {
+                write!(f, "invalid ternary weight: {w} (must be -1, 0, or +1)")
+            }
             Self::ReservedPattern => write!(f, "reserved 0b11 pattern in packed ternary data"),
         }
     }

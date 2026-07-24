@@ -2,52 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="Prism Engine is compiler-first deployment for local AI: compile GGUF and SafeTensors into inspectable ComputeImages for heterogeneous execution.">
   <title>Prism Engine — Compiler-first deployment for local AI</title>
-  <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="dark-mode.css">
-  <link rel="stylesheet" href="tribunus-theme.css">
-  <link rel="stylesheet" href="signature-inspector.css">
-  <link rel="stylesheet" href="living-instruments.css">
-  <link rel="stylesheet" href="ubuntu.css">
-  <link rel="stylesheet" href="tensor-journey.css">
-  <link rel="stylesheet" href="tensor-inspector.css">
-  <link rel="stylesheet" href="tensor-search.css">
-  <link rel="stylesheet" href="compiler-graph.css">
-  <link rel="stylesheet" href="scroll-state.css">
-  <link rel="stylesheet" href="scroll-reveal.css">
-  <link rel="stylesheet" href="hero-chapters.css?v=537fc9e8">
-  <link rel="stylesheet" href="apple-scroll.css?v=537fc9e8">
-  <link rel="stylesheet" href="computeimage-anatomy.css">
-  <script src="signature-inspector.js" defer></script>
-  <script src="tensor-journey.js" defer></script>
-  <script src="scroll-state.js" defer></script>
-  <script src="scroll-reveal.js" defer></script>
-  <script src="apple-scroll.js?v=537fc9e8" defer></script>
-  <script src="computeimage-anatomy.js" defer></script>
+  <link rel="stylesheet" href="foundation.css">
+  <link rel="stylesheet" href="components.css">
+  <link rel="stylesheet" href="instruments.css">
+  <link rel="stylesheet" href="pages.css">
 </head>
 <body class="apple-story">
-  <header class="site-header">
-    <a class="brand" href="#top" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
-    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span class="menu-label">Menu</span></button>
-    <nav id="primary-navigation" aria-label="Primary navigation"><a href="architecture.html">Architecture</a><a href="#compiler">Demo</a><a href="#status">Status</a><a href="field-guide.html">Docs</a><a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">View on GitHub <span>↗</span></a></nav>
-  </header>
+  <header class="nav site-header component-header" data-observatory-shell>
+  <a class="brand" href="index.html" aria-label="Prism Engine home"><span class="brand-mark"><i></i><i></i><i></i></span><span>PRISM <em>ENGINE</em></span></a>
+  <span class="component-chapter" data-component="chapter">Introduction</span>
+  <div class="component-orientation" aria-label="Observatory orientation"><strong data-reading-chapter>Introduction</strong><span data-reading-count>Primary journey</span><span data-reading-time>8 min read</span><span class="reading-meter" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+  <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation"><span class="menu-icon" aria-hidden="true">☰</span><span>Menu</span></button>
+  <nav id="primary-navigation" aria-label="Primary navigation" data-observatory-navigation>
+    <a href="architecture.html">Graph</a>
+    <a href="demo.html">Artifact</a>
+    <a href="heterogeneous.html">Execution</a>
+    <a href="roadmap.html">Evidence</a>
+    <a class="nav-cta" href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a>
+  </nav>
+</header>
 
   <main id="top">
-    <section class="hero shell">
+    <section class="hero shell prism-origin" data-origin-reveal data-birth-sequence>
+      <div class="origin-beam" aria-hidden="true"><i></i><b></b><span></span></div>
       <div class="hero-copy">
-        <div class="eyebrow"><span class="pulse"></span> Local-first AI infrastructure</div>
-        <h1>Compiler-first<br><span>deployment for local AI.</span></h1>
-        <p class="hero-lede">Prism Engine compiles GGUF and SafeTensors into inspectable ComputeImages for local heterogeneous execution. Every representation, placement, artifact, and outcome remains inspectable.</p>
+        <div class="eyebrow"><span class="pulse"></span> Act I / computational illumination</div>
+        <h1>Computation was never meant<br><span>to target hardware.</span></h1>
+        <p class="hero-lede">It was meant to target intent. Prism reveals the hidden structure between a model and the machine that brings it to life.</p>
         <p class="hero-qualifier"><b>Primary validated path today:</b> Apple Silicon + Metal.</p>
         <div class="hero-actions"><a class="button primary" href="demo.html">Open the Apple Silicon demo milestone <span>↗</span></a><a class="button quiet" href="field-guide.html">Read the architecture overview <span>↗</span></a></div>
         <div class="hero-meta"><span><b>AGPLv3</b> + commercial dual license</span><span><b>Pre-1.0</b> systems software</span></div>
       </div>
-      <div class="hero-visual" role="img" aria-label="A ComputeImage artifact with its compile and execution route.">
+      <div class="hero-visual origin-artifact" role="img" aria-label="A ComputeImage artifact with its compile and execution route.">
         <div class="visual-grid"></div><div class="orb orb-one"></div><div class="orb orb-two"></div><div class="beam beam-a"></div><div class="beam beam-b"></div>
         <div class="visual-card card-top"><span class="tiny-label">COMPUTEIMAGE</span><strong>model.cimage</strong><span class="status-dot">Illustrative trace</span></div>
-        <div class="center-label"><span>PRISM / COMPILE CONTRACT</span><b>inspect<br>→ execute → prove</b></div>
+        <div class="center-label"><span>PRISM / COMPUTATIONAL ILLUMINATION</span><b>intent<br>→ structure → execution</b><small>light enters · hidden computation emerges</small></div>
         <div class="hero-route" aria-label="GGUF to ComputeImage to Metal route"><span>GGUF</span><b>→</b><span>compile</span><b>→</b><strong>model.cimage</strong><b>→</b><span>Metal</span></div>
         <div class="hero-proof"><span>REPRESENTATION</span><b>mixed precision</b><span>TARGET</span><b>Apple Silicon</b><span>EVIDENCE</span><b>receipt attached at runtime</b></div>
       </div>
@@ -55,17 +47,25 @@
 
     <section class="signal-bar"><div class="shell signal-inner"><span>Built for people who need to know what ran.</span><span class="signal-line"></span><span>Models · artifacts · hardware · evidence</span></div></section>
 
-    <section class="section shell working-path" id="working-path" aria-labelledby="working-path-title">
+    <nav class="discovery-sequence shell" aria-label="Discover computation"><span class="discovery-kicker">ENTER THE PRISM FIELD</span><a href="#working-path"><b>01</b><span>What is computation?</span></a><a href="#computeimage-anatomy"><b>02</b><span>What does it become?</span></a><a href="#compiler"><b>03</b><span>How is it made legal?</span></a><a href="#instruments"><b>04</b><span>How does it become real?</span></a><a href="#status"><b>05</b><span>What can be proven?</span></a></nav>
+
+    <section class="illumination-constellation shell" id="surfaces" aria-labelledby="surfaces-title">
+      <div class="constellation-heading"><div><div class="eyebrow">THE PRISM FIELD / SIX SURFACES</div><h2 id="surfaces-title">One computation.<br><span>Many places to reveal it.</span></h2></div><p>Prism is more than a compiler. Each surface owns one part of the journey from intent to observable execution.</p></div>
+      <div class="constellation-layout"><div class="constellation-orbit" role="list" aria-label="Prism computational surfaces"><button class="constellation-node is-active" type="button" data-surface="cimage" role="listitem"><small>01</small><b>ComputeImage</b><span>the sealed object</span></button><button class="constellation-node" type="button" data-surface="compiler" role="listitem"><small>02</small><b>Spatial Compiler</b><span>the search field</span></button><button class="constellation-node" type="button" data-surface="runtime" role="listitem"><small>03</small><b>Runtime</b><span>the realization</span></button><button class="constellation-node" type="button" data-surface="scheduler" role="listitem"><small>04</small><b>Scheduler</b><span>the conductor</span></button><button class="constellation-node" type="button" data-surface="evidence" role="listitem"><small>05</small><b>Evidence Engine</b><span>the memory</span></button><button class="constellation-node" type="button" data-surface="fabric" role="listitem"><small>06</small><b>Fabric</b><span>the field</span></button><span class="constellation-core" aria-hidden="true">◈</span></div><aside class="constellation-inspector" aria-live="polite"><span class="constellation-kicker">ARTIFACT / CIMAGE</span><h3>ComputeImage</h3><p>Carries logical meaning across physical layouts, execution views, residency, and receipts without making runtime rediscover deployment policy.</p><dl><div><dt>OWNS</dt><dd>sealed deployment contract</dd></div><div><dt>MEETS</dt><dd>compiler · scheduler · evidence</dd></div></dl><span class="constellation-trace">intent → views → execution</span></aside></div>
+    </section>
+
+    <section class="section shell working-path" id="working-path" aria-labelledby="working-path-title" data-canonical-stage="source">
       <div class="section-heading"><div><div class="eyebrow">01 / One working path</div><h2 id="working-path-title">From model<br><span>to receipt.</span></h2></div><p>Start with the smallest complete story: compile a local model, inspect the artifact, run it on the validated path, and keep the result attached to the work.</p></div>
       <div class="working-path-grid"><div class="path-stage"><span>01</span><b>Source</b><code>model.gguf</code></div><i aria-hidden="true">→</i><div class="path-stage"><span>02</span><b>Compile</b><code>prism compile</code></div><i aria-hidden="true">→</i><div class="path-stage"><span>03</span><b>Inspect</b><code>model.cimage</code></div><i aria-hidden="true">→</i><div class="path-stage"><span>04</span><b>Run</b><code>prism run</code></div><i aria-hidden="true">→</i><div class="path-stage path-stage-proof"><span>05</span><b>Receipt</b><code>evidence.json</code></div></div>
       <div class="working-path-note"><span class="tiny-label">DEMO BOUNDARY</span><p>Use the executable Apple Silicon demo for measured timings and receipts. This page does not present invented benchmark numbers.</p><a class="link" href="field-guide.html">Read the setup path ↗</a></div>
     </section>
 
-    <section class="computeimage-anatomy" id="computeimage-anatomy" aria-labelledby="computeimage-anatomy-title">
+    <section class="computeimage-anatomy" id="computeimage-anatomy" aria-labelledby="computeimage-anatomy-title" data-canonical-stage="representation">
       <div class="computeimage-sticky shell">
         <div class="section-heading"><div><div class="eyebrow">02 / ComputeImage anatomy</div><h2 id="computeimage-anatomy-title">The artifact<br><span>keeps the why.</span></h2></div><p>Scroll through the sealed object from identity to payload. The fields are illustrative; the contract is the point.</p></div>
         <div class="computeimage-frame" role="img" aria-label="Illustrative ComputeImage anatomy: metadata, logical tensors, execution views, receipts, and payload progressively appear as the compiler seals the artifact.">
           <div class="computeimage-chrome"><span><i></i><i></i><i></i></span><b>model.cimage</b><em>ILLUSTRATIVE ARTIFACT</em></div>
+          <div class="computeimage-sigil" aria-hidden="true"><span>CIMAGE</span><b>◈</b><small>sealed object / intent → execution</small></div>
           <div class="computeimage-body">
             <div class="computeimage-spine" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
             <div class="computeimage-layer layer-metadata" data-anatomy-layer="0"><span class="layer-index">01</span><div><b>Metadata</b><small>identity · schema · target contract</small></div><code>illustrative</code></div>
@@ -81,7 +81,12 @@
       </div>
     </section>
 
-    <section class="section shell" id="compiler" aria-labelledby="compiler-title">
+    <section class="section shell computeimage-life" id="computeimage-life" aria-labelledby="computeimage-life-title" data-computeimage-life data-computeimage-renderer data-subject-id="computational-subject:prism-model">
+      <div class="section-heading"><div><div class="eyebrow">03 / The life of a ComputeImage</div><h2 id="computeimage-life-title">One object.<br><span>Many observations.</span></h2></div><p>Do not replace the artifact as the story advances. Change the instrument: inspect its silhouette, topology, execution history, capabilities, and receipts while its identity remains fixed.</p></div>
+      <div class="computeimage-life-layout"><div class="computeimage-specimen" role="img" aria-label="ComputeImage specimen with identity preserved across observations"><span class="specimen-spine"></span><b>◈</b><small>model.cimage</small><em data-life-status>SEALED / PLANNED</em></div><div class="computeimage-life-controls" role="list" aria-label="ComputeImage observations"><button type="button" data-life-view="identity" role="listitem" class="is-active"><b>01</b><span>Identity</span><small>what remains invariant</small></button><button type="button" data-life-view="topology" role="listitem"><b>02</b><span>Topology</span><small>how views relate</small></button><button type="button" data-life-view="execution" role="listitem"><b>03</b><span>Execution</span><small>where it can run</small></button><button type="button" data-life-view="history" role="listitem"><b>04</b><span>History</span><small>what changed</small></button><button type="button" data-life-view="receipts" role="listitem"><b>05</b><span>Receipts</span><small>what is proven</small></button></div><aside class="computeimage-life-readout" aria-live="polite"><span class="tiny-label">CURRENT OBSERVATION</span><h3 data-life-title>Identity preserved</h3><p data-life-copy>The subject remains the same while its representations accumulate.</p><span data-life-proof>identity · provenance · subject</span></aside></div>
+    </section>
+
+    <section class="section shell" id="compiler" aria-labelledby="compiler-title" data-canonical-stage="plan">
       <div class="section-heading"><div><div class="eyebrow">03 / Compiler Lab</div><h2 id="compiler-title">See the work<br>behind the artifact.</h2></div><p>Compilation is not a loading spinner. Prism exposes the decisions that shape a deployment artifact, while keeping the distinction between an illustrative trace and a measured run explicit.</p></div>
       <div class="lab-window" aria-describedby="compiler-lab-summary">
         <div class="window-chrome"><span class="window-dots"><i></i><i></i><i></i></span><span>prism / compiler-lab</span><span class="window-live"><i></i> ILLUSTRATIVE TRACE</span></div>
@@ -91,13 +96,13 @@
       <div class="caption-row"><span>Illustrative trace: measured values and receipts come from the executable local demo.</span><a href="https://github.com/Tribunus-dev/prism-engine/tree/main/PrismAgent">Read the desktop UI ↗</a></div>
     </section>
 
-    <section class="section shell instruments" id="instruments" aria-labelledby="instruments-title">
+    <section class="section shell instruments" id="instruments" aria-labelledby="instruments-title" data-canonical-stage="execution">
       <div class="section-heading"><div><div class="eyebrow">05 / From artifact to execution</div><h2 id="instruments-title">Watch the artifact<br><span>become executable.</span></h2></div><p>A small operational view of the compiler contract. Change the representation, inspect the surviving candidates, and follow the route all the way to evidence.</p></div>
       <div class="instrument-toolbar"><div class="instrument-tabs" role="tablist" aria-label="Instrument views"><button class="instrument-tab is-active" data-instrument-tab="pipeline" role="tab" aria-selected="true">Pipeline</button><button class="instrument-tab" data-instrument-tab="evidence" role="tab" aria-selected="false">Evidence</button><button class="instrument-tab" data-instrument-tab="memory" role="tab" aria-selected="false">Memory</button></div><label class="mode-toggle"><input id="engineering-mode" type="checkbox"><span></span> Engineering Mode</label></div>
       <div class="instrument-grid">
         <div class="instrument-main" data-instrument-panel="pipeline">
           <div class="pipeline-strip" aria-label="Compilation pipeline"><button class="pipeline-node is-current" data-stage="source"><small>01</small><b>GGUF</b><span>source identity</span></button><i>→</i><button class="pipeline-node" data-stage="compiler"><small>02</small><b>Compiler</b><span>lower + search</span></button><i>→</i><button class="pipeline-node" data-stage="image"><small>03</small><b>ComputeImage</b><span>sealed artifact</span></button><i>→</i><button class="pipeline-node" data-stage="runtime"><small>04</small><b>Runtime</b><span>schedule + prove</span></button></div>
-          <div class="instrument-card candidate-card"><div class="card-heading"><div><span class="tiny-label">REPRESENTATION SEARCH</span><h3 id="instrument-stage-title">Source admitted</h3></div><span class="live-pill"><i></i><span id="instrument-status">ILLUSTRATIVE TRACE</span></span></div><div class="candidate-list"><button class="candidate-row is-survivor" data-candidate="mixed"><span class="candidate-signal"></span><span><b>Mixed precision</b><small>BF16 attention · FP8 weights</small></span><strong>survivor</strong></button><button class="candidate-row" data-candidate="ternary"><span class="candidate-signal"></span><span><b>Progressive ternary</b><small>reference gate pending</small></span><strong>candidate</strong></button><button class="candidate-row" data-candidate="persistent"><span class="candidate-signal"></span><span><b>Persistent megakernel</b><small>evolutionary schedule</small></span><strong>candidate</strong></button></div><div class="candidate-footer"><span>Illustrative quality <b id="quality-value">98.4%</b></span><span>Illustrative residency <b id="residency-value">HBM → L2</b></span><span>Illustrative route <b id="route-value">Metal / queue 0</b></span></div></div>
+          <div class="instrument-card candidate-card"><div class="card-heading"><div><span class="tiny-label">REPRESENTATION SEARCH</span><h3 id="instrument-stage-title">Source admitted</h3></div><span class="live-pill"><i></i><span id="instrument-status">ILLUSTRATIVE TRACE</span></span></div><div class="candidate-list"><button class="candidate-row is-survivor" data-candidate="mixed"><span class="candidate-signal"></span><span><b>Mixed precision</b><small>BF16 attention · FP8 weights</small></span><strong>survivor</strong></button><button class="candidate-row" data-candidate="ternary"><span class="candidate-signal"></span><span><b>Progressive ternary</b><small>reference gate pending</small></span><strong>candidate</strong></button><button class="candidate-row" data-candidate="persistent"><span class="candidate-signal"></span><span><b>Persistent megakernel</b><small>evolutionary schedule</small></span><strong>candidate</strong></button></div><div class="candidate-footer"><span>Quality <b id="quality-value">illustrative only</b></span><span>Residency <b id="residency-value">illustrative only</b></span><span>Route <b id="route-value">illustrative only</b></span></div></div>
         </div>
         <div class="instrument-main is-hidden" data-instrument-panel="evidence"><div class="instrument-card evidence-card"><div class="card-heading"><div><span class="tiny-label">EXECUTION RECEIPT</span><h3>Evidence attached to the run</h3></div><span class="receipt-seal">SEALED</span></div><div class="receipt-diagram"><div><span>ARTIFACT</span><b>model.cimage</b><small>sha256: 7a9e…c13b</small></div><i>→</i><div><span>ROUTE</span><b>metal.queue[0]</b><small>Apple M3 Max · 64 GB</small></div><i>→</i><div><span>OUTCOME</span><b id="receipt-outcome">validated</b><small>behavioral comparison attached</small></div></div><pre class="engineering-output" hidden>{"artifact":"model.cimage","search":"mixed_precision","residency":["HBM","L2"],"receipt":"attached"}</pre></div></div>
         <div class="instrument-main is-hidden" data-instrument-panel="memory"><div class="instrument-card memory-card"><div class="card-heading"><div><span class="tiny-label">RESIDENCY PLAN</span><h3>Where the tensors live</h3></div><span class="memory-total">41.2 / 64 GB</span></div><div class="memory-stack"><div class="memory-segment memory-model" style="--memory:64%"><span>Weights <b>26.4 GB</b></span></div><div class="memory-segment memory-kv" style="--memory:28%"><span>KV cache <b>11.5 GB</b></span></div><div class="memory-segment memory-work" style="--memory:12%"><span>Workspace <b>3.3 GB</b></span></div></div><div class="memory-legend"><span><i></i>resident</span><span><i></i>streamed</span><span><i></i>reserved</span><span><i></i>free 22.8 GB</span></div></div></div>
@@ -109,15 +114,46 @@
 
     <section class="section shell status-section" id="status" aria-labelledby="status-title"><div class="section-heading"><div><div class="eyebrow">07 / Evidence and current reality</div><h2 id="status-title">What is real<br><span>today.</span></h2></div><p>Prism is pre-1.0 systems software. These bands separate demonstrable paths from work that is implemented and qualifying, and from architectural development surfaces.</p></div><div class="reality-bands"><article><span class="tiny-label">DEMONSTRABLE TODAY</span><h3>Architecture and compiler walkthrough</h3><p>The public path is an inspectable walkthrough of model ingestion, ComputeImage structure, and the evidence boundary; the executable Apple Silicon release is still being stabilized.</p><a href="demo.html">Open the demo milestone ↗</a></article><article><span class="tiny-label">IMPLEMENTED, QUALIFYING</span><h3>Apple Silicon + Metal</h3><p>Primary local validation path. Target-specific execution evidence belongs to the executable demo and its receipts.</p><a href="field-guide.html">Read the validation boundary ↗</a></article><article><span class="tiny-label">ARCHITECTURAL, DEVELOPING</span><h3>MI300X, XDNA, heterogeneous routing</h3><p>ROCm/HIP, XDNA/XDNA2 planning, progressive quantization, KV policy, and cross-device routing remain scoped to their integration and qualification evidence.</p><a href="roadmap.html">See the roadmap ↗</a></article></div></section>
 
-    <section class="section shell next-route" id="next-route" aria-labelledby="next-route-title"><div class="section-heading"><div><div class="eyebrow">08 / Choose the next route</div><h2 id="next-route-title">Read, inspect,<br><span>or prepare.</span></h2></div><p>Choose the shortest path for the question you brought with you.</p></div><div class="journey-guide-grid"><a class="journey-guide-card journey-guide-card-primary" href="field-guide.html"><span class="journey-guide-number">01</span><span class="tiny-label">START HERE</span><h3>Read the architecture overview</h3><p>Start with the model, compiler, ComputeImage, runtime, and current boundary.</p><span class="journey-guide-path">Open the docs <b>↗</b></span></a><a class="journey-guide-card" href="architecture.html"><span class="journey-guide-number">02</span><span class="tiny-label">SYSTEM MODEL</span><h3>Inspect the architecture</h3><p>Follow authority, execution, evidence, and the ComputeImage contract.</p><span class="journey-guide-path">Architecture Guide <b>↗</b></span></a><a class="journey-guide-card" href="demo.html"><span class="journey-guide-number">03</span><span class="tiny-label">NEXT MILESTONE</span><h3>Prepare the demo</h3><p>See the exact gates required before an Apple Silicon run is published.</p><span class="journey-guide-path">Open the milestone <b>↗</b></span></a></div></section>
+    <section class="section shell capability-signal" aria-labelledby="capability-title"><div class="section-heading"><div><div class="eyebrow">08 / The missing layer</div><h2 id="capability-title">Deployment that<br><span>remembers.</span></h2></div><p>The repository already contains the operational layer behind the artifact: model inspection, replay bundles, provenance, experiment comparison, benchmark regression checks, and native runtime boundaries. These are the systems that turn a compiled image into an explainable deployment.</p></div><div class="reality-bands"><article><span class="tiny-label">INSPECT</span><h3>Know what entered the compiler.</h3><p>Inspect tensors, classify assets, estimate memory, validate model inputs, and compare model surfaces before planning.</p></article><article><span class="tiny-label">REPLAY</span><h3>Keep the result reproducible.</h3><p>Capture, run, minimize, compare, import, and export replay bundles instead of treating a runtime failure as a one-off.</p></article><article><span class="tiny-label">QUALIFY</span><h3>Compare work over time.</h3><p>Run experiments and benchmarks, detect regressions, promote baselines, and preserve provenance across the deployment path.</p></article></div><div class="figure-link"><span>See the implementation boundary</span><a class="link" href="field-guide.html">Open the current capability map ↗</a></div></section>
+
+    <section class="section shell next-route" id="next-route" aria-labelledby="next-route-title"><div class="section-heading"><div><div class="eyebrow">09 / Choose the next route</div><h2 id="next-route-title">Read, inspect,<br><span>or prepare.</span></h2></div><p>Choose the shortest path for the question you brought with you.</p></div><div class="journey-guide-grid"><a class="journey-guide-card journey-guide-card-primary" href="field-guide.html"><span class="journey-guide-number">01</span><span class="tiny-label">START HERE</span><h3>Read the architecture overview</h3><p>Start with the model, compiler, ComputeImage, runtime, and current boundary.</p><span class="journey-guide-path">Open the docs <b>↗</b></span></a><a class="journey-guide-card" href="architecture.html"><span class="journey-guide-number">02</span><span class="tiny-label">SYSTEM MODEL</span><h3>Inspect the architecture</h3><p>Follow authority, execution, evidence, and the ComputeImage contract.</p><span class="journey-guide-path">Architecture Guide <b>↗</b></span></a><a class="journey-guide-card" href="demo.html"><span class="journey-guide-number">03</span><span class="tiny-label">NEXT MILESTONE</span><h3>Prepare the demo</h3><p>See the exact gates required before an Apple Silicon run is published.</p><span class="journey-guide-path">Open the milestone <b>↗</b></span></a></div></section>
 
     <section class="closing shell"><div class="closing-mark"><span class="brand-mark"><i></i><i></i><i></i></span></div><div><div class="eyebrow">An independent systems research project</div><h2>Make heterogeneous AI<br><span>legible.</span></h2><p>Prism Engine is an independent systems research project by Julian Torres. It is available under AGPLv3, with commercial dual licensing available for teams that need an alternative to the open-source obligations.</p><div class="hero-actions"><a class="button primary" href="https://github.com/Tribunus-dev/prism-engine">Read the source <span>↗</span></a><a class="button quiet" href="mailto:julian@tribunus.dev">Contact Julian <span>↗</span></a></div></div></section>
     <section class="tensor-journey shell" aria-labelledby="journey-title">
       <div class="section-heading process-heading"><div><div class="eyebrow">04 / One tensor, end to end</div><h2 id="journey-title">Watch one tensor<br><span>become executable.</span></h2></div><p>The same tensor keeps its identity while Prism adds graph semantics, representation decisions, lowered work, placement, KV policy, and evidence. This is an illustrative walkthrough, not a live receipt.</p></div>
       <div class="journey-frame"><div class="journey-toolbar"><span class="tiny-label" id="journey-stage">01 / INGEST</span><span class="journey-caption" id="journey-caption">Read the source tensor and preserve its identity in the ECS world.</span><div class="journey-controls"><button type="button" id="journey-play" aria-pressed="true">Pause</button><button type="button" id="journey-reset">Reset</button></div></div><svg class="journey-svg" viewBox="0 0 1200 470" role="img" aria-labelledby="journey-svg-title journey-svg-desc"><title id="journey-svg-title">Animated tensor compilation state machine</title><desc id="journey-svg-desc">A tensor moves through ECS graph semantics, progressive representation search, lowered kernels, heterogeneous placement, KV policy, and a CImage.</desc><defs><filter id="tensor-glow"><feGaussianBlur stdDeviation="5" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><path class="journey-route" d="M110 235 C170 235 175 100 250 100 S330 370 410 370 S500 100 585 100 S670 370 750 370 S830 100 915 100 S1000 235 1090 235"/><g class="journey-station" data-stage="0" transform="translate(110 235)"><circle r="43"/><text y="-5">SOURCE</text><text y="12">BF16</text><rect x="-25" y="-85" width="50" height="28" rx="3"/><text class="station-index" y="-67">01</text></g><g class="journey-station" data-stage="1" transform="translate(250 100)"><circle r="43"/><text y="-5">GRAPH</text><text y="12">ECS</text><rect x="-25" y="-85" width="50" height="28" rx="3"/><text class="station-index" y="-67">02</text></g><g class="journey-station" data-stage="2" transform="translate(410 370)"><circle r="43"/><text y="-5">SEARCH</text><text y="12">Q / T</text><rect x="-25" y="57" width="50" height="28" rx="3"/><text class="station-index" y="75">03</text></g><g class="journey-station" data-stage="3" transform="translate(585 100)"><circle r="43"/><text y="-5">LOWER</text><text y="12">UOP</text><rect x="-25" y="-85" width="50" height="28" rx="3"/><text class="station-index" y="-67">04</text></g><g class="journey-station" data-stage="4" transform="translate(750 370)"><circle r="43"/><text y="-5">PLACE</text><text y="12">CPU/GPU</text><rect x="-25" y="57" width="50" height="28" rx="3"/><text class="station-index" y="75">05</text></g><g class="journey-station" data-stage="5" transform="translate(915 100)"><circle r="43"/><text y="-5">PROVE</text><text y="12">KV / LOSS</text><rect x="-25" y="-85" width="50" height="28" rx="3"/><text class="station-index" y="-67">06</text></g><g class="journey-station" data-stage="6" transform="translate(1090 235)"><circle r="43"/><text y="-5">CIMAGE</text><text y="12">READY</text><rect x="-35" y="57" width="70" height="28" rx="3"/><text class="station-index" y="75">07</text></g><g class="tensor-token" filter="url(#tensor-glow)"><rect x="-14" y="-14" width="28" height="28" rx="5"/><text y="4">T</text></g><g class="journey-annotation" id="journey-annotation"><rect x="25" y="25" width="300" height="62" rx="4"/><text x="42" y="50" class="annotation-title">TENSOR_042 / DOWN_PROJ</text><text x="42" y="70" class="annotation-body">identity preserved · fields accumulate</text></g></svg><div class="journey-legend"><span><i class="legend-dot source"></i>tensor state</span><span><i class="legend-line"></i>lowered dependency</span><span><i class="legend-dot survivor"></i>selected candidate</span></div></div>
     </section>
-  </main>
-  <footer class="site-footer shell"><span>© 2026 Tribunus · Prism Engine · <a href="https://github.com/Tribunus-dev/prism-engine/commit/edaeafdf">edaeafdf · 2026-07-23</a></span><span>AGPLv3 · commercial dual licensing</span><a href="https://github.com/Tribunus-dev/prism-engine">GitHub ↗</a></footer>
-  <script src="site.js" defer></script>
+    <section class="canonical-continuation shell" data-canonical-journey aria-labelledby="canonical-continuation-title">
+      <div class="section-heading"><div><div class="eyebrow">THE LIFE OF ONE COMPUTEIMAGE / CONTINUATION</div><h2 id="canonical-continuation-title">The object leaves the compiler.<br><span>It does not leave the story.</span></h2></div><p>Execution, evidence, and Fabric are not new objects. They are later observations of the same ComputeImage identity.</p></div>
+      <div class="canonical-continuation-grid"><article data-canonical-stage="execution"><span>06 / EXECUTION</span><strong>One packet finds a provider.</strong><p>The sealed plan becomes ordered work across capability boundaries.</p><small>identity preserved · route observed</small></article><article data-canonical-stage="receipt"><span>07 / RECEIPT</span><strong>Evidence attaches to the outcome.</strong><p>The observation records what happened, under which constraints, and what remains unknown.</p><small>claim bounded · provenance attached</small></article><article data-canonical-stage="fabric"><span>08 / FABRIC</span><strong>The same object can travel.</strong><p>Scale changes the physical realization without changing computational intent.</p><small>research direction · deployment boundary</small></article></div>
+    </section>
+  <section class="living-atlas" data-atlas-context="Introduction" aria-labelledby="living-atlas-title">
+  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from semantic input to physical execution and evidence.</p></div>
+  <div class="atlas-layout">
+    <div class="atlas-graph" role="list" aria-label="Prism living architecture">
+      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>meaning → candidates</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="image" role="listitem"><small>02</small><strong>ComputeImage</strong><span>views → sealed artifact</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="scheduler" role="listitem"><small>03</small><strong>Scheduler</strong><span>work → execution lanes</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="evidence" role="listitem"><small>04</small><strong>Evidence</strong><span>run → receipt</span></button>
+      <button type="button" class="atlas-node" data-atlas-node="fabric" role="listitem"><small>05</small><strong>Fabric</strong><span>machine → fleet</span></button>
+      <svg class="atlas-wires" viewBox="0 0 700 360" aria-hidden="true"><path d="M140 70 C250 20 340 20 560 70 M140 70 C250 130 350 130 560 180 M140 180 C270 180 370 180 560 180 M140 290 C250 240 350 240 560 290 M140 290 C290 350 420 350 560 290"/><path d="M560 70 C600 120 600 230 560 290"/></svg>
+    </div>
+    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves semantic identity while searching representation, placement, and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
+  </div>
+</section>
+</main>
+  <footer class="site-footer component-footer">
+  <div class="continue-reading" aria-label="Continue reading">
+    <span class="eyebrow">Continue reading</span>
+    <a class="continue-reading-link" href="architecture.html">Architecture <span aria-hidden="true">↗</span></a>
+  </div>
+  <div class="footer-meta">
+    <span>PRISM ENGINE / Introduction</span>
+    <span>AGPLv3 · commercial dual licensing</span>
+  </div>
+</footer>
+
+  <script type="module" src="site.js"></script>
+
 </body>
 </html>

@@ -12,8 +12,10 @@ use prism_ecs_ir::evolution::{
     objectives::{
         ArchiveEntry, BehaviorDescriptor, ObjectiveValue, ObjectiveVector, QualityDiversityArchive,
     },
-    pareto::{DeploymentCandidate, DeploymentEvidence, DeploymentGatePolicy, DeploymentIdentity,
-        DeploymentMeasurements, GateStatus, HardGate, ParetoArchive},
+    pareto::{
+        DeploymentCandidate, DeploymentEvidence, DeploymentGatePolicy, DeploymentIdentity,
+        DeploymentMeasurements, GateStatus, HardGate, ParetoArchive,
+    },
     progressive::ProgressiveStageExecutor,
     variation::VariationOperator,
 };
@@ -44,6 +46,12 @@ pub struct HeterogeneousScheduleEvidence {
     pub supports_realtime_text: bool,
     pub supports_batched_text: bool,
     pub supports_batched_audio: bool,
+    #[serde(default)]
+    pub workload_profiles: Vec<crate::workload_search::WorkloadProfile>,
+    #[serde(default)]
+    pub throughput_evidence: Vec<crate::workload_search::WorkloadThroughputEvidence>,
+    #[serde(default)]
+    pub selected_execution_graph: crate::workload_search::SelectedExecutionGraph,
 }
 
 /// Hardware backend evaluated by the evolutionary search.
@@ -55,6 +63,7 @@ pub struct HeterogeneousScheduleEvidence {
 #[serde(rename_all = "snake_case")]
 pub enum SearchBackend {
     Ane,
+    Accelerate,
     Metal,
 }
 
@@ -62,6 +71,7 @@ impl SearchBackend {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Ane => "ane",
+            Self::Accelerate => "accelerate",
             Self::Metal => "metal",
         }
     }
@@ -87,7 +97,7 @@ pub struct JointTilingConfiguration {
 }
 
 impl JointTilingConfiguration {
-    fn from_genome(genome: &CandidateGenome) -> Self {
+    pub fn from_genome(genome: &CandidateGenome) -> Self {
         let geometry = &genome.metal_geometry;
         Self {
             ane_unit: genome.ane_unit.clone(),
@@ -102,7 +112,7 @@ impl JointTilingConfiguration {
         }
     }
 
-    fn with_shape(
+    pub fn with_shape(
         genome: &CandidateGenome,
         ane_tile_m: u32,
         ane_tile_n: u32,
@@ -153,12 +163,15 @@ impl JointTilingConfiguration {
 /// `wall_time_ms` is optional because an evaluator may report a device timer
 /// instead of host elapsed time. No bandwidth or memory values are inferred
 /// here.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BackendEvaluation {
     pub performance_score: f64,
     pub feasible: bool,
     pub measured: bool,
     pub wall_time_ms: Option<f64>,
+    /// Provenance of the timing sample; promotion must not infer native
+    /// execution from a numeric score alone.
+    pub evidence_source: String,
 }
 
 /// Per-backend evidence retained for one tiling profile.
@@ -171,6 +184,7 @@ pub struct BackendMeasurement {
     pub performance_score: Option<f64>,
     pub wall_time_ms: Option<f64>,
     pub evaluator: String,
+    pub evidence_source: String,
     pub error: Option<String>,
 }
 
@@ -179,6 +193,8 @@ pub struct BackendMeasurement {
 pub struct JointTilingMeasurement {
     pub configuration: JointTilingConfiguration,
     pub ane: BackendMeasurement,
+    #[serde(default)]
+    pub accelerate: Option<BackendMeasurement>,
     pub metal: BackendMeasurement,
     pub both_feasible: bool,
     pub joint_score: Option<f64>,
@@ -193,6 +209,10 @@ pub struct JointTilingEvidence {
     pub selected_score: Option<f64>,
     pub both_backends_feasible: bool,
     pub both_backends_measured: bool,
+    #[serde(default)]
+    pub all_backends_feasible: bool,
+    #[serde(default)]
+    pub all_backends_measured: bool,
     pub profiles_evaluated: Vec<JointTilingMeasurement>,
 }
 
@@ -202,6 +222,12 @@ impl JointTilingEvidence {
     /// native ternary promotion.
     pub fn native_lane_ready(&self) -> bool {
         self.both_backends_feasible && self.both_backends_measured
+    }
+
+    /// Return true only when ANE, Accelerate, and Metal were measured and
+    /// feasible on the same selected tiling profile.
+    pub fn heterogeneous_lane_ready(&self) -> bool {
+        self.all_backends_feasible && self.all_backends_measured
     }
 
     /// Convert measured joint-lane evidence into the promotion contract.
@@ -341,6 +367,13 @@ fn harmonic_score(ane: f64, metal: f64) -> Option<f64> {
     Some((2.0 * ane * metal / (ane + metal)).clamp(0.0, 1.0))
 }
 
+fn harmonic_score_3(a: f64, b: f64, c: f64) -> Option<f64> {
+    if !a.is_finite() || !b.is_finite() || !c.is_finite() || a <= 0.0 || b <= 0.0 || c <= 0.0 {
+        return None;
+    }
+    Some((3.0 / (1.0 / a + 1.0 / b + 1.0 / c)).clamp(0.0, 1.0))
+}
+
 fn backend_measurement(
     evaluator: &dyn EvaluationStrategy,
     backend: SearchBackend,
@@ -370,6 +403,7 @@ fn backend_measurement(
                 performance_score,
                 wall_time_ms,
                 evaluator: evaluator.name().to_string(),
+                evidence_source: result.evidence_source,
                 error: None,
             }
         }
@@ -381,6 +415,7 @@ fn backend_measurement(
             performance_score: None,
             wall_time_ms: Some(started.elapsed().as_secs_f64() * 1_000.0),
             evaluator: evaluator.name().to_string(),
+            evidence_source: "error".into(),
             error: Some(error),
         },
     }
@@ -390,14 +425,31 @@ fn evaluate_joint_tiling(
     evaluator: &dyn EvaluationStrategy,
     genome: &str,
     context: &[u8],
+    graph: Option<&SpatialGraph>,
 ) -> JointTilingEvidence {
     let parsed_genome = serde_json::from_str::<CandidateGenome>(genome).unwrap_or_default();
+    let tinygrad_profile_hint = graph.and_then(|graph| {
+        let anchor_profile = crate::workload_search::default_profile_grid()
+            .first()
+            .copied()?;
+        evaluator
+            .evaluate_workload_profile_on_graph(genome, context, anchor_profile, graph)
+            .ok()
+            .map(|evidence| evidence.tokens_per_second.clamp(0.0, 1_000_000.0))
+    });
     let profiles_evaluated = joint_tiling_configurations(&parsed_genome)
         .into_iter()
         .map(|configuration| {
             let ane = backend_measurement(
                 evaluator,
                 SearchBackend::Ane,
+                genome,
+                context,
+                configuration,
+            );
+            let accelerate = backend_measurement(
+                evaluator,
+                SearchBackend::Accelerate,
                 genome,
                 context,
                 configuration,
@@ -411,14 +463,30 @@ fn evaluate_joint_tiling(
             );
             let both_feasible = ane.feasible && metal.feasible;
             let joint_score = both_feasible
-                .then(|| harmonic_score(ane.performance_score?, metal.performance_score?))
+                .then(|| {
+                    if accelerate.feasible {
+                        harmonic_score_3(
+                            ane.performance_score?,
+                            accelerate.performance_score?,
+                            metal.performance_score?,
+                        )
+                    } else {
+                        harmonic_score(ane.performance_score?, metal.performance_score?)
+                    }
+                })
                 .flatten();
+            let adjusted_joint_score = joint_score.and_then(|score| {
+                tinygrad_profile_hint.map_or(Some(score), |hint| {
+                    Some((0.95 * score) + (0.05 * (hint / 1_000_000.0).clamp(0.0, 0.05)))
+                })
+            });
             JointTilingMeasurement {
                 configuration,
                 ane,
+                accelerate: Some(accelerate),
                 metal,
                 both_feasible,
-                joint_score,
+                joint_score: adjusted_joint_score,
             }
         })
         .collect::<Vec<_>>();
@@ -447,6 +515,18 @@ fn evaluate_joint_tiling(
         both_backends_feasible: selected.is_some(),
         both_backends_measured: selected
             .is_some_and(|measurement| measurement.ane.measured && measurement.metal.measured),
+        all_backends_feasible: selected
+            .as_ref()
+            .and_then(|measurement| measurement.accelerate.as_ref())
+            .is_some_and(|accelerate| accelerate.feasible),
+        all_backends_measured: selected
+            .as_ref()
+            .and_then(|measurement| {
+                measurement.accelerate.as_ref().map(|accelerate| {
+                    measurement.ane.measured && measurement.metal.measured && accelerate.measured
+                })
+            })
+            .unwrap_or(false),
         profiles_evaluated,
     }
 }
@@ -461,8 +541,23 @@ fn candidate_measurements(evidence: &JointTilingEvidence) -> serde_json::Value {
                     .selected_configuration
                     .unwrap_or(measurement.configuration)
         })
-        .flat_map(|measurement| [measurement.ane.wall_time_ms, measurement.metal.wall_time_ms])
-        .flatten()
+        .flat_map(|measurement| {
+            let mut times = Vec::new();
+            if let Some(ane) = measurement.ane.wall_time_ms {
+                times.push(ane);
+            }
+            if let Some(metal) = measurement.metal.wall_time_ms {
+                times.push(metal);
+            }
+            if let Some(accelerate) = measurement
+                .accelerate
+                .as_ref()
+                .and_then(|backend| backend.wall_time_ms)
+            {
+                times.push(accelerate);
+            }
+            times
+        })
         .sum();
     serde_json::json!({
         "wall_time_ms": wall_time_ms,
@@ -471,7 +566,11 @@ fn candidate_measurements(evidence: &JointTilingEvidence) -> serde_json::Value {
         "peak_memory_mb": 0.0,
         "reconstruction_error": evidence.selected_score.map(|score| 1.0 - score),
         "accuracy_score": evidence.selected_score,
-        "measurement_kind": "joint_ane_metal_tiling",
+        "measurement_kind": "joint_ane_accelerate_metal_tiling",
+        "ane_feasible": evidence.both_backends_feasible,
+        "ane_measured": evidence.both_backends_measured,
+        "accelerate_feasible": evidence.all_backends_feasible,
+        "accelerate_measured": evidence.all_backends_measured,
         "joint_tiling": evidence,
     })
 }
@@ -489,11 +588,14 @@ fn deployment_archive_from_records(
 ) -> ParetoArchive {
     let mut archive = ParetoArchive::default();
     for record in records {
-        let Ok(genome) = serde_json::from_str::<CandidateGenome>(&record.genome) else { continue };
-        let Some(measurements) = record.measurements.as_ref() else { continue };
-        let engram_digest = sha256_digest(
-            &serde_json::to_string(&genome.engram).unwrap_or_default(),
-        );
+        let Ok(genome) = serde_json::from_str::<CandidateGenome>(&record.genome) else {
+            continue;
+        };
+        let Some(measurements) = record.measurements.as_ref() else {
+            continue;
+        };
+        let engram_digest =
+            sha256_digest(&serde_json::to_string(&genome.engram).unwrap_or_default());
         let number = |name: &str| measurements.get(name).and_then(serde_json::Value::as_f64);
         let deployment_measurements = DeploymentMeasurements {
             quality: number("accuracy_score"),
@@ -530,7 +632,10 @@ fn deployment_archive_from_records(
             status,
             observed: record.score_vector.first().copied(),
             limit: None,
-            detail: record.rejection_reason.clone().unwrap_or_else(|| "candidate evaluated".into()),
+            detail: record
+                .rejection_reason
+                .clone()
+                .unwrap_or_else(|| "candidate evaluated".into()),
         });
         candidate.evidence = DeploymentEvidence {
             candidate_digest: record.candidate_digest.clone(),
@@ -776,7 +881,7 @@ impl SearchCoordinator {
                     }
                 }
 
-                let evidence = evaluate_joint_tiling(self.inner, genome, context);
+                let evidence = evaluate_joint_tiling(self.inner, genome, context, Some(self.graph));
                 if let Ok(mut cache) = self.joint_evidence.lock() {
                     cache.insert(cache_key, evidence.clone());
                 }
@@ -853,7 +958,11 @@ impl SearchCoordinator {
                 prism_ecs_ir::evolution::compile_plan::classify_tensor(first_tensor);
             initial_genomes.extend(self.runtime.tensor_elites(&tensor_family, 4));
         }
-        for backend in [SearchBackend::Ane, SearchBackend::Metal] {
+        for backend in [
+            SearchBackend::Ane,
+            SearchBackend::Accelerate,
+            SearchBackend::Metal,
+        ] {
             initial_genomes.extend(self.runtime.hardware_elites(
                 &prism_ecs_ir::evolution::HardwareProfileKey {
                     backend: backend.as_str().into(),
@@ -1015,7 +1124,11 @@ impl SearchCoordinator {
                 quality_archive.insert(entry);
             }
         }
-        for backend in [SearchBackend::Ane, SearchBackend::Metal] {
+        for backend in [
+            SearchBackend::Ane,
+            SearchBackend::Accelerate,
+            SearchBackend::Metal,
+        ] {
             let profile = prism_ecs_ir::evolution::HardwareProfileKey {
                 backend: backend.as_str().into(),
                 device: evaluator.name().into(),
@@ -1503,8 +1616,7 @@ impl SearchCoordinator {
         let best_genome = quality_archive
             .ranked_elites()
             .first()
-            .map(|entry| entry.genome.clone())
-            ;
+            .map(|entry| entry.genome.clone());
 
         if production_mode
             && !all_candidates
@@ -1520,12 +1632,20 @@ impl SearchCoordinator {
         });
 
         if let Some(evidence) = &best_joint_tiling {
-            for backend in [SearchBackend::Ane, SearchBackend::Metal] {
+            for backend in [
+                SearchBackend::Ane,
+                SearchBackend::Accelerate,
+                SearchBackend::Metal,
+            ] {
                 let measured = evidence
                     .profiles_evaluated
                     .iter()
                     .filter(|profile| match backend {
                         SearchBackend::Ane => profile.ane.measured,
+                        SearchBackend::Accelerate => profile
+                            .accelerate
+                            .as_ref()
+                            .is_some_and(|measurement| measurement.measured),
                         SearchBackend::Metal => profile.metal.measured,
                     })
                     .count() as u64;
@@ -1577,7 +1697,11 @@ impl SearchCoordinator {
                     session_id: runtime_session.session_id.clone(),
                 });
             if evaluator.is_measured() {
-                for backend in [SearchBackend::Ane, SearchBackend::Metal] {
+                for backend in [
+                    SearchBackend::Ane,
+                    SearchBackend::Accelerate,
+                    SearchBackend::Metal,
+                ] {
                     self.runtime.insert_hardware_elite(
                         prism_ecs_ir::evolution::HardwareProfileKey {
                             backend: backend.as_str().into(),
@@ -1628,6 +1752,44 @@ impl SearchCoordinator {
             serde_json::to_string(&plan).unwrap_or_default()
         });
 
+        let workload_profiles = crate::workload_search::default_profile_grid();
+        let throughput_evidence = best_genome
+            .as_ref()
+            .map(|genome| {
+                let representations = [
+                    RepresentationAxis::Ternary158,
+                    RepresentationAxis::TernaryTile640,
+                    RepresentationAxis::Nf4,
+                    RepresentationAxis::Int4,
+                    RepresentationAxis::Int8,
+                    RepresentationAxis::Bf16,
+                    RepresentationAxis::Fp16,
+                ];
+                let evidence = representations
+                    .into_iter()
+                    .flat_map(|representation| {
+                        let mut representation_genome = genome.clone();
+                        representation_genome.representation = representation;
+                        let genome_json = serde_json::to_string(&representation_genome).ok();
+                        workload_profiles.iter().filter_map(move |profile| {
+                            let json = genome_json.as_deref()?;
+                            evaluator
+                                .evaluate_workload_profile_on_graph(
+                                    json,
+                                    context_bytes,
+                                    *profile,
+                                    graph,
+                                )
+                                .ok()
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                Some(evidence)
+            })
+            .flatten()
+            .unwrap_or_default();
+        let selected_execution_graph =
+            crate::workload_search::select_execution_graph(&throughput_evidence);
         let heterogeneous_schedule =
             serde_json::from_str::<FormatPlan>(format_plan.as_deref().unwrap_or("null"))
                 .ok()
@@ -1672,6 +1834,9 @@ impl SearchCoordinator {
                             &prism_spatial_ir::execution_plan::ResidencyWorkload::BatchedAudio,
                         )
                     }),
+                    workload_profiles: crate::workload_search::default_profile_grid(),
+                    throughput_evidence,
+                    selected_execution_graph,
                 });
 
         let gen_count = gen_records.len() as u64;
@@ -1743,10 +1908,13 @@ impl SearchCoordinator {
                 continue;
             }
             let representations = [
-                RepresentationAxis::Fp16,
-                RepresentationAxis::Int8,
                 RepresentationAxis::Ternary158,
                 RepresentationAxis::TernaryTile640,
+                RepresentationAxis::Nf4,
+                RepresentationAxis::Int4,
+                RepresentationAxis::Int8,
+                RepresentationAxis::Bf16,
+                RepresentationAxis::Fp16,
             ];
             let mut best: Option<(CandidateGenome, f64)> = None;
             for representation in representations {
@@ -1780,7 +1948,23 @@ impl SearchCoordinator {
                 }
             }
         }
-        overrides.into_iter().map(|(class, tensors)| (class, tensors.into_iter().map(|(name, format)| (name, prism_ecs_ir::evolution::compile_plan::PerTensorFormat { format })).collect())).collect()
+        overrides
+            .into_iter()
+            .map(|(class, tensors)| {
+                (
+                    class,
+                    tensors
+                        .into_iter()
+                        .map(|(name, format)| {
+                            (
+                                name,
+                                prism_ecs_ir::evolution::compile_plan::PerTensorFormat { format },
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect()
     }
 
     pub fn trace(&self) -> &SearchTrace {
@@ -1857,9 +2041,8 @@ impl SearchSelectionReceipt {
             candidates_evaluated: candidates.len() as u64,
             measured_candidates,
             selected_candidate_digest,
-            fallback_reason: (!production_evidence).then(|| {
-                "search used a non-measured evaluator; scores are diagnostic only".into()
-            }),
+            fallback_reason: (!production_evidence)
+                .then(|| "search used a non-measured evaluator; scores are diagnostic only".into()),
             receipt_digest: String::new(),
         };
         let bytes = serde_json::to_vec(&receipt).unwrap_or_default();
@@ -1920,7 +2103,32 @@ pub trait EvaluationStrategy: Send + Sync {
             feasible: score.is_finite() && score > 0.0,
             measured: self.is_measured(),
             wall_time_ms: Some(started.elapsed().as_secs_f64() * 1_000.0),
+            evidence_source: if self.is_measured() {
+                "evaluator-measured".into()
+            } else {
+                "synthetic-fallback".into()
+            },
         })
+    }
+
+    fn evaluate_workload_profile(
+        &self,
+        genome: &str,
+        context: &[u8],
+        profile: crate::workload_search::WorkloadProfile,
+    ) -> Result<crate::workload_search::WorkloadThroughputEvidence, String> {
+        let _ = (genome, context, profile);
+        Err("workload profile measurement is unavailable for this evaluator".into())
+    }
+
+    fn evaluate_workload_profile_on_graph(
+        &self,
+        genome: &str,
+        context: &[u8],
+        profile: crate::workload_search::WorkloadProfile,
+        _graph: &SpatialGraph,
+    ) -> Result<crate::workload_search::WorkloadThroughputEvidence, String> {
+        self.evaluate_workload_profile(genome, context, profile)
     }
 
     fn name(&self) -> &str;
@@ -1952,7 +2160,360 @@ fn sha256_digest(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workload_search::{default_profile_grid, WorkloadProfile};
+    use prism_ecs_core::identity::SourceFormat;
+    use prism_ecs_ir::cimage_types::TensorShape;
     use prism_ecs_ir::evolution::foundation::CandidateGenome;
+    use prism_ecs_source::{
+        CanonicalSource, SourceCapabilities, SourceIdentity, TensorCatalog, TensorDescriptor,
+    };
+    use prism_spatial_ir::graph::{
+        ComputeIntensity, ComputeKind, EdgeDirection, MemoryKind, MemoryRegion, ShapeContract,
+        SpatialEdge, SpatialEdgeId, SpatialNode,
+    };
+    use std::collections::HashSet;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    struct MatrixEvaluationStrategy {
+        backend_calls: Arc<AtomicUsize>,
+        ane_calls: Arc<AtomicUsize>,
+        accelerate_calls: Arc<AtomicUsize>,
+        metal_calls: Arc<AtomicUsize>,
+        profile_calls: Arc<AtomicUsize>,
+        tinygrad_calls: Arc<AtomicUsize>,
+    }
+
+    impl EvaluationStrategy for MatrixEvaluationStrategy {
+        fn evaluate(&self, _genome: &str, _context: &[u8]) -> Result<Vec<f64>, String> {
+            Ok(vec![1.0])
+        }
+
+        fn evaluate_backend(
+            &self,
+            backend: SearchBackend,
+            _genome: &str,
+            _context: &[u8],
+            _configuration: &JointTilingConfiguration,
+        ) -> Result<BackendEvaluation, String> {
+            self.backend_calls.fetch_add(1, Ordering::SeqCst);
+            if matches!(backend, SearchBackend::Ane) {
+                self.ane_calls.fetch_add(1, Ordering::SeqCst);
+            } else if matches!(backend, SearchBackend::Accelerate) {
+                self.accelerate_calls.fetch_add(1, Ordering::SeqCst);
+            } else if matches!(backend, SearchBackend::Metal) {
+                self.metal_calls.fetch_add(1, Ordering::SeqCst);
+            }
+            Ok(BackendEvaluation {
+                performance_score: 1.0,
+                feasible: true,
+                measured: true,
+                wall_time_ms: Some(1.0),
+                evidence_source: format!("{backend:?}"),
+            })
+        }
+
+        fn evaluate_workload_profile_on_graph(
+            &self,
+            genome: &str,
+            _context: &[u8],
+            profile: WorkloadProfile,
+            graph: &prism_spatial_ir::SpatialGraph,
+        ) -> Result<crate::workload_search::WorkloadThroughputEvidence, String> {
+            self.profile_calls.fetch_add(1, Ordering::SeqCst);
+
+            let genome: CandidateGenome =
+                serde_json::from_str(genome).map_err(|error| format!("decode genome: {error}"))?;
+            let representation = match genome.representation {
+                prism_ecs_ir::evolution::RepresentationAxis::Fp16 => "Fp16",
+                prism_ecs_ir::evolution::RepresentationAxis::Bf16 => "Bf16",
+                prism_ecs_ir::evolution::RepresentationAxis::Int8 => "Int8",
+                prism_ecs_ir::evolution::RepresentationAxis::Int4 => "Int4",
+                prism_ecs_ir::evolution::RepresentationAxis::Nf4 => "Nf4",
+                prism_ecs_ir::evolution::RepresentationAxis::Nf8 => "Nf8",
+                prism_ecs_ir::evolution::RepresentationAxis::Ternary158 => "Ternary158",
+                prism_ecs_ir::evolution::RepresentationAxis::TernaryTile640 => "Ternary158",
+                prism_ecs_ir::evolution::RepresentationAxis::Binary1 => "Binary1",
+            }
+            .to_string();
+
+            let lowering_target = if matches!(
+                profile.primary_lane,
+                crate::workload_search::ExecutionLane::Metal
+            ) {
+                prism_spatial_ir::LoweringTarget::Metal
+            } else {
+                prism_spatial_ir::LoweringTarget::Portable
+            };
+            let strategies = vec![
+                prism_spatial_ir::FusionStrategy::StandardFused,
+                prism_spatial_ir::FusionStrategy::PerOperation,
+            ];
+
+            if self.tinygrad_calls.load(Ordering::SeqCst) == 0 {
+                self.tinygrad_calls.fetch_add(1, Ordering::SeqCst);
+                let compiled = crate::uop::compile_spatial_graph_strategies(
+                    graph,
+                    lowering_target,
+                    &strategies,
+                )
+                .map_err(|error| format!("tinygrad evaluation failed: {error}"))?;
+                if compiled.is_empty() {
+                    return Err("tinygrad candidate set is empty".to_string());
+                }
+            }
+
+            let compiled = crate::uop::compile_spatial_graph_strategies(
+                graph,
+                lowering_target,
+                &strategies,
+            )
+            .map_err(|error| format!("tinygrad evaluation failed: {error}"))?;
+            if compiled.is_empty() {
+                return Err("tinygrad candidate set is empty".to_string());
+            }
+            let strategy_signature = compiled
+                .iter()
+                .map(|(strategy, capture, artifacts)| {
+                    format!(
+                        "{}:{}:{}",
+                        strategy.stable_id().to_string(),
+                        capture.digest(),
+                        artifacts.len()
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(";");
+            let latency_ms = (profile.batch_size + profile.concurrency) as f64;
+            let tokens = profile.batch_size.max(1) as f64;
+            Ok(crate::workload_search::WorkloadThroughputEvidence {
+                profile,
+                representation,
+                tiling_digest: "test-tiling".into(),
+                tokens_per_second: tokens * 1_000.0 / latency_ms.max(0.001),
+                latency_ms: latency_ms.max(0.001),
+                measured: true,
+                evidence_source: "tinygrad-backed".into(),
+                execution_fingerprint: format!(
+                    "tinygrad-full-lower={lowering_target:?}:strategies={}",
+                    strategy_signature
+                ),
+                projected: false,
+                projection_basis: "tinygrad-lowering".into(),
+                mixed_precision_graph: "tinygrad-mixed-precision-graph".into(),
+            })
+        }
+
+        fn is_measured(&self) -> bool {
+            true
+        }
+
+        fn name(&self) -> &str {
+            "tinygrad-matrix-evaluator"
+        }
+    }
+
+    fn make_minimal_graph() -> prism_spatial_ir::SpatialGraph {
+        let mut graph = prism_spatial_ir::SpatialGraph::new();
+        let memory_a = graph.add_node(SpatialNode::Memory {
+            id: prism_spatial_ir::SpatialNodeId(1),
+            kind: MemoryKind::InputBuffer,
+            region: MemoryRegion {
+                shape: TensorShape { dims: vec![2, 3] },
+                element_size: 4,
+                strides: vec![3, 1],
+            },
+        });
+        let memory_b = graph.add_node(SpatialNode::Memory {
+            id: prism_spatial_ir::SpatialNodeId(2),
+            kind: MemoryKind::InputBuffer,
+            region: MemoryRegion {
+                shape: TensorShape { dims: vec![3, 2] },
+                element_size: 4,
+                strides: vec![2, 1],
+            },
+        });
+        let compute = graph.add_node(SpatialNode::Compute {
+            id: prism_spatial_ir::SpatialNodeId(3),
+            kind: ComputeKind::MatMul,
+            shape: ShapeContract::new(
+                vec![
+                    TensorShape { dims: vec![2, 3] },
+                    TensorShape { dims: vec![3, 2] },
+                ],
+                vec![TensorShape { dims: vec![2, 2] }],
+            ),
+            intensity: ComputeIntensity::ComputeBound,
+        });
+        graph.add_edge(SpatialEdge {
+            id: SpatialEdgeId(1),
+            source: memory_a,
+            sink: compute,
+            direction: EdgeDirection::Forward,
+            source_output_idx: 0,
+            sink_input_idx: 0,
+            shape: Some(TensorShape { dims: vec![2, 3] }),
+        });
+        graph.add_edge(SpatialEdge {
+            id: SpatialEdgeId(2),
+            source: memory_b,
+            sink: compute,
+            direction: EdgeDirection::Forward,
+            source_output_idx: 0,
+            sink_input_idx: 1,
+            shape: Some(TensorShape { dims: vec![3, 2] }),
+        });
+        graph
+    }
+
+    fn make_minimal_source() -> CanonicalSource {
+        CanonicalSource {
+            identity: SourceIdentity {
+                format: SourceFormat::SafeTensors,
+                source_digest: "mock-source-digest".into(),
+                model_family: "mock".into(),
+                architecture: "mock-model".into(),
+            },
+            catalog: TensorCatalog::new(vec![TensorDescriptor {
+                name: "layer_attn_proj.weight".into(),
+                shape: vec![2, 3],
+                dtype: "f32".into(),
+                original_dtype: "f32".into(),
+                element_size: 4,
+                data_offset: None,
+                data_size_bytes: 24,
+                layout: "contiguous".into(),
+                byte_offset: 0,
+                byte_length: 24,
+            }]),
+            capabilities: SourceCapabilities {
+                random_access: true,
+                mmap: true,
+                writable: false,
+                supports_streaming: true,
+                supports_random_access: true,
+                supports_dequantize: true,
+            },
+            provider: None,
+        }
+    }
+
+    fn assert_required_representation_matrix(
+        evidence: &[crate::workload_search::WorkloadThroughputEvidence],
+    ) {
+        let mut seen = HashSet::new();
+        for item in evidence {
+            seen.insert(item.representation.clone());
+        }
+        let expected = ["Ternary158", "Nf4", "Int4", "Int8", "Bf16", "Fp16"];
+        for representation in expected {
+            assert!(
+                seen.contains(representation),
+                "missing representation {representation} in throughput matrix"
+            );
+        }
+    }
+
+    fn tinygrad_fingerprint_present(
+        evidence: &[crate::workload_search::WorkloadThroughputEvidence],
+    ) {
+        assert!(
+            evidence
+                .iter()
+                .any(|item| item.execution_fingerprint.contains("tinygrad-full-lower")),
+            "missing tinygrad-lowering evidence fingerprint"
+        );
+    }
+
+    fn assert_workload_profiles_complete(
+        evidence: &[crate::workload_search::WorkloadThroughputEvidence],
+    ) {
+        let profile_count = default_profile_grid().len();
+        let mut representation_to_count = std::collections::HashMap::new();
+        for item in evidence {
+            let count = representation_to_count
+                .entry(item.representation.clone())
+                .or_insert(0usize);
+            *count = count.saturating_add(1);
+        }
+        assert_eq!(
+            representation_to_count
+                .remove("Ternary158")
+                .expect("expected ternary coverage"),
+            profile_count * 2,
+        );
+        for representation in ["Nf4", "Int4", "Int8", "Bf16", "Fp16"] {
+            assert_eq!(
+                representation_to_count
+                    .remove(representation)
+                    .expect("expected mixed-precision coverage"),
+                profile_count,
+            );
+        }
+        assert!(
+            representation_to_count.is_empty(),
+            "unexpected representations in matrix"
+        );
+        assert_eq!(evidence.len(), profile_count * 7);
+    }
+
+    fn assert_typed_profile_coverage(
+        profile_refs: &[crate::workload_search::WorkloadProfile],
+    ) {
+        let mut seen_prefill = false;
+        let mut seen_decode = false;
+        let mut seen_realtime = false;
+        let mut seen_batch = false;
+        let mut has_batch_one = false;
+        let mut has_batch_four = false;
+        let mut has_batch_eight = false;
+        let mut has_batch_sixteen = false;
+        let mut concurrencies = [false; 17];
+        for sample in profile_refs {
+            if sample.phase == crate::workload_search::InferenceWorkloadPhase::Prefill {
+                seen_prefill = true;
+            }
+            if sample.phase == crate::workload_search::InferenceWorkloadPhase::Decode {
+                seen_decode = true;
+            }
+            if sample.service_class == crate::workload_search::ServiceClass::Realtime {
+                seen_realtime = true;
+            }
+            if sample.service_class == crate::workload_search::ServiceClass::Batch {
+                seen_batch = true;
+            }
+            if sample.batch_size == 1 {
+                has_batch_one = true;
+            }
+            if sample.batch_size == 4 {
+                has_batch_four = true;
+            }
+            if sample.batch_size == 8 {
+                has_batch_eight = true;
+            }
+            if sample.batch_size == 16 {
+                has_batch_sixteen = true;
+            }
+            if sample.concurrency <= 16 {
+                concurrencies[sample.concurrency as usize] = true;
+            }
+        }
+        assert!(seen_prefill);
+        assert!(seen_decode);
+        assert!(seen_realtime);
+        assert!(seen_batch);
+        assert!(has_batch_one);
+        assert!(has_batch_four);
+        assert!(has_batch_eight);
+        assert!(has_batch_sixteen);
+        assert!(concurrencies[1]);
+        assert!(concurrencies[2]);
+        assert!(concurrencies[4]);
+        assert!(concurrencies[8]);
+        assert!(concurrencies[16]);
+    }
 
     #[test]
     fn compiler_profile_admission_uses_shared_metal_validation() {
@@ -1975,6 +2536,8 @@ mod tests {
             selected_score: None,
             both_backends_feasible: true,
             both_backends_measured: false,
+            all_backends_feasible: false,
+            all_backends_measured: false,
             profiles_evaluated: Vec::new(),
         };
         assert!(!evidence.native_lane_ready());
@@ -1989,6 +2552,8 @@ mod tests {
             selected_score: None,
             both_backends_feasible: true,
             both_backends_measured: false,
+            all_backends_feasible: false,
+            all_backends_measured: false,
             profiles_evaluated: Vec::new(),
         };
         let receipt =
@@ -2019,6 +2584,8 @@ mod tests {
             selected_score: None,
             both_backends_feasible: true,
             both_backends_measured: true,
+            all_backends_feasible: true,
+            all_backends_measured: true,
             profiles_evaluated: Vec::new(),
         };
         let behavioral = prism_ecs_ir::evolution::TernaryObjectiveEvidence {
@@ -2051,5 +2618,168 @@ mod tests {
         assert_eq!(receipt.task_loss, Some(0.034));
         assert_eq!(receipt.router_agreement, Some(0.97));
         assert_eq!(receipt.generation_loss, Some(0.036));
+    }
+
+    #[test]
+    fn evaluator_matrix_runs_complete_tinygrad_profile_sweep() {
+        let backend_calls = Arc::new(AtomicUsize::new(0));
+        let ane_calls = Arc::new(AtomicUsize::new(0));
+        let accelerate_calls = Arc::new(AtomicUsize::new(0));
+        let metal_calls = Arc::new(AtomicUsize::new(0));
+        let profile_calls = Arc::new(AtomicUsize::new(0));
+        let tinygrad_calls = Arc::new(AtomicUsize::new(0));
+        let mut coordinator = SearchCoordinator::new(SearchConfig {
+            max_generations: 1,
+            population_size: 1,
+            mutation_rate: 0.0,
+            crossover_rate: 0.0,
+            tournament_size: 1,
+            elite_count: 1,
+            early_stop_generations: 1,
+            production_mode: false,
+            ..SearchConfig::default()
+        });
+        let evaluator = MatrixEvaluationStrategy {
+            backend_calls: Arc::clone(&backend_calls),
+            ane_calls: Arc::clone(&ane_calls),
+            accelerate_calls: Arc::clone(&accelerate_calls),
+            metal_calls: Arc::clone(&metal_calls),
+            profile_calls: Arc::clone(&profile_calls),
+            tinygrad_calls: Arc::clone(&tinygrad_calls),
+        };
+        let source = make_minimal_source();
+        let graph = make_minimal_graph();
+
+        let result = coordinator
+            .run_search(&source, &graph, Some(&evaluator), false)
+            .expect("search should run through bounded evaluation matrix");
+
+        let workload_evidence = result
+            .heterogeneous_schedule
+            .as_ref()
+            .map(|schedule| schedule.throughput_evidence.as_slice())
+            .expect("matrix search should publish heterogeneous workload evidence");
+
+        assert_required_representation_matrix(workload_evidence);
+        assert_workload_profiles_complete(workload_evidence);
+        tinygrad_fingerprint_present(workload_evidence);
+
+        assert!(
+            backend_calls.load(Ordering::SeqCst) > 0,
+            "evaluator should dispatch backend measurements"
+        );
+        assert!(
+            ane_calls.load(Ordering::SeqCst) > 0,
+            "evaluator should evaluate ANE lane in the matrix sweep"
+        );
+        assert!(
+            accelerate_calls.load(Ordering::SeqCst) > 0,
+            "evaluator should evaluate Accelerate lane in the matrix sweep"
+        );
+        assert!(
+            metal_calls.load(Ordering::SeqCst) > 0,
+            "evaluator should evaluate Metal lane in the matrix sweep"
+        );
+        assert!(
+            profile_calls.load(Ordering::SeqCst) > 0,
+            "evaluator should evaluate workload profiles"
+        );
+        assert!(
+            tinygrad_calls.load(Ordering::SeqCst) > 0,
+            "tinygrad-inspired lowering should be exercised"
+        );
+
+        let selected_graph = result
+            .heterogeneous_schedule
+            .expect("schedule should be present")
+            .selected_execution_graph;
+        assert!(selected_graph.route_sequence.len() >= 1);
+        let mut lanes = Vec::new();
+        for route in &selected_graph.route_sequence {
+            lanes.push(route.clone());
+        }
+        assert!(
+            lanes.contains(&crate::workload_search::ExecutionLane::Ane)
+                || lanes.contains(&crate::workload_search::ExecutionLane::Accelerate)
+                || lanes.contains(&crate::workload_search::ExecutionLane::Metal),
+            "selected execution graph should carry at least one concrete lane"
+        );
+    }
+
+    #[test]
+    fn evaluator_matrix_generates_full_prealldecode_coverage_for_representation() {
+        let backend_calls = Arc::new(AtomicUsize::new(0));
+        let profile_calls = Arc::new(AtomicUsize::new(0));
+        let tinygrad_calls = Arc::new(AtomicUsize::new(0));
+        let evaluator = MatrixEvaluationStrategy {
+            backend_calls: Arc::clone(&backend_calls),
+            ane_calls: Arc::new(AtomicUsize::new(0)),
+            accelerate_calls: Arc::new(AtomicUsize::new(0)),
+            metal_calls: Arc::new(AtomicUsize::new(0)),
+            profile_calls: Arc::clone(&profile_calls),
+            tinygrad_calls: Arc::clone(&tinygrad_calls),
+        };
+        let source = make_minimal_source();
+        let graph = make_minimal_graph();
+
+        let result = SearchCoordinator::new(SearchConfig {
+            max_generations: 1,
+            population_size: 1,
+            mutation_rate: 0.0,
+            crossover_rate: 0.0,
+            tournament_size: 1,
+            elite_count: 1,
+            early_stop_generations: 1,
+            production_mode: false,
+            ..SearchConfig::default()
+        })
+        .run_search(&source, &graph, Some(&evaluator), false)
+        .expect("search should run through bounded evaluation matrix");
+
+        let throughput_evidence = &result
+            .heterogeneous_schedule
+            .as_ref()
+            .expect("matrix search should publish heterogeneous schedule")
+            .throughput_evidence;
+        let ternary = throughput_evidence
+            .iter()
+            .filter(|item| item.representation == "Ternary158")
+            .collect::<Vec<_>>();
+        assert!(!ternary.is_empty());
+        assert_typed_profile_coverage(
+            &ternary
+                .iter()
+                .map(|item| item.profile)
+                .collect::<Vec<_>>(),
+        );
+
+        assert!(
+            ternary
+                .iter()
+                .any(|sample| sample.profile.phase == crate::workload_search::InferenceWorkloadPhase::Prefill),
+            "ternary evidence should include prefill profiles"
+        );
+        assert!(
+            ternary
+                .iter()
+                .any(|sample| sample.profile.phase == crate::workload_search::InferenceWorkloadPhase::Decode),
+            "ternary evidence should include decode profiles"
+        );
+        assert!(
+            ternary
+                .iter()
+                .any(|sample| sample.profile.service_class == crate::workload_search::ServiceClass::Batch),
+            "ternary evidence should include batch workloads"
+        );
+        assert!(
+            ternary
+                .iter()
+                .any(|sample| sample.profile.service_class == crate::workload_search::ServiceClass::Realtime),
+            "ternary evidence should include realtime workloads"
+        );
+        assert!(
+            throughput_evidence.iter().any(|sample| sample.tokens_per_second > 0.0),
+            "throughput should be measured"
+        );
     }
 }

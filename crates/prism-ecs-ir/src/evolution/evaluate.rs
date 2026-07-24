@@ -129,8 +129,7 @@ mod tests {
     fn binary_genome_scores_higher_than_fp16() {
         let eval = SyntheticEvaluator::new();
         let mut binary_genome = CandidateGenome::new();
-        binary_genome.representation =
-            crate::evolution::foundation::RepresentationAxis::Binary1;
+        binary_genome.representation = crate::evolution::foundation::RepresentationAxis::Binary1;
         let binary_score = eval.evaluate(&binary_genome, &[]);
 
         let fp16_genome = CandidateGenome::new();

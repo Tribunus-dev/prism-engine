@@ -205,10 +205,7 @@ mod tests {
             memory_variance: 0.5,
             probe_valid: true,
         };
-        assert_eq!(
-            system.classify_budget(&high),
-            SearchBudgetClass::Minimal
-        );
+        assert_eq!(system.classify_budget(&high), SearchBudgetClass::Minimal);
     }
 
     #[test]

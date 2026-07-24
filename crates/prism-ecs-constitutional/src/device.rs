@@ -8,8 +8,8 @@ use crate::world_txn::{
 };
 use prism_ecs_core::{Entity, World};
 
-use serde::{Deserialize, Serialize};
 use crate::world_txn::WorldTransitExt;
+use serde::{Deserialize, Serialize};
 
 /// Stable hardware identity — backend-specific but deterministic.
 /// PCIe: domain:bus:dev:func + vendor:device ID

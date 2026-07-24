@@ -28,9 +28,9 @@ impl EvolutionBudget {
     pub fn generous() -> Self {
         Self {
             max_candidates: 10_000,
-            max_wall_time_ms: 600_000,     // 10 minutes
+            max_wall_time_ms: 600_000,           // 10 minutes
             max_memory_bytes: 512 * 1024 * 1024, // 512 MiB
-            max_energy_uj: 100_000_000,    // 100 J
+            max_energy_uj: 100_000_000,          // 100 J
         }
     }
 
@@ -38,9 +38,9 @@ impl EvolutionBudget {
     pub fn quick() -> Self {
         Self {
             max_candidates: 100,
-            max_wall_time_ms: 30_000,         // 30 seconds
+            max_wall_time_ms: 30_000,           // 30 seconds
             max_memory_bytes: 64 * 1024 * 1024, // 64 MiB
-            max_energy_uj: 10_000_000,        // 10 J
+            max_energy_uj: 10_000_000,          // 10 J
         }
     }
 

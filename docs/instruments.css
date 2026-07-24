@@ -1,0 +1,11 @@
+@layer instruments {
+  .computeimage-life,.computeimage-life-layout,.tensor-journey,[data-canonical-journey]{content-visibility:auto;contain-intrinsic-size:720px}
+  [data-computeimage-renderer]{--instrument-accent:var(--chapter-accent,var(--compiler));isolation:isolate}
+  [data-computeimage-mode="silhouette"] [data-life-proof]{opacity:.72}
+  [data-computeimage-mode="evidence"] [data-life-proof]{color:var(--instrument-accent)}
+  .chapter-progress{transform-origin:left center;will-change:width}
+  body[data-optical-primary="beam"] .orb-two,body[data-optical-primary="receipt"] .origin-beam,body[data-optical-primary="receipt"] .orb-two{animation-play-state:paused;opacity:.16}
+  body[data-optical-primary="dispersion"] .hero-route,body[data-optical-primary="frontier"] .hero-route{opacity:.72}
+  body[data-optical-primary="pulse"] .execution-packet{animation-play-state:running}
+  body[data-motion-mode="discrete"] .origin-beam,body[data-motion-mode="discrete"] .orb,body[data-motion-mode="discrete"] .beam,body[data-motion-mode="discrete"] .execution-packet{animation:none!important}
+}

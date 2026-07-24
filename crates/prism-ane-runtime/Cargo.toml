@@ -9,6 +9,9 @@ repository = "https://github.com/Tribunus-dev/prism-engine"
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
+prism-ane = { path = "../prism-ane", optional = true, features = ["ane"] }
+tempfile = "3"
+bytemuck = "1"
 serde = { workspace = true }
 thiserror = { workspace = true }
 
@@ -19,4 +22,4 @@ coreml-proto = { version = "0.1.0", optional = true }
 [features]
 default = []
 # Enables CoreML compilation pathway (requires macOS + Xcode).
-coreml = ["dep:coreml-proto"]
+coreml = ["dep:coreml-proto", "dep:prism-ane", "prism-ane/ane"]

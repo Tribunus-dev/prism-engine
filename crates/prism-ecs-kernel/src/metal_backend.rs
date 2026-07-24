@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use crate::{
     BackendKind, KernelArtifact, KernelBackend, KernelCompileRequest, KernelDescriptor,
     KernelDispatchRequest, KernelError, KernelManifest, KernelMeasurement,
-    KernelMeasurementRequest, KernelOutput, KernelPayload,
+    KernelMeasurementRequest, KernelOutput, KernelPayload, ResidentKernelDispatchRequest,
 };
 
 /// Portable Metal-facing backend. Compilation is deterministic and platform
@@ -11,8 +11,22 @@ use crate::{
 #[derive(Debug, Default, Clone, Copy)]
 pub struct MetalBackend;
 
-pub const FP16_GEMV_MSL: &str = "kernel void fp16_gemv() {}";
-pub const FP16_MATMUL_MSL: &str = "kernel void fp16_matmul() {}";
+pub const FP16_GEMV_MSL: &str = r#"
+#include <metal_stdlib>
+using namespace metal;
+kernel void fp16_gemv(device const half* weights [[buffer(0)]],
+                      device const float* input [[buffer(1)]],
+                      device float* output [[buffer(2)]],
+                      constant uint& m [[buffer(3)]],
+                      constant uint& n [[buffer(4)]],
+                      uint row [[thread_position_in_grid]]) {
+    if (row >= m) return;
+    float acc = 0.0f;
+    for (uint col = 0; col < n; ++col) acc += float(weights[row * n + col]) * input[col];
+    output[row] = acc;
+}
+"#;
+pub const FP16_MATMUL_MSL: &str = FP16_GEMV_MSL;
 pub const INT8_GEMV_MSL: &str = "kernel void int8_gemv() {}";
 pub const NF4_TILE640_GEMV_MSL: &str = "kernel void nf4_tile640_gemv() {}";
 pub const TERNARY_TILE640_GEMV_MSL: &str = "kernel void ternary_tile640_gemv() {}";
@@ -43,7 +57,7 @@ impl KernelBackend for MetalBackend {
     fn compile(&self, request: &KernelCompileRequest) -> Result<KernelArtifact, KernelError> {
         self.validate(&request.descriptor)?;
         let source_digest = hex::encode(Sha256::digest(&request.source));
-        let binary = request.source.clone();
+        let binary = compile_msl_payload(&request.source)?;
         let binary_digest = hex::encode(Sha256::digest(&binary));
         let mut descriptor = request.descriptor.clone();
         descriptor.source_digest = source_digest;
@@ -74,6 +88,27 @@ impl KernelBackend for MetalBackend {
         }
     }
 
+    fn dispatch_resident<'a>(
+        &self,
+        request: ResidentKernelDispatchRequest<'a>,
+    ) -> Result<KernelOutput, KernelError> {
+        #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+        {
+            return crate::metal_dispatch::dispatch_artifact_resident(
+                request.artifact,
+                request.inputs,
+                request.bindings,
+            );
+        }
+        #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+        {
+            let _ = request;
+            Err(KernelError::UnsupportedBackend(
+                "resident Metal dispatch requires macOS with the metal-dispatch feature".into(),
+            ))
+        }
+    }
+
     fn measure(
         &self,
         request: &KernelMeasurementRequest,
@@ -84,13 +119,26 @@ impl KernelBackend for MetalBackend {
             ));
         }
         let mut samples = Vec::with_capacity(request.iterations as usize);
+        #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+        let resident_inputs: Vec<&[u8]> = request.inputs.iter().map(Vec::as_slice).collect();
         for _ in 0..request.iterations {
             let start = std::time::Instant::now();
-            self.dispatch(&KernelDispatchRequest {
-                artifact: request.artifact.clone(),
-                inputs: request.inputs.clone(),
-                bindings: vec![],
-            })?;
+            #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+            {
+                crate::metal_dispatch::dispatch_artifact_resident(
+                    &request.artifact,
+                    &resident_inputs,
+                    &[],
+                )?;
+            }
+            #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+            {
+                self.dispatch(&KernelDispatchRequest {
+                    artifact: request.artifact.clone(),
+                    inputs: request.inputs.clone(),
+                    bindings: vec![],
+                })?;
+            }
             samples.push(start.elapsed().as_nanos() as f64);
         }
         let avg = samples.iter().sum::<f64>() / samples.len() as f64;
@@ -104,5 +152,59 @@ impl KernelBackend for MetalBackend {
 
     fn name(&self) -> &str {
         "metal"
+    }
+}
+
+fn compile_msl_payload(source: &[u8]) -> Result<Vec<u8>, KernelError> {
+    #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+    {
+        use std::{fs, process::Command};
+        let nonce = format!(
+            "prism-metal-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(nonce);
+        fs::create_dir_all(&root).map_err(|e| KernelError::CompilationFailed(e.to_string()))?;
+        let msl = root.join("kernel.metal");
+        let air = root.join("kernel.air");
+        let lib = root.join("kernel.metallib");
+        fs::write(&msl, source).map_err(|e| KernelError::CompilationFailed(e.to_string()))?;
+        let metal = Command::new("xcrun")
+            .args(["-sdk", "macosx", "metal", "-c"])
+            .arg(&msl)
+            .arg("-o")
+            .arg(&air)
+            .output()
+            .map_err(|e| KernelError::CompilationFailed(format!("launch xcrun metal: {e}")))?;
+        if !metal.status.success() {
+            let _ = fs::remove_dir_all(&root);
+            return Err(KernelError::CompilationFailed(
+                String::from_utf8_lossy(&metal.stderr).into_owned(),
+            ));
+        }
+        let metallib = Command::new("xcrun")
+            .args(["-sdk", "macosx", "metallib"])
+            .arg(&air)
+            .arg("-o")
+            .arg(&lib)
+            .output()
+            .map_err(|e| KernelError::CompilationFailed(format!("launch xcrun metallib: {e}")))?;
+        if !metallib.status.success() {
+            let _ = fs::remove_dir_all(&root);
+            return Err(KernelError::CompilationFailed(
+                String::from_utf8_lossy(&metallib.stderr).into_owned(),
+            ));
+        }
+        let bytes = fs::read(&lib).map_err(|e| KernelError::CompilationFailed(e.to_string()))?;
+        let _ = fs::remove_dir_all(&root);
+        return Ok(bytes);
+    }
+    #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+    {
+        Ok(source.to_vec())
     }
 }

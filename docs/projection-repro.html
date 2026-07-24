@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prism Projection Reproducer</title>
+    <link rel="stylesheet" href="foundation.css" />
+    <link rel="stylesheet" href="components.css" />
+    <link rel="stylesheet" href="instruments.css" />
+    <link rel="stylesheet" href="pages.css" />
+  </head>
+  <body data-test-root="body">
+    <div class="shell">
+      <header data-test-root="header">Prism projection repro header</header>
+      <main data-test-root="main">Prism repro content target. Toggle feature flags in the query string or use controls.</main>
+      <footer>Repro footer</footer>
+    <section class="controls">
+        <label><input type="checkbox" data-flag="prismDiagnostics" /> prismDiagnostics</label>
+        <label><input type="checkbox" data-flag="prismObserver" /> prismObserver</label>
+        <label><input type="checkbox" data-flag="prismRuntime" /> prismRuntime</label>
+        <label><input type="checkbox" data-flag="prismShell" /> prismShell</label>
+        <label><input type="checkbox" data-flag="prismReceipts" /> prismReceipts</label>
+        <label><input type="checkbox" data-flag="prismNavigation" /> prismNavigation</label>
+        <label><input type="checkbox" data-flag="prismScroll" /> prismScroll</label>
+        <label><input type="checkbox" data-flag="prismGpu" /> prismGpu</label>
+        <label><input type="checkbox" data-flag="prismSystems"> prismSystems only</label>
+        <label><input type="checkbox" data-probe="mutationObserver"> Global MutationObserver</label>
+        <label><input type="checkbox" data-probe="attributeObserver"> Attribute Observation</label>
+        <label><input type="checkbox" data-probe="datasetTelemetry"> documentElement Dataset Telemetry</label>
+        <label><input type="checkbox" data-probe="customRuntimeEvents"> prism:runtime custom events</label>
+        <label><input type="checkbox" data-probe="fixedBodyOverlay"> fixed body overlay</label>
+        <label><input type="checkbox" data-probe="fullScreenCanvas"> full-screen canvas</label>
+        <label><input type="checkbox" data-probe="bodyPrepend"> body-prepended node</label>
+        <label><input type="checkbox" data-probe="shellInsert"> shell insertion after header</label>
+        <label><input type="checkbox" data-probe="continuousBodyData"> continuous body data updates</label>
+        <label><input type="checkbox" data-probe="portalMutation"> portal-root mutation</label>
+      </section>
+      <textarea id="prismSystemsList" rows="2" placeholder="observation-graph, computeimage-renderer, navigation, gpu-prism"> </textarea>
+      <div class="row">
+        <button type="button" data-apply>Apply checked flags</button>
+        <button type="button" data-copy>Copy repro URL</button>
+      </div>
+      <h2>Startup matrix runner</h2>
+      <div class="row">
+        <label><button type="button" data-run-matrix>Run matrix probes</button> (checks startup invariants across six safe combinations)</label>
+      </div>
+      <h2>Live repro probe</h2>
+      <pre id="reproState"></pre>
+    </div>
+    <script type="module">
+      const check = value => {
+        if (value == null) return false;
+        return !['0', 'false', 'off', 'no'].includes(String(value).toLowerCase());
+      };
+
+      const params = new URLSearchParams(location.search);
+      const render = () => {
+        const header = document.querySelector('[data-test-root="header"]');
+        const main = document.querySelector('[data-test-root="main"]');
+        const report = {
+          headerConnected: Boolean(header && header.isConnected),
+          mainConnected: Boolean(main && main.isConnected),
+          headerCount: document.querySelectorAll('header').length,
+          mainCount: document.querySelectorAll('main').length,
+          bodyChildren: [...document.body.children].map(node => node.tagName.toLowerCase()),
+          params: Object.fromEntries(new URLSearchParams(location.search).entries()),
+          prismRuntime: check(new URLSearchParams(location.search).get('prismRuntime')),
+          prismDiagnostics: check(new URLSearchParams(location.search).get('prismDiagnostics')),
+          portalRootPresent: Boolean(document.querySelector('#prism-portal-root')),
+          effectsRootPresent: Boolean(document.querySelector('#prism-effects-root')),
+          effectsShellPresent: Boolean(document.querySelector('#prism-effects-shell')),
+          bodyMutationObserved: document.body.querySelector('[data-prism-observation-projected]') ? 'projected' : 'pending',
+          externalProjectionPresent: Boolean(document.querySelector('#browser-mcp-container')),
+          mainClass: main?.className || null,
+          headerClass: header?.className || null,
+          shellCount: document.querySelectorAll('.observatory-shell').length,
+        };
+        window.repro = report;
+        document.getElementById('reproState').textContent = JSON.stringify(report, null, 2);
+      };
+
+      document.querySelectorAll('input[data-flag]').forEach(input => {
+        input.checked = check(params.get(input.dataset.flag));
+      });
+      document.querySelectorAll('input[data-probe]').forEach(input => {
+        input.checked = check(params.get(input.dataset.probe));
+      });
+      const systemsValue = params.get('prismSystems') || '';
+      document.getElementById('prismSystemsList').value = systemsValue;
+      const cleanup = {};
+      const enableProbe = (name, enabled, mount) => {
+        if (!cleanup[name] && enabled) {
+          cleanup[name] = mount();
+        }
+        if (!enabled && cleanup[name]) {
+          const stop = cleanup[name];
+          if (typeof stop === 'function') stop();
+          delete cleanup[name];
+        }
+      };
+      const body = document.body;
+      const runProbes = () => {
+        const values = Object.fromEntries(new URLSearchParams(location.search).entries());
+        enableProbe('mutationObserver', check(values.mutationObserver), () => {
+          const mutations = [];
+          const observer = new MutationObserver(records => mutations.push(records.length));
+          observer.observe(document.body, { childList: true, subtree: true });
+          return () => observer.disconnect();
+        });
+        enableProbe('attributeObserver', check(values.attributeObserver), () => {
+          const observer = new MutationObserver(records => records.length);
+          observer.observe(document.body, { attributes: true, subtree: true });
+          return () => observer.disconnect();
+        });
+        enableProbe('datasetTelemetry', check(values.datasetTelemetry), () => {
+          const interval = setInterval(() => {
+            document.documentElement.dataset.probeTick = String(Date.now());
+            document.documentElement.dataset.probeScroll = String(Math.round(scrollY));
+          }, 180);
+          return () => {
+            clearInterval(interval);
+            delete document.documentElement.dataset.probeTick;
+            delete document.documentElement.dataset.probeScroll;
+          };
+        });
+        enableProbe('customRuntimeEvents', check(values.customRuntimeEvents), () => {
+          const interval = setInterval(() => {
+            window.dispatchEvent(new CustomEvent('prism:runtime', {
+              detail: { type: 'repro', at: performance.now() },
+            }));
+          }, 250);
+          return () => clearInterval(interval);
+        });
+        enableProbe('fixedBodyOverlay', check(values.fixedBodyOverlay), () => {
+          const overlay = document.createElement('div');
+          overlay.className = 'repro-overlay';
+          overlay.textContent = 'repro overlay';
+          overlay.style.cssText = 'position:fixed;right:10px;bottom:10px;z-index:9999;padding:6px 10px;background:#0016;font:10px var(--mono);color:#fff;border:1px solid #fff5';
+          body.append(overlay);
+          return () => overlay.remove();
+        });
+        enableProbe('fullScreenCanvas', check(values.fullScreenCanvas), () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = innerWidth;
+          canvas.height = innerHeight;
+          canvas.style.cssText = 'position:fixed;inset:0;opacity:.45;z-index:9998;pointer-events:none';
+          const context = canvas.getContext('2d');
+          if (context) {
+            context.fillStyle = 'rgba(30,90,255,.25)';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+          }
+          body.append(canvas);
+          return () => canvas.remove();
+        });
+        enableProbe('bodyPrepend', check(values.bodyPrepend), () => {
+          const marker = document.createElement('div');
+          marker.className = 'repro-body-prepend';
+          marker.textContent = 'body prepend probe';
+          marker.style.cssText = 'position:relative;padding:6px 10px;font-size:11px;background:#f90d;color:#000';
+          body.prepend(marker);
+          return () => marker.remove();
+        });
+        enableProbe('shellInsert', check(values.shellInsert), () => {
+          const header = document.querySelector('[data-test-root=\"header\"]');
+          if (!header) return;
+          const shell = document.createElement('div');
+          shell.className = 'repro-shell-insert';
+          shell.textContent = 'shell insert probe';
+          shell.style.cssText = 'padding:8px 12px;border:1px solid #6bd8ff;margin:10px 0;color:#8be;';
+          header.after(shell);
+          return () => shell.remove();
+        });
+        enableProbe('continuousBodyData', check(values.continuousBodyData), () => {
+          let tick = 0;
+          const interval = setInterval(() => {
+            body.dataset.reproStep = String(tick++);
+            body.dataset.reproScroll = String(Math.round(scrollY));
+          }, 80);
+          return () => {
+            clearInterval(interval);
+            delete body.dataset.reproStep;
+            delete body.dataset.reproScroll;
+          };
+        });
+        enableProbe('portalMutation', check(values.portalMutation), () => {
+          const portal = document.querySelector('#prism-portal-root');
+          if (!portal) return;
+          const mutations = [];
+          const observer = new MutationObserver(records => {
+            records.forEach((record) => {
+              if (record.type === 'childList') {
+                mutations.push({
+                  at: Date.now(),
+                  added: [...record.addedNodes].map((node) => node.nodeName || 'unknown'),
+                  removed: [...record.removedNodes].map((node) => node.nodeName || 'unknown'),
+                });
+                if (mutations.length > 80) mutations.shift();
+              }
+            });
+          });
+          observer.observe(portal, { childList: true, subtree: true });
+          const interval = setInterval(() => {
+            const entry = document.getElementById('reproState');
+            if (!entry) return;
+            entry.textContent = `${entry.textContent}\nportalMutationMutations=${mutations.length}`;
+          }, 500);
+          return () => {
+            observer.disconnect();
+            clearInterval(interval);
+          };
+        });
+      };
+      runProbes();
+
+      const matrixScenarios = [
+        {
+          name: 'baseline-core',
+          query: 'prismRuntime=on&prismDiagnostics=on&prismObserver=on&prismGpu=on&prismShell=on&prismReceipts=on&prismNavigation=on&prismScroll=on&prismRuntimeHardAbort=off',
+        },
+        {
+          name: 'no-gpu-effects',
+          query: 'prismRuntime=on&prismDiagnostics=on&prismObserver=on&prismGpu=off&prismShell=on&prismReceipts=off&prismNavigation=on&prismScroll=on&prismRuntimeHardAbort=off',
+        },
+        {
+          name: 'shell-only',
+          query: 'prismRuntime=on&prismDiagnostics=on&prismObserver=on&prismGpu=off&prismShell=on&prismReceipts=off&prismNavigation=on&prismScroll=off&prismRuntimeHardAbort=off',
+        },
+        {
+          name: 'minimal',
+          query: 'prismRuntime=on&prismDiagnostics=on&prismObserver=off&prismGpu=off&prismShell=off&prismReceipts=off&prismNavigation=off&prismScroll=off&prismRuntimeHardAbort=off',
+        },
+        {
+          name: 'hard-off-fail-soft',
+          query: 'prismRuntime=on&prismDiagnostics=on&prismObserver=on&prismGpu=on&prismShell=on&prismReceipts=on&prismNavigation=on&prismScroll=on&prismRuntimeHardAbort=off&prismSystems=observatory-shell,unknown-system',
+        },
+        {
+          name: 'hard-abort-fail-stop',
+          query: 'prismRuntime=on&prismDiagnostics=on&prismObserver=on&prismGpu=off&prismShell=off&prismReceipts=off&prismNavigation=off&prismScroll=off&prismRuntimeHardAbort=on&prismSystems=observatory-shell,unknown-system',
+        },
+      ];
+
+      const collectFrameHealth = (frame) => {
+        const doc = frame?.document;
+        if (!doc) return { loaded: false };
+        const body = doc.body;
+        return {
+          loaded: true,
+          bodyConnected: Boolean(body && body.isConnected),
+          projectionCount: body?.querySelectorAll('[data-prism-observation-projected]').length || 0,
+          hasPortal: Boolean(body && body.querySelector('#prism-portal-root')),
+          hasEffectsRoot: Boolean(body && body.querySelector('#prism-effects-root')),
+          hasEffectsShell: Boolean(body && body.querySelector('#prism-effects-shell')),
+          shellCount: body ? body.querySelectorAll('.observatory-shell').length : 0,
+          navCount: body ? body.querySelectorAll('[data-observatory-navigation], .chapter-rail, .chapter-nav, #primary-navigation').length : 0,
+          renderFailures: body ? body.querySelectorAll('[data-prism-failed]').length : 0,
+          prismObservationProjected: body ? body.dataset.prismObservationProjected : null,
+          prismProjectionRoute: body ? body.dataset.prismProjectionRoute : null,
+          projectionMarker: body ? body.dataset.prismObservationProjected === 'true' : false,
+          projectionProjectedAttr: body ? body.getAttribute('data-prism-observation-projected') === 'true' : false,
+          projectionRoute: body ? body.dataset.prismProjectionRoute : null,
+          bodyChildren: body ? body.children.length : 0,
+        };
+      };
+
+      const runStartupMatrix = async () => {
+        const output = {
+          startedAt: new Date().toISOString(),
+          scenarios: [],
+        };
+        document.getElementById('reproState').textContent = 'running startup matrix...';
+        for (const scenario of matrixScenarios) {
+          const iframe = document.createElement('iframe');
+          const targetUrl = `${location.origin}${location.pathname.replace('projection-repro.html', '')}index.html?${scenario.query}`;
+          const record = {
+            scenario: scenario.name,
+            url: targetUrl,
+            success: false,
+            errors: [],
+            health: null,
+          };
+          output.scenarios.push(record);
+          iframe.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px;';
+          iframe.sandbox = 'allow-scripts allow-same-origin';
+          iframe.src = targetUrl;
+          document.body.append(iframe);
+          const waitForLoad = new Promise((resolve) => {
+            iframe.addEventListener('load', resolve, { once: true });
+            setTimeout(() => resolve('timeout'), 7000);
+          });
+          await waitForLoad;
+          const windowState = iframe.contentWindow;
+          const errorBuffer = [];
+          if (windowState) {
+            windowState.onerror = (event) => {
+              errorBuffer.push(String(event?.message || event || 'window error'));
+            };
+            windowState.onunhandledrejection = (event) => {
+              errorBuffer.push(String(event?.reason || event || 'unhandled rejection'));
+            };
+            const health = collectFrameHealth(windowState.document);
+            record.health = health;
+            const projectionHealthy = Boolean(
+              (health.projectionMarker || health.projectionProjectedAttr) && health.projectionRoute
+            );
+            record.success = projectionHealthy && health.bodyConnected && !errorBuffer.length;
+          }
+          if (errorBuffer.length) record.errors = errorBuffer;
+          iframe.remove();
+          await new Promise(resolve => setTimeout(resolve, 150));
+        }
+        document.getElementById('reproState').textContent = JSON.stringify(output, null, 2);
+        return output;
+      };
+
+      document.querySelector('[data-apply]').addEventListener('click', () => {
+        const next = new URLSearchParams(location.search);
+        document.querySelectorAll('input[data-flag]').forEach(input => {
+          next.set(input.dataset.flag, input.checked ? 'on' : 'off');
+        });
+        const systemsValue = document.getElementById('prismSystemsList').value.trim();
+        if (systemsValue) {
+          next.set('prismSystems', systemsValue);
+        } else {
+          next.delete('prismSystems');
+        }
+        document.querySelectorAll('input[data-probe]').forEach(input => {
+          next.set(input.dataset.probe, input.checked ? 'on' : 'off');
+        });
+        next.set('prismRuntime', 'on');
+        next.set('prismDebug', 'on');
+        location.href = `${location.pathname}?${next.toString()}`;
+      });
+
+      document.querySelector('[data-copy]').addEventListener('click', async () => {
+        await navigator.clipboard.writeText(location.href);
+      });
+
+      document.querySelector('[data-run-matrix]').addEventListener('click', () => {
+        runStartupMatrix().catch((error) => {
+          const previous = document.getElementById('reproState').textContent || '';
+          document.getElementById('reproState').textContent = `${previous}\n\nmatrix failed: ${error?.message || String(error)}`;
+        });
+      });
+
+      render();
+      import('./site.js').then(() => render()).catch(() => render());
+      setInterval(render, 500);
+    </script>
+  </body>
+</html>
