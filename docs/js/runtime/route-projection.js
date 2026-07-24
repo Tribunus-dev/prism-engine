@@ -20,5 +20,3 @@ export const createRouteProjection = ({ routeForLocation, primaryRoute }) => ({
     return routeForLocation(pathname);
   },
 });
-  }
-});

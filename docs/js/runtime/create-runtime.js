@@ -15,6 +15,9 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
     registries,
     repository,
     stateSubject: null,
+    projection,
+    currentProjection: null,
+    currentRoute: null,
     subjectFromRepository: (snapshot = kernel?.state?.repositoryState) => {
       if (!kernel?.ensureComputeImageSubject) return null;
       const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
@@ -37,6 +40,8 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
       claims: kernel?.state?.claims || [],
       capabilities: kernel?.state?.capabilities || [],
     }),
+    getCurrentRoute: () => runtime.currentRoute,
+    getProjection: () => runtime.currentProjection,
     async start() {
       domRuntime?.mark('boot', { dependencies: ['kernel', 'domRuntime', 'registries', 'adapters', 'repository', 'projection'] });
       domRuntime?.mark('load-services');
@@ -51,6 +56,8 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
       domRuntime?.mark('observation-graph-loaded');
       domRuntime?.mark('build-subject', { subject: kernel?.subject?.id });
       const route = projection.project();
+      runtime.currentProjection = route;
+      runtime.currentRoute = route?.route || null;
       if (!route?.observation) {
         throw createPrismError(ERROR_CODES.ROUTE_PROJECTION_FAILED, 'Route projection produced an incomplete route', { route });
       }
