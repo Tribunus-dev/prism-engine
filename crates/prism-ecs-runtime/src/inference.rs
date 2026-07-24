@@ -30,6 +30,19 @@ pub struct InferenceWorkMetadata {
     pub priority: u32,
 }
 
+/// Canonical ECS ownership of the KV epoch and physical pages reserved by an
+/// inference request. The KV manager retains device handles privately; this
+/// component is the replayable scheduling fence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KvCacheBinding {
+    pub epoch: u64,
+    pub page_ids: Vec<u64>,
+    pub logical_context_tokens: u32,
+    pub capacity_tokens: u32,
+}
+
+impl Component for KvCacheBinding {}
+
 impl Component for InferenceWorkMetadata {}
 
 impl Default for InferenceWorkMetadata {

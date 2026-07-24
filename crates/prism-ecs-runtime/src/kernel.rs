@@ -57,6 +57,13 @@ pub enum Command {
         kv_epoch: u64,
         kv_tokens: u32,
     },
+    BindInferenceKv {
+        entity: u64,
+        epoch: u64,
+        page_ids: Vec<u64>,
+        logical_context_tokens: u32,
+        capacity_tokens: u32,
+    },
 
     // ── Lifecycle (typed, domain-specific) ──
     Lifecycle(LifecycleCommand),
@@ -81,6 +88,10 @@ pub enum CommandResult {
         generated_tokens: u32,
         kv_epoch: u64,
         kv_tokens: u32,
+    },
+    KvBound {
+        entity_id: u64,
+        epoch: u64,
     },
 
     // Lifecycle
@@ -116,6 +127,7 @@ impl CommandEnvelope {
             Command::CancelAgent { .. } => 0,
             Command::RegisterModel { .. } => 0,
             Command::AdvanceInference { .. } => 0,
+            Command::BindInferenceKv { .. } => 0,
             Command::Lifecycle(lc) => lc.type_id().discriminant(),
         };
         Self {
@@ -137,6 +149,7 @@ impl CommandEnvelope {
             CancelAgent { .. } => 2,
             RegisterModel { .. } => 3,
             AdvanceInference { .. } => 4,
+            BindInferenceKv { .. } => 5,
             Lifecycle(_) => self.command_type_id as u64,
         })
     }
@@ -392,6 +405,24 @@ impl KernelHandle {
                 kv_epoch,
                 kv_tokens,
             ),
+            Command::BindInferenceKv {
+                entity,
+                epoch,
+                page_ids,
+                logical_context_tokens,
+                capacity_tokens,
+            } => execute_bind_inference_kv(
+                &mut world,
+                entity,
+                epoch,
+                page_ids,
+                logical_context_tokens,
+                capacity_tokens,
+            )
+            .map(|_| CommandResult::KvBound {
+                entity_id: entity,
+                epoch,
+            }),
             Command::Lifecycle(lc) => execute_lifecycle(&mut world, lc),
         };
 
@@ -623,6 +654,22 @@ impl RuntimeKernel {
                     generated_tokens,
                     kv_epoch,
                     kv_tokens,
+                )?;
+            }
+            Command::BindInferenceKv {
+                entity,
+                epoch,
+                page_ids,
+                logical_context_tokens,
+                capacity_tokens,
+            } => {
+                execute_bind_inference_kv(
+                    &mut world,
+                    entity,
+                    epoch,
+                    page_ids,
+                    logical_context_tokens,
+                    capacity_tokens,
                 )?;
             }
             // Re-execute lifecycle commands so entity ID allocation stays
@@ -1259,6 +1306,29 @@ fn execute_record_work_plan(
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::WorkPlanRecorded { entity: cmd.entity },
     ))
+}
+
+fn execute_bind_inference_kv(
+    world: &mut World,
+    entity: u64,
+    epoch: u64,
+    page_ids: Vec<u64>,
+    logical_context_tokens: u32,
+    capacity_tokens: u32,
+) -> Result<(), RuntimeError> {
+    let target = Entity::new(entity, 0);
+    if !world.has_entity(target) {
+        return Err(RuntimeError::Entity(format!("inference entity {entity} not found")));
+    }
+    let binding = crate::inference::KvCacheBinding {
+        epoch,
+        page_ids,
+        logical_context_tokens,
+        capacity_tokens,
+    };
+    world
+        .add_component(target, binding)
+        .map_err(|error| RuntimeError::Entity(format!("bind inference KV failed: {error}")))
 }
 
 fn execute_advance_inference(

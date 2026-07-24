@@ -15,7 +15,7 @@ pub use backend::{
     BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher,
     KernelDispatchSpec,
 };
-pub use inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
+pub use inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata, KvCacheBinding};
 pub use kernel::{
     create_kernel, AgentSnapshot, Command, CommandEnvelope, CommandResult, CommitOutcome,
     KernelHandle, KernelHealth, RuntimeKernel,
