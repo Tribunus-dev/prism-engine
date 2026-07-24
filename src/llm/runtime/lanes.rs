@@ -6,9 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use super::super::manifest::{ExecutionLane, InferencePhase, QualificationStatus};
+use super::super::manifest::{ExecutionLane, QualificationStatus};
 use super::super::server::{
     AccelerateExecutionReceipt, CoreMlAuxiliaryReceipt, DispatchId, LaneDispatch,
     LaneExecutionReceipt, MetalExecutionReceipt,
@@ -39,18 +37,6 @@ impl EcsMetalLane {
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-/// Returns a fake ISO-8601 timestamp for the current moment.
-fn fake_timestamp() -> String {
-    let d = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = d.as_secs();
-    let hours = (secs / 3600) % 24;
-    let minutes = (secs / 60) % 60;
-    let s = secs % 60;
-    format!("2025-01-15T{:02}:{:02}:{:02}.000000000Z", hours, minutes, s)
-}
-
 // ── LaneRouter ───────────────────────────────────────────────────────
 
 /// Routes inference dispatches to the appropriate execution lane and
@@ -77,55 +63,17 @@ impl LaneRouter {
     /// Dispatch a Metal prefill (prompt evaluation) operation.
     pub fn dispatch_metal_prefill(
         &self,
-        dispatch: &LaneDispatch,
+        _dispatch: &LaneDispatch,
     ) -> Result<MetalExecutionReceipt, String> {
-        let receipt = MetalExecutionReceipt {
-            dispatch_id: dispatch.dispatch_id,
-            phase: InferencePhase::PromptPrefill,
-            kv_epoch: dispatch.required_epoch,
-            command_submission_time: fake_timestamp(),
-            completion_time: fake_timestamp(),
-            input_allocation_ids: dispatch.input_allocations.clone(),
-            output_allocation_ids: dispatch.output_allocations.clone(),
-            authoritative_result_committed: true,
-        };
-
-        self.cache_lane_receipt(
-            dispatch.dispatch_id,
-            ExecutionLane::Metal,
-            Some(receipt.clone()),
-            None,
-            None,
-        )?;
-
-        Ok(receipt)
+        Err("legacy Metal prefill router is non-authoritative; dispatch through EcsMetalLane".into())
     }
 
     /// Dispatch a Metal decode (token generation) operation.
     pub fn dispatch_metal_decode(
         &self,
-        dispatch: &LaneDispatch,
+        _dispatch: &LaneDispatch,
     ) -> Result<MetalExecutionReceipt, String> {
-        let receipt = MetalExecutionReceipt {
-            dispatch_id: dispatch.dispatch_id,
-            phase: InferencePhase::Decode,
-            kv_epoch: dispatch.required_epoch,
-            command_submission_time: fake_timestamp(),
-            completion_time: fake_timestamp(),
-            input_allocation_ids: dispatch.input_allocations.clone(),
-            output_allocation_ids: dispatch.output_allocations.clone(),
-            authoritative_result_committed: true,
-        };
-
-        self.cache_lane_receipt(
-            dispatch.dispatch_id,
-            ExecutionLane::Metal,
-            Some(receipt.clone()),
-            None,
-            None,
-        )?;
-
-        Ok(receipt)
+        Err("legacy Metal decode router is non-authoritative; dispatch through EcsMetalLane".into())
     }
 
     /// Dispatch an Accelerate framework operation.
