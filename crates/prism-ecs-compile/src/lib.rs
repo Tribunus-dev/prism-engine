@@ -29,7 +29,19 @@ pub use qwen3_6_moe::{
 };
 
 pub mod active_window;
+pub mod adapter_training;
+pub mod agentic_workload;
+pub mod engram_learning;
 pub mod evaluator;
+pub mod execution_graph_evolution;
+pub mod knowledge_correction;
+pub mod kv_cache_compaction;
+pub mod kv_cache_evolution;
+pub mod living_cimage;
+pub mod living_ecs;
+pub mod living_promotion;
+pub mod model_export;
+pub mod progressive_ternary;
 pub mod representation_cache;
 pub mod search;
 pub mod semantic_region_discovery;
@@ -38,7 +50,62 @@ pub mod semantic_region_manifest;
 pub mod semantic_region_probe;
 pub mod semantic_region_search;
 pub mod semantic_region_spec;
+pub mod shadow_calibration;
+pub mod speculative_inference;
 pub mod workload_search;
+
+pub use adapter_training::{
+    admit_adapter, AdapterAdmissionPolicy, AdapterArtifact, AdapterKind, AdapterTrainingError,
+    AdapterTrainingReceipt, AdapterTrainingRequest,
+};
+pub use agentic_workload::{
+    AgenticCalibrationCorpus, AgenticOutcome, AgenticWorkloadClass, AgenticWorkloadEpisode,
+    AgenticWorkloadError, EngramAccessEvent, PrivacyClass, RetentionPolicy,
+};
+pub use engram_learning::{
+    admit_engram_generation, EngramAdmissionPolicy, EngramAdmissionReceipt, EngramEntry,
+    EngramEvaluation, EngramGeneration, EngramLearningError, EngramRepresentation,
+    EngramRouterPolicy,
+};
+pub use execution_graph_evolution::{
+    admit_execution_graph, mutate_execution_graph, ExecutableUnitCandidate, ExecutableUnitKind,
+    ExecutionGraphAdmissionPolicy, ExecutionGraphAdmissionReceipt, ExecutionGraphEdge,
+    ExecutionGraphError, ExecutionGraphMeasurement, ExecutionGraphMutation, TargetExecutionGraph,
+};
+pub use knowledge_correction::{
+    admit_knowledge_correction, CorrectionMechanism, KnowledgeCorrectionError,
+    KnowledgeCorrectionEvaluation, KnowledgeCorrectionPolicy, KnowledgeCorrectionProposal,
+    KnowledgeCorrectionReceipt, ModelErrorClass, ObservedModelError, RefreshPolicy,
+    TemporalKnowledgeContract,
+};
+pub use kv_cache_compaction::{
+    evaluate_kv_compaction, propose_compaction_candidates, KvCompactionAdmissionPolicy,
+    KvCompactionAlgorithm, KvCompactionCandidate, KvCompactionError, KvCompactionMeasurement,
+    KvCompactionReceipt,
+};
+pub use kv_cache_evolution::*;
+pub use living_cimage::{
+    AdaptationKind, AdaptationLifecycle, CImageGeneration, LivingCImage, LivingCImageError,
+    LivingCImageGeneration, LivingCImageId,
+};
+pub use living_ecs::{
+    event_from_command, project_living_cimage, validate_command_against_authority,
+    LivingAdaptationIndex, LivingCalibrationAuthority, LivingCImageAuthority, LivingCommand,
+    LivingCommandKind, LivingEcsError, LivingEntityKind, LivingEvent, LivingGenerationAuthority,
+    LivingLifecycle, LivingLifecycleComponent, LivingProjection, LivingReplayRegistry,
+};
+pub use living_promotion::{
+    build_rollback_receipt, evaluate_promotion, DomainAdmissionEvidence,
+    LivingGenerationPromotionPolicy, LivingGenerationPromotionReceipt,
+    LivingGenerationPromotionRequest, LivingGenerationRollbackReceipt, LivingPromotionError,
+    RefinementDomain,
+};
+pub use model_export::{
+    validate_export, CanonicalModelFormat, EngramExportPolicy, ExportEquivalenceClass,
+    ExportPrecisionPolicy, ExportedComponent, ModelExportError, ModelExportPolicy,
+    ModelExportReceipt, ModelExportRequest, ModelExportValidation,
+};
+pub use progressive_ternary::*;
 pub use search::{
     EvaluationStrategy, SearchCoordinator, SearchError, SearchResult, SearchSelectionReceipt,
 };
@@ -67,6 +134,11 @@ pub use semantic_region_spec::{
     SemanticRegionDiscoveryReceipt, SemanticRegionSpec, SemanticRegionSpecEntry,
     SemanticRegionSpecError, SEMANTIC_REGION_SPEC_V1,
 };
+pub use shadow_calibration::{
+    evaluate_shadow_candidate, ShadowCalibrationError, ShadowCalibrationPolicy,
+    ShadowCalibrationReceipt, ShadowEpisodeComparison,
+};
+pub use speculative_inference::*;
 
 pub mod legalize;
 pub use legalize::{
@@ -244,7 +316,9 @@ pub enum CalibrationPolicy {
     Auto,
 }
 impl Default for CalibrationPolicy {
-    fn default() -> Self { Self::Auto }
+    fn default() -> Self {
+        Self::Auto
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -253,7 +327,9 @@ pub enum ValidationPolicy {
     Production,
 }
 impl Default for ValidationPolicy {
-    fn default() -> Self { Self::Structural }
+    fn default() -> Self {
+        Self::Structural
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -263,12 +339,25 @@ pub struct CompilationPolicy {
 
 impl Default for CompilationPolicy {
     fn default() -> Self {
-        Self { stages: vec![CompilationStage::SourceDetection, CompilationStage::GraphConstruction, CompilationStage::EvolutionarySearch, CompilationStage::Legalization, CompilationStage::KernelGeneration, CompilationStage::CImageEmission, CompilationStage::Certification, CompilationStage::ReceiptBuild] }
+        Self {
+            stages: vec![
+                CompilationStage::SourceDetection,
+                CompilationStage::GraphConstruction,
+                CompilationStage::EvolutionarySearch,
+                CompilationStage::Legalization,
+                CompilationStage::KernelGeneration,
+                CompilationStage::CImageEmission,
+                CompilationStage::Certification,
+                CompilationStage::ReceiptBuild,
+            ],
+        }
     }
 }
 
 impl CompilationPolicy {
-    pub fn enabled_stages(&self) -> &[CompilationStage] { &self.stages }
+    pub fn enabled_stages(&self) -> &[CompilationStage] {
+        &self.stages
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -291,33 +380,113 @@ pub struct SearchConfig {
     pub max_peak_memory_bytes: Option<u64>,
 }
 
-fn default_surrogate_measurement_fraction() -> f64 { 0.2 }
+fn default_surrogate_measurement_fraction() -> f64 {
+    0.2
+}
 
 impl Default for SearchConfig {
     fn default() -> Self {
-        Self { max_generations: 1, population_size: 20, mutation_rate: 0.1, crossover_rate: 0.7, tournament_size: 3, elite_count: 2, early_stop_generations: 10, production_mode: false, surrogate_measurement_fraction: default_surrogate_measurement_fraction(), min_quality: None, max_p99_latency_ms: None, max_peak_memory_bytes: None }
+        Self {
+            max_generations: 1,
+            population_size: 20,
+            mutation_rate: 0.1,
+            crossover_rate: 0.7,
+            tournament_size: 3,
+            elite_count: 2,
+            early_stop_generations: 10,
+            production_mode: false,
+            surrogate_measurement_fraction: default_surrogate_measurement_fraction(),
+            min_quality: None,
+            max_p99_latency_ms: None,
+            max_peak_memory_bytes: None,
+        }
     }
 }
 
 impl SearchConfig {
     pub fn effective_surrogate_measurement_fraction(&self) -> f64 {
-        if self.surrogate_measurement_fraction.is_finite() { self.surrogate_measurement_fraction.clamp(0.01, 1.0) } else { default_surrogate_measurement_fraction() }
+        if self.surrogate_measurement_fraction.is_finite() {
+            self.surrogate_measurement_fraction.clamp(0.01, 1.0)
+        } else {
+            default_surrogate_measurement_fraction()
+        }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchTrace {
+    pub search_id: Uuid,
+    pub generations_completed: u32,
+    pub candidates_evaluated: u64,
+    pub best_score: Option<f64>,
+    pub pareto_frontier_size: usize,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Error)]
 pub enum CompileError {
-    #[error("unsupported source: {0}")]
-    UnsupportedSource(String),
-    #[error("compilation failed: {0}")]
-    CompilationFailed(String),
-    #[error("validation failed: {0}")]
-    ValidationFailed(String),
+    #[error("source detection failed: {0}")]
+    SourceDetectionFailed(String),
+    #[error("graph build failed: {0}")]
+    GraphBuildFailed(String),
+    #[error("search failed: {0}")]
+    SearchFailed(String),
+    #[error("legalization failed: {0}")]
+    LegalizationFailed(String),
+    #[error("kernel generation failed: {0}")]
+    KernelGenerationFailed(String),
+    #[error("CImage emission failed: {0}")]
+    CImageEmissionFailed(String),
+    #[error("receipt construction failed: {0}")]
+    ReceiptBuildFailed(String),
+    #[error("certification failed: {0}")]
+    CertificationFailed(String),
+    #[error("invalid configuration: {0}")]
+    InvalidConfiguration(String),
+}
+
+pub trait CompilationEventSink: Send + Sync {
+    fn emit(&self, event: CompilationEvent);
+}
+
+#[derive(Debug, Default)]
+pub struct VecEventSink {
+    events: std::sync::Mutex<Vec<CompilationEvent>>,
+}
+
+impl VecEventSink {
+    pub fn events(&self) -> Vec<CompilationEvent> {
+        self.events.lock().expect("event sink lock").clone()
+    }
+}
+
+impl CompilationEventSink for VecEventSink {
+    fn emit(&self, event: CompilationEvent) {
+        self.events.lock().expect("event sink lock").push(event);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompileRequest {
-    pub id: Uuid,
-    pub source: CanonicalSource,
+pub struct CompileReceipt {
+    pub compilation_id: Uuid,
+    pub compiler: CompilerIdentity,
+    pub source: SourceIdentity,
     pub config: CompileConfig,
+    pub stages: Vec<StageResult>,
+    pub output_path: Option<String>,
+    pub output_digest: Option<String>,
+    pub status: CompileStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompileStatus {
+    Success,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug)]
+pub struct CompileResult {
+    pub receipt: CompileReceipt,
+    pub output_path: Option<std::path::PathBuf>,
 }
