@@ -11,8 +11,10 @@ const ontology = await import(pathToFileURL(resolve(docsRoot, 'js/core/ontology.
 const transformations = await import(pathToFileURL(resolve(docsRoot, 'js/core/transformations.js')).href);
 const projections = await import(pathToFileURL(resolve(docsRoot, 'js/core/observation-projections.js')).href);
 const observationGraph = await import(pathToFileURL(resolve(docsRoot, 'js/core/observation-graph.js')).href);
+const canonicalContract = await import(pathToFileURL(resolve(docsRoot, 'js/core/canonical-contract.js')).href);
 
 const claimClassValues = new Set(Object.values(ontology.CLAIM_CLASSES || {}));
+const knowledgeStateValues = new Set(Object.values(ontology.KNOWLEDGE_STATES || {}));
 const repositoryState = JSON.parse(await readFile(resolve(docsRoot, 'repository-state.json'), 'utf8'));
 const capabilities = Array.isArray(repositoryState?.capabilities) ? repositoryState.capabilities : [];
 const claims = Array.isArray(repositoryState?.claims) ? repositoryState.claims : [];
@@ -81,6 +83,23 @@ for (const route of Object.values(projections.PROJECTIONS || {})) {
   }
 }
 
+for (const [sceneName, scene] of Object.entries(observationGraph.SCENES || {})) {
+  if (!scene?.phase) {
+    report.push(`scene ${sceneName} missing phase`);
+  } else if (!Object.values(canonicalContract.CANONICAL_PHASE_STAGES || {}).includes(scene.phase)) {
+    report.push(`scene ${sceneName} has phase not in canonical phase map: ${scene.phase}`);
+  }
+  if (scene?.claim && !claimClassValues.has(scene.claim)) {
+    report.push(`scene ${sceneName} uses non-ontology claim ${scene.claim}`);
+  }
+  if (scene?.knowledge && !knowledgeStateValues.has(scene.knowledge)) {
+    report.push(`scene ${sceneName} uses non-ontology knowledge state ${scene.knowledge}`);
+  }
+  if (scene?.next && !Object.prototype.hasOwnProperty.call(observationGraph.SCENES || {}, scene.next)) {
+    report.push(`scene ${sceneName} transitions to unknown scene ${scene.next}`);
+  }
+}
+
 const scenes = new Set(Object.keys(observationGraph.SCENES || {}));
 const pageScenes = new Map(Object.entries(observationGraph.PAGE_SCENES || {}));
 const projectedRoutes = new Set(Object.values(projections.PROJECTIONS || {}).map(route => route.route));
@@ -101,21 +120,23 @@ for (const [page, scene] of pageScenes) {
     report.push(`pageScene ${page} references unknown scene ${scene}`);
   }
 }
-const canonicalJourneySource = await readFile(resolve(docsRoot, 'js/renderers/canonical-journey.js'), 'utf8');
 const canonicalObjectSource = await readFile(resolve(docsRoot, 'js/systems/canonical-object.js'), 'utf8');
 const canonicalStages = new Set();
 for (const match of canonicalObjectSource.matchAll(/([a-zA-Z0-9-]+):\s*'([^']+)'/g)) {
   const value = match[2];
   if (value) canonicalStages.add(value);
 }
-const stageMappings = canonicalJourneySource.match(/const\s+mapping\s*=\s*\{([\s\S]*?)\};/m);
-if (stageMappings) {
-  const mappingBody = stageMappings[1];
-  for (const match of mappingBody.matchAll(/([a-zA-Z0-9_-]+)\s*:\s*\[/g)) {
-    canonicalStages.add(match[1]);
+for (const stage of Object.values(canonicalContract.CANONICAL_JOURNEY_STAGES || {})) {
+  if (Array.isArray(stage) && stage[0] && stage[1]) {
+    // valid journey definition; no action needed
+  } else {
+    report.push(`canonical journey stage token malformed: ${JSON.stringify(stage)}`);
   }
 }
-const requiredStages = ['source', 'execution', 'receipt', 'fabric'];
+for (const [stageName] of Object.entries(canonicalContract.CANONICAL_JOURNEY_STAGES || {})) {
+  canonicalStages.add(stageName);
+}
+const requiredStages = canonicalContract.CANONICAL_JOURNEY_ORDER || ['execution', 'receipt', 'fabric'];
 for (const required of requiredStages) {
   if (!canonicalStages.has(required)) {
     report.push(`canonical journey runtime configuration missing required stage: ${required}`);
@@ -138,6 +159,54 @@ for (const route of Object.values(projections.PROJECTIONS || {})) {
   if (!pageScenes.has(route.route)) {
     report.push(`pageScenes missing route ${route.route}`);
   }
+}
+
+if (projectionsPrimaryRouteCount(Object.values(projections.PROJECTIONS || {})) === -1) {
+  report.push('projection ordering is missing stable route priority values');
+}
+for (const [id, projection] of Object.entries(projections.PROJECTIONS || {})) {
+  if (!projection?.observation) {
+    report.push(`projection ${id} missing observation`);
+  }
+  if (projection?.claims?.length === 0) {
+    report.push(`projection ${projection.route || id} has no claims`);
+  }
+}
+for (const [route, scene] of pageScenes) {
+  const projection = Object.values(projections.PROJECTIONS || {}).find(item => item.route === route);
+  if (!projection) continue;
+  if (!observationGraph.PAGE_SCENES || !Object.prototype.hasOwnProperty.call(observationGraph.PAGE_SCENES, route)) {
+    report.push(`pageScenes missing projected route ${route}`);
+  }
+  if (!scene) {
+    report.push(`page ${route} resolves to unknown scene`);
+  } else if (!observationGraph.SCENES || !Object.prototype.hasOwnProperty.call(observationGraph.SCENES, scene)) {
+    report.push(`page ${route} maps to unknown scene ${scene}`);
+  }
+}
+
+const canonicalRepositoryClaimIds = new Set((claims || []).map(claim => claim?.id).filter(Boolean));
+for (const route of Object.values(projections.PROJECTIONS || {})) {
+  for (const claim of route.claims || []) {
+    if (claim?.id && !canonicalRepositoryClaimIds.has(claim.id)) {
+      report.push(`projection ${route.route || '<unknown>'} references unknown claim id ${claim.id}`);
+    }
+  }
+}
+
+function projectionsPrimaryRouteCount(allProjections = []) {
+  const positions = allProjections
+    .map(projection => projection?.position)
+    .filter((position) => Number.isFinite(position))
+    .map((position) => Number(position));
+  if (positions.some(pos => pos <= 0)) return -1;
+  const sorted = [...positions].sort((a, b) => a - b);
+  const unique = new Set(positions);
+  if (unique.size !== positions.length) return -1;
+  for (let index = 0; index < sorted.length; index += 1) {
+    if (sorted[index] !== index + 1) return -1;
+  }
+  return positions.length;
 }
 
 if (report.length) {

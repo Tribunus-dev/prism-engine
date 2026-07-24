@@ -1,23 +1,5 @@
 
-export const CANONICAL_OBJECT_STAGES = {
-  source: 'silhouette',
-  representation: 'representation',
-  plan: 'physical',
-  computeimage: 'identity',
-  execution: 'execution',
-  receipt: 'evidence',
-  fabric: 'fabric',
-};
-
-export const CANONICAL_PHASE_STAGES = {
-  intent: 'source',
-  representation: 'representation',
-  plan: 'plan',
-  computeimage: 'computeimage',
-  execution: 'execution',
-  receipt: 'receipt',
-  fabric: 'fabric',
-};
+import { CANONICAL_OBJECT_STAGES, CANONICAL_PHASE_STAGES } from '../core/canonical-contract.js';
 
 export const createCanonicalObjectSystem = () => {
   const start = (context) => {

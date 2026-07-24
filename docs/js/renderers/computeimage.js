@@ -1,6 +1,8 @@
 
+import { COMPUTEIMAGE_RENDERER_MODES } from '../core/canonical-contract.js';
+
 export const createComputeImageRenderer = (context) => {
-  const modes = ['silhouette', 'identity', 'representation', 'physical', 'execution', 'history', 'evidence', 'fabric'];
+  const modes = COMPUTEIMAGE_RENDERER_MODES;
   const instances = new WeakMap();
   const resolveComputation = (computation) => {
     if (computation) return computation;

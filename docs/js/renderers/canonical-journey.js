@@ -1,9 +1,5 @@
 
-export const CANONICAL_JOURNEY_STAGES = {
-  execution: ['ComputeImage', 'Execution', ['provider capability is compatible']],
-  receipt: ['Execution', 'Receipt', ['observation occurred', 'provenance is available']],
-  fabric: ['ComputeImage', 'Fabric', ['subject identity persists']],
-};
+import { CANONICAL_JOURNEY_STAGES } from '../core/canonical-contract.js';
 
 export const createCanonicalJourneyRenderer = () => {
   const start = (context) => {

@@ -4,6 +4,9 @@ import { resolve } from 'node:path';
 const docsRoot = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const read = async relative => readFile(new URL(relative, `file://${docsRoot}/`), 'utf8');
 
+const contractModule = await import(new URL('../js/core/canonical-contract.js', `file://${docsRoot}/`));
+const { CANONICAL_OBJECT_STAGES, COMPUTEIMAGE_RENDERER_MODES } = contractModule;
+
 const checks = [];
 
 const runtimeSource = await read('../js/runtime/create-runtime.js');
@@ -36,7 +39,7 @@ if (!canonicalObjectSource.includes('context?.runtime?.getCanonicalSubject?.()')
   checks.push('canonical-object.js is not consuming runtime.getCanonicalSubject');
 }
 
-if (!/CANONICAL_OBJECT_STAGES/.test(canonicalObjectSource) || !canonicalObjectSource.includes("representation: 'representation'")) {
+if (!/CANONICAL_OBJECT_STAGES/.test(canonicalObjectSource) || CANONICAL_OBJECT_STAGES?.representation !== 'representation') {
   checks.push('canonical-object.js is not mapping representation to representation mode');
 }
 
@@ -65,7 +68,7 @@ if (canonicalObjectSource.includes('kernel?.ensureComputeImageSubject') || canon
   checks.push('canonical-object.js must not fallback to kernel-local subject construction');
 }
 
-if (!computeImageSource.includes("'representation'") && !computeImageSource.includes('"representation"')) {
+if (!/COMPUTEIMAGE_RENDERER_MODES/.test(computeImageSource) || !Array.isArray(COMPUTEIMAGE_RENDERER_MODES) || !COMPUTEIMAGE_RENDERER_MODES.includes('representation')) {
   checks.push('computeimage.js does not expose representation mode in renderer modes list');
 }
 
