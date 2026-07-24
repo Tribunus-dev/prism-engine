@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "description": "Prism website diagnostics and reproduction tooling",
   "scripts": {
-    "matrix:check": "playwright test prism-matrix.spec.js"
+    "matrix:check": "playwright test prism-matrix.spec.js",
+    "observatory:check": "playwright test docs/observatory-smoke.spec.js",
+    "site:check": "playwright test prism-matrix.spec.js docs/observatory-smoke.spec.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1"
