@@ -12,9 +12,9 @@ const inferDomainFromId = (id = '') => {
 
 const inferLevel = (status = '') => {
   const normalized = String(status || '').toLowerCase().trim();
-  if (normalized === 'repository-evidence' || normalized === 'measured' || normalized === 'validated') return 'validated';
-  if (normalized === 'compile-verified' || normalized === 'illustrative' || normalized === 'architectural-derivation') return 'implemented';
-  if (normalized === 'research-direction') return 'planned';
+  if (normalized === 'measured' || normalized === 'validated' || normalized === 'repository') return 'validated';
+  if (normalized === 'compile-verified' || normalized === 'illustrative' || normalized === 'architectural') return 'implemented';
+  if (normalized === 'planned' || normalized === 'research-direction') return 'planned';
   return levelOrder.includes(normalized) ? normalized : 'implemented';
 };
 

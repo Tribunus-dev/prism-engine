@@ -1,4 +1,5 @@
 import { PROJECTIONS } from './observation-projections.js';
+import { CLAIM_CLASSES, KNOWLEDGE_STATES } from './ontology.js';
 
 export const SCENES = {
   origin: {
@@ -8,8 +9,8 @@ export const SCENES = {
     question: 'What is computation?',
     intent: 'An opaque model artifact enters the field.',
     next: 'refraction',
-    claim: 'illustrative',
-    knowledge: 'observed',
+    claim: CLAIM_CLASSES.ILLUSTRATIVE,
+    knowledge: KNOWLEDGE_STATES.OBSERVED,
     existence: 'active',
     misconception: 'A model is just weights.',
     takeaway: 'A model already contains semantic intent.',
@@ -24,8 +25,8 @@ export const SCENES = {
     question: 'What was already inside the model?',
     intent: 'Prism separates representation structure without destroying coherence.',
     next: 'representation',
-    claim: 'architectural',
-    knowledge: 'derived',
+    claim: CLAIM_CLASSES.ARCHITECTURAL,
+    knowledge: KNOWLEDGE_STATES.DERIVED,
     existence: 'active',
     misconception: 'Structure is added after the model is loaded.',
     takeaway: 'The prism reveals representation that was already present.',
@@ -40,8 +41,8 @@ export const SCENES = {
     question: 'What can remain unified?',
     intent: 'A shared representation carries intent across domains.',
     next: 'compiler',
-    claim: 'repository',
-    knowledge: 'verified',
+    claim: CLAIM_CLASSES.REPOSITORY,
+    knowledge: KNOWLEDGE_STATES.VERIFIED,
     existence: 'active',
     misconception: 'Every subsystem needs its own semantic model.',
     takeaway: 'One canonical object can cross implementation boundaries.',
@@ -56,8 +57,8 @@ export const SCENES = {
     question: 'Which plan is legal?',
     intent: 'Candidates are searched against quality, resource, and target gates.',
     next: 'compute-image',
-    claim: 'architectural',
-    knowledge: 'derived',
+    claim: CLAIM_CLASSES.ARCHITECTURAL,
+    knowledge: KNOWLEDGE_STATES.DERIVED,
     existence: 'active',
     misconception: 'Compilation is only lowering.',
     takeaway: 'Compilation is semantic transformation and constrained search.',
@@ -72,8 +73,8 @@ export const SCENES = {
     question: 'What recombines?',
     intent: 'A sealed ComputeImage carries the deployment contract into execution.',
     next: 'scheduler',
-    claim: 'repository',
-    knowledge: 'verified',
+    claim: CLAIM_CLASSES.REPOSITORY,
+    knowledge: KNOWLEDGE_STATES.VERIFIED,
     existence: 'planned',
     misconception: 'A ComputeImage is another model format.',
     takeaway: 'A ComputeImage is an executable semantic artifact.',
@@ -88,8 +89,8 @@ export const SCENES = {
     question: 'Where does work belong?',
     intent: 'A serving requirement travels through explicit capability boundaries.',
     next: 'evidence',
-    claim: 'compile-verified',
-    knowledge: 'verified',
+    claim: CLAIM_CLASSES.COMPILE,
+    knowledge: KNOWLEDGE_STATES.VERIFIED,
     existence: 'partial',
     misconception: 'Scheduling is only hardware selection.',
     takeaway: 'Scheduling preserves intent across capability boundaries.',
@@ -104,8 +105,8 @@ export const SCENES = {
     question: 'What can be proven?',
     intent: 'Receipts preserve the boundary between a plan and an observed result.',
     next: 'fabric',
-    claim: 'repository',
-    knowledge: 'verified',
+    claim: CLAIM_CLASSES.REPOSITORY,
+    knowledge: KNOWLEDGE_STATES.VERIFIED,
     existence: 'active',
     misconception: 'Benchmarks prove correctness by themselves.',
     takeaway: 'Receipts expose the scope of claims.',
@@ -120,8 +121,8 @@ export const SCENES = {
     question: 'How far can intent travel?',
     intent: 'The same semantic object expands across machines and providers.',
     next: 'origin',
-    claim: 'illustrative',
-    knowledge: 'hypothesized',
+    claim: CLAIM_CLASSES.ILLUSTRATIVE,
+    knowledge: KNOWLEDGE_STATES.HYPOTHESIZED,
     existence: 'deferred',
     misconception: 'Portability means every target behaves identically.',
     takeaway: 'Portability preserves intent while execution remains target-specific.',
@@ -234,14 +235,7 @@ export const createObservationGraphSystem = () => {
         canonicalSubject.intent = scene.intent;
         canonicalSubject.questions = [scene.next, scene.question];
       }
-      const belief =
-        scene.knowledge === 'repository-evidence'
-          ? 'verified'
-          : scene.knowledge === 'compile-verification'
-            ? 'verified'
-            : scene.knowledge === 'research-direction'
-              ? 'hypothesized'
-              : 'observed';
+      const belief = Object.values(KNOWLEDGE_STATES).includes(scene.knowledge) ? scene.knowledge : KNOWLEDGE_STATES.OBSERVED;
       kernel.setBelief(belief, { observation: scene.effect });
       kernel.record({
         type: 'observation-entered',

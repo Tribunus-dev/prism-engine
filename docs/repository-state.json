@@ -86,7 +86,7 @@
         "crates/prism-ecs-core",
         "crates/prism-ecs-ir"
       ],
-      "status": "repository-evidence"
+      "status": "repository"
     },
     {
       "id": "computeimage",
@@ -95,7 +95,7 @@
         "docs/cimage-layout-abi-v1.md",
         "crates/prism-ecs-artifact"
       ],
-      "status": "repository-evidence"
+      "status": "repository"
     },
     {
       "id": "metal",
@@ -104,7 +104,7 @@
         "crates/prism-metal-runtime",
         "docs/demo.html"
       ],
-      "status": "repository-evidence"
+      "status": "repository"
     },
     {
       "id": "rocm",
@@ -113,7 +113,7 @@
         "docs/adr-031-aiter-atom-rocm-provider.md",
         "crates/prism-amd-npu-runtime"
       ],
-      "status": "repository-evidence"
+      "status": "repository"
     },
     {
       "id": "xdna",
@@ -122,7 +122,7 @@
         "crates/prism-intel-npu-runtime",
         "docs/heterogeneous.html"
       ],
-      "status": "repository-evidence"
+      "status": "repository"
     }
   ],
   "claims": [
@@ -131,7 +131,7 @@
       "class": "repository",
       "subjectId": "computational-subject:prism-model",
       "capabilityId": "ecs-native-compiler",
-      "status": "repository-evidence",
+      "status": "repository",
       "sourceRefs": [
         "crates/prism-ecs-compile",
         "crates/prism-ecs-core",
@@ -144,7 +144,7 @@
       "class": "repository",
       "subjectId": "computational-subject:prism-model",
       "capabilityId": "computeimage",
-      "status": "repository-evidence",
+      "status": "repository",
       "sourceRefs": [
         "docs/cimage-layout-abi-v1.md",
         "crates/prism-ecs-artifact"
@@ -156,7 +156,7 @@
       "class": "repository",
       "subjectId": "computational-subject:prism-model",
       "capabilityId": "metal",
-      "status": "repository-evidence",
+      "status": "repository",
       "sourceRefs": [
         "crates/prism-metal-runtime",
         "docs/demo.html"
@@ -168,7 +168,7 @@
       "class": "repository",
       "subjectId": "computational-subject:prism-model",
       "capabilityId": "rocm",
-      "status": "repository-evidence",
+      "status": "repository",
       "sourceRefs": [
         "docs/adr-031-aiter-atom-rocm-provider.md",
         "crates/prism-amd-npu-runtime"
@@ -180,7 +180,7 @@
       "class": "repository",
       "subjectId": "computational-subject:prism-model",
       "capabilityId": "xdna",
-      "status": "repository-evidence",
+      "status": "repository",
       "sourceRefs": [
         "crates/prism-intel-npu-runtime",
         "docs/heterogeneous.html"
@@ -191,7 +191,7 @@
       "id": "claim:canonical-journey",
       "class": "architectural",
       "subjectId": "computational-subject:prism-model",
-      "status": "architectural-derivation",
+      "status": "implemented",
       "sourceRefs": [
         "docs/prism-semantics.md"
       ],
