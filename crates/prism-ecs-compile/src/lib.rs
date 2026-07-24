@@ -33,6 +33,7 @@ pub mod evaluator;
 pub mod representation_cache;
 pub mod search;
 pub mod semantic_region_discovery;
+pub mod semantic_region_probe;
 pub mod semantic_region_spec;
 pub mod workload_search;
 pub use search::{
@@ -42,6 +43,10 @@ pub use semantic_region_discovery::{
     discover_semantic_partition, ArchitectureDiscoverer, GraphExplicitDiscoverer, GraphRegionHint,
     LogicalTensorDescriptor, SemanticDiscoveryError, SemanticModelConfig,
     SemanticRegionDiscoverer,
+};
+pub use semantic_region_probe::{
+    selector_digest, MappedTensorRegionProbeContext, RegionProbeError, RegionSensitivityReceipt,
+    RegionView,
 };
 pub use semantic_region_spec::{
     SemanticRegionDiscoveryReceipt, SemanticRegionSpec, SemanticRegionSpecEntry,
