@@ -33,7 +33,7 @@ export const createCanonicalObjectSystem = () => {
     specimen.setAttribute('aria-describedby', narrative.id);
     const renderer = context.computeImageRenderer;
     const mounted = renderer?.mount?.(specimen, computation);
-    const modes = { source: 'silhouette', representation: 'semantic', plan: 'physical', computeimage: 'identity', execution: 'execution', receipt: 'evidence', fabric: 'fabric' };
+    const modes = { source: 'silhouette', representation: 'representation', plan: 'physical', computeimage: 'identity', execution: 'execution', receipt: 'evidence', fabric: 'fabric' };
     const phaseStages = { intent: 'source', representation: 'representation', plan: 'plan', computeimage: 'computeimage', execution: 'execution', receipt: 'receipt', fabric: 'fabric' };
     const update = event => {
       const stage = event.detail?.stage || phaseStages[event?.phase] || document.body.dataset.canonicalStage || 'source';

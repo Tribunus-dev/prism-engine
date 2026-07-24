@@ -277,7 +277,7 @@ const initPrismStages = () => {
   activate(0);
   update();
 };
-const initSemanticLayers = () => {
+const initRepresentationLayers = () => {
   const layers = [...document.querySelectorAll(".layer-grid article")];
   layers.forEach((article) => {
     const title = article.querySelector("h3")?.textContent.toLowerCase() || "";
@@ -356,7 +356,7 @@ const initLivingAtlas = () => {
     compiler: [
       "COMPILER / SEARCH",
       "Compiler",
-      "Preserves semantic identity while searching representation, placement, and target legality.",
+      "Preserves representation identity while searching placement and target legality.",
       "Model graph + quality contract",
       "ECS world / CPU analysis",
       "Admitted candidates + PrismIR",
@@ -496,7 +496,7 @@ const initSurfaceConstellation = () => {
     cimage: [
       "ARTIFACT / CIMAGE",
       "ComputeImage",
-      "Carries logical meaning across physical layouts, execution views, residency, and receipts without making runtime rediscover deployment policy.",
+      "Carries representation across physical layouts, execution views, residency, and receipts without making runtime rediscover deployment policy.",
       "sealed deployment contract",
       "compiler · scheduler · evidence",
       "intent → views → execution",
@@ -504,7 +504,7 @@ const initSurfaceConstellation = () => {
     compiler: [
       "COMPILER / SEARCH",
       "Spatial Compiler",
-      "Searches representation and placement together while preserving semantic identity and explicit admission boundaries.",
+      "Searches representation and placement together while preserving identity and explicit admission boundaries.",
       "representation frontier",
       "ComputeImage · runtime · evidence",
       "identity → search → admission",
@@ -602,7 +602,7 @@ export const createSiteShellSystem = () => {
     initComputeImageSignature(kernel, domRuntime);
     initStartHereSignature(domRuntime);
     initPrismStages();
-    initSemanticLayers();
+    initRepresentationLayers();
     initLivingArchitecture();
     initLivingAtlas();
     initAtlasScroll(kernel);

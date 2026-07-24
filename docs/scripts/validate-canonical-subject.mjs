@@ -25,8 +25,16 @@ if (!canonicalObjectSource.includes('context?.runtime?.getCanonicalSubject?.()')
   checks.push('canonical-object.js is not consuming runtime.getCanonicalSubject');
 }
 
+if (!/modes\s*=\s*\{[^}]*representation:\s*[\'\"]representation[\'\"]/.test(canonicalObjectSource)) {
+  checks.push('canonical-object.js does not map representation to representation mode');
+}
+
 if (!computeImageSource.includes('context?.runtime?.getCanonicalSubject')) {
   checks.push('computeimage.js is not consuming runtime.getCanonicalSubject');
+}
+
+if (!computeImageSource.includes("'representation'") && !computeImageSource.includes('"representation"')) {
+  checks.push('computeimage.js does not expose representation mode in renderer modes list');
 }
 
 if (!computeImageSource.includes('kernel?.ensureComputeImageSubject?.()') && !computeImageSource.includes('kernel?.subject?.computeImage')) {

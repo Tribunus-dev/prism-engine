@@ -1,6 +1,6 @@
 
 export const createComputeImageRenderer = (context) => {
-  const modes = ['silhouette', 'identity', 'semantic', 'physical', 'execution', 'history', 'evidence', 'fabric'];
+  const modes = ['silhouette', 'identity', 'representation', 'physical', 'execution', 'history', 'evidence', 'fabric'];
   const instances = new WeakMap();
   const resolveComputation = (computation) => {
     if (computation) return computation;
