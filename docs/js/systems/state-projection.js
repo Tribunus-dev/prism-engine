@@ -4,7 +4,8 @@ export const createStateProjectionSystem = () => {
     const kernel = context?.kernel;
     if (!kernel) return;
     const project = () => {
-      document.body.dataset.computationalSubject = kernel.subject.id;
+      const canonicalSubject = context?.runtime?.getCanonicalSubject?.() || context?.runtime?.stateSubject || kernel?.subject?.computeImage || kernel?.subject;
+      document.body.dataset.computationalSubject = canonicalSubject?.id || kernel.subject.id;
       document.body.dataset.observerMode = kernel.state.observerMode;
       document.body.dataset.opticalState = kernel.state.opticalState;
       document.body.dataset.continuity = 'explicit';
