@@ -32,10 +32,16 @@ pub mod active_window;
 pub mod evaluator;
 pub mod representation_cache;
 pub mod search;
+pub mod semantic_region_discovery;
 pub mod semantic_region_spec;
 pub mod workload_search;
 pub use search::{
     EvaluationStrategy, SearchCoordinator, SearchError, SearchResult, SearchSelectionReceipt,
+};
+pub use semantic_region_discovery::{
+    discover_semantic_partition, ArchitectureDiscoverer, GraphExplicitDiscoverer, GraphRegionHint,
+    LogicalTensorDescriptor, SemanticDiscoveryError, SemanticModelConfig,
+    SemanticRegionDiscoverer,
 };
 pub use semantic_region_spec::{
     SemanticRegionDiscoveryReceipt, SemanticRegionSpec, SemanticRegionSpecEntry,
@@ -120,20 +126,19 @@ pub enum CompilationStage {
 
 impl std::fmt::Display for CompilationStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value = match self {
-            Self::SourceDetection => "source_detection",
-            Self::SourceIngestion => "source_ingestion",
-            Self::GraphConstruction => "graph_construction",
-            Self::EvolutionarySearch => "evolutionary_search",
-            Self::CandidateMeasurement => "candidate_measurement",
-            Self::Legalization => "legalization",
-            Self::TargetLowering => "target_lowering",
-            Self::KernelGeneration => "kernel_generation",
-            Self::CImageEmission => "cimage_emission",
-            Self::ReceiptBuild => "receipt_build",
-            Self::Certification | Self::Certify => "certification",
-        };
-        write!(f, "{value}")
+        match self {
+            Self::SourceDetection => write!(f, "source_detection"),
+            Self::SourceIngestion => write!(f, "source_ingestion"),
+            Self::GraphConstruction => write!(f, "graph_construction"),
+            Self::EvolutionarySearch => write!(f, "evolutionary_search"),
+            Self::CandidateMeasurement => write!(f, "candidate_measurement"),
+            Self::Legalization => write!(f, "legalization"),
+            Self::TargetLowering => write!(f, "target_lowering"),
+            Self::KernelGeneration => write!(f, "kernel_generation"),
+            Self::CImageEmission => write!(f, "cimage_emission"),
+            Self::ReceiptBuild => write!(f, "receipt_build"),
+            Self::Certification | Self::Certify => write!(f, "certification"),
+        }
     }
 }
 
@@ -146,18 +151,23 @@ pub struct StageResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum EventKind { StageStarted, StageCompleted, Warning, Error, Info }
+pub enum EventKind {
+    StageStarted,
+    StageCompleted,
+    Warning,
+    Error,
+    Info,
+}
 
 impl std::fmt::Display for EventKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let value = match self {
-            Self::StageStarted => "stage_started",
-            Self::StageCompleted => "stage_completed",
-            Self::Warning => "warning",
-            Self::Error => "error",
-            Self::Info => "info",
-        };
-        write!(f, "{value}")
+        match self {
+            Self::StageStarted => write!(f, "stage_started"),
+            Self::StageCompleted => write!(f, "stage_completed"),
+            Self::Warning => write!(f, "warning"),
+            Self::Error => write!(f, "error"),
+            Self::Info => write!(f, "info"),
+        }
     }
 }
 
@@ -208,21 +218,38 @@ impl Default for CompileConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum CalibrationPolicy { None, FromFile(String), Auto }
-impl Default for CalibrationPolicy { fn default() -> Self { Self::Auto } }
+pub enum CalibrationPolicy {
+    None,
+    FromFile(String),
+    Auto,
+}
+impl Default for CalibrationPolicy {
+    fn default() -> Self { Self::Auto }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ValidationPolicy { Structural, Production }
-impl Default for ValidationPolicy { fn default() -> Self { Self::Structural } }
+pub enum ValidationPolicy {
+    Structural,
+    Production,
+}
+impl Default for ValidationPolicy {
+    fn default() -> Self { Self::Structural }
+}
 
 #[derive(Debug, Clone)]
-pub struct CompilationPolicy { stages: Vec<CompilationStage> }
+pub struct CompilationPolicy {
+    stages: Vec<CompilationStage>,
+}
+
 impl Default for CompilationPolicy {
     fn default() -> Self {
         Self { stages: vec![CompilationStage::SourceDetection, CompilationStage::GraphConstruction, CompilationStage::EvolutionarySearch, CompilationStage::Legalization, CompilationStage::KernelGeneration, CompilationStage::CImageEmission, CompilationStage::Certification, CompilationStage::ReceiptBuild] }
     }
 }
-impl CompilationPolicy { pub fn enabled_stages(&self) -> &[CompilationStage] { &self.stages } }
+
+impl CompilationPolicy {
+    pub fn enabled_stages(&self) -> &[CompilationStage] { &self.stages }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchConfig {
@@ -236,9 +263,12 @@ pub struct SearchConfig {
     pub production_mode: bool,
     #[serde(default = "default_surrogate_measurement_fraction")]
     pub surrogate_measurement_fraction: f64,
-    #[serde(default)] pub min_quality: Option<f64>,
-    #[serde(default)] pub max_p99_latency_ms: Option<f64>,
-    #[serde(default)] pub max_peak_memory_bytes: Option<u64>,
+    #[serde(default)]
+    pub min_quality: Option<f64>,
+    #[serde(default)]
+    pub max_p99_latency_ms: Option<f64>,
+    #[serde(default)]
+    pub max_peak_memory_bytes: Option<u64>,
 }
 
 fn default_surrogate_measurement_fraction() -> f64 { 0.2 }
@@ -253,4 +283,21 @@ impl SearchConfig {
     pub fn effective_surrogate_measurement_fraction(&self) -> f64 {
         if self.surrogate_measurement_fraction.is_finite() { self.surrogate_measurement_fraction.clamp(0.01, 1.0) } else { default_surrogate_measurement_fraction() }
     }
+}
+
+#[derive(Debug, Error)]
+pub enum CompileError {
+    #[error("unsupported source: {0}")]
+    UnsupportedSource(String),
+    #[error("compilation failed: {0}")]
+    CompilationFailed(String),
+    #[error("validation failed: {0}")]
+    ValidationFailed(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompileRequest {
+    pub id: Uuid,
+    pub source: CanonicalSource,
+    pub config: CompileConfig,
 }
