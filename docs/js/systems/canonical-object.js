@@ -26,7 +26,8 @@ export const createCanonicalObjectSystem = () => {
     const phaseStages = { intent: 'source', representation: 'representation', plan: 'plan', computeimage: 'computeimage', execution: 'execution', receipt: 'receipt', fabric: 'fabric' };
     const update = event => {
       const stage = event.detail?.stage || phaseStages[event?.phase] || document.body.dataset.canonicalStage || 'source';
-      const currentComputation = getSubject() || computation;
+      const currentComputation = getSubject();
+      if (!currentComputation) return;
       mounted?.setMode?.(modes[stage] || 'silhouette');
       specimen.dataset.canonicalStage = stage;
       specimen.dataset.subjectId = currentComputation?.id || '';

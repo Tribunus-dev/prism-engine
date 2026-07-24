@@ -47,14 +47,14 @@ if (computeImageSource.includes('kernel?.subject?.computeImage') || computeImage
   checks.push('computeimage.js must not fall back to kernel-local subject construction');
 }
 
-if (!observationGraphSource.includes('context?.runtime?.getCanonicalSubject') && !observationGraphSource.includes('context?.runtime?.stateSubject')) {
+if (!observationGraphSource.includes('context?.runtime?.getCanonicalSubject?.()')) {
   checks.push('observation-graph.js is not consuming canonical runtime subject');
 }
 if (observationGraphSource.includes('kernel?.subject?.computeImage') || observationGraphSource.includes('kernel?.ensureComputeImageSubject')) {
   checks.push('observation-graph.js must not fall back to kernel-local subject construction');
 }
 
-if (!stateProjectionSource.includes('runtime?.getCanonicalSubject') && !stateProjectionSource.includes('runtime?.stateSubject')) {
+if (!stateProjectionSource.includes('runtime?.getCanonicalSubject?.()')) {
   checks.push('state-projection.js is not reading canonical subject through runtime state');
 }
 if (stateProjectionSource.includes('kernel?.subject?.computeImage') || stateProjectionSource.includes('kernel?.subject?.')) {
@@ -129,8 +129,12 @@ for (const file of filePaths) {
   const lower = source;
   const hasSubjectFallback = /context\?\.runtime\?\.subject|runtime\?\.state\?\.subject|kernel\?\.subject\?\.computeImage|kernel\?\.subject\?\./g.test(lower);
   const hasLegacyRoute = /context\?\.runtime\?\.currentRoute/g.test(lower);
+  const staleCanonicalFallback = /getSubject\(\)\s*\|\|\s*computation/g.test(lower);
   if (hasSubjectFallback && file !== 'js/observatory-kernel.js') {
     checks.push(`${file} contains legacy kernel subject fallback; use runtime.getCanonicalSubject/stateSubject instead`);
+  }
+  if (staleCanonicalFallback && file !== 'js/runtime/create-runtime.js') {
+    checks.push(`${file} contains stale canonical subject fallback; always use current getCanonicalSubject result`);
   }
   if (/(runtime\?\.stateSubject|stateSubject\s*\|\|)/g.test(lower) && file !== 'js/runtime/create-runtime.js') {
     checks.push(`${file} contains stateSubject fallback; consume runtime.getCanonicalSubject directly`);
