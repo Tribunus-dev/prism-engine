@@ -36,13 +36,17 @@ export const createGpuPrismSystem = () => {
       const root = (() => {
         const existing = document.querySelector('#prism-effects-root');
         if (existing) {
-          domRuntime?.claim?.('gpu-prism-root', '#prism-effects-root');
+          if (existing.parentElement !== shell) {
+            shell.append(existing);
+          }
+          domRuntime?.claimNode?.('gpu-prism-root', existing);
           return existing;
         }
         const created = document.createElement('div');
         created.id = 'prism-effects-root';
         created.setAttribute('aria-hidden', 'true');
         domRuntime?.claimNode?.('gpu-prism-root', created);
+        shell.append(created);
         return created;
       })();
 
@@ -237,10 +241,12 @@ export const createGpuPrismSystem = () => {
       }
       const shell = document.querySelector('#prism-effects-shell');
       const mountRoot = document.querySelector('#prism-effects-root');
-      if (mountRoot && !mountRoot.children.length) {
+      const shellOwner = shell?.getAttribute?.('data-prism-owned');
+      const rootOwner = mountRoot?.getAttribute?.('data-prism-owned');
+      if (mountRoot && mountRoot.children.length === 0 && (!rootOwner || rootOwner === 'gpu-prism-root')) {
         mountRoot.remove();
       }
-      if (shell && shell.children.length === 0) {
+      if (shell && shell.children.length === 0 && (!shellOwner || shellOwner === 'gpu-prism-shell')) {
         shell.remove();
       }
     };

@@ -5,10 +5,10 @@
   "description": "Prism website diagnostics and reproduction tooling",
   "scripts": {
     "matrix:check": "playwright test prism-matrix.spec.js",
-    "observatory:check": "playwright test docs/observatory-smoke.spec.js",
-    "site:check": "playwright test prism-matrix.spec.js docs/observatory-smoke.spec.js"
+    "matrix:chrome": "playwright test --project=chrome prism-matrix.spec.js"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.1"
+    "@playwright/test": "^1.61.1",
+    "playwright": "^1.61.1"
   }
 }

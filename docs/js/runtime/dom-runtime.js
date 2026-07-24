@@ -6,6 +6,7 @@ export const createDomRuntime = (options = {}) => {
   };
   let runtime = options?.runtime;
   const started = performance.now();
+  let renderFence = false;
   const owners = new WeakMap();
   const ownershipIndex = new Map();
   const ownershipClaims = {};
@@ -29,9 +30,19 @@ export const createDomRuntime = (options = {}) => {
       conflicts: 0,
       assertionFailures: 0,
     },
+    structural: {
+      strict: 0,
+      attempts: 0,
+    },
     projections: {
       attempts: 0,
       mismatches: 0,
+    },
+    lifecycle: {
+      claims: 0,
+      mutations: 0,
+      verification: 0,
+      fences: 0,
     },
   };
 
@@ -58,6 +69,36 @@ export const createDomRuntime = (options = {}) => {
     const event = { type, at: Math.round(performance.now() - started), ...detail };
     diagnostics.events.push(event);
     return event;
+  };
+
+  const recordChannel = (channel, type, detail = {}) => {
+    const event = {
+      channel,
+      type,
+      at: Math.round(performance.now() - started),
+      ...detail,
+    };
+    diagnostics.events.push(event);
+    return event;
+  };
+
+  const requireConnectedRoot = (selector, root) => {
+    const node = typeof root === 'string' ? document.querySelector(root) : root;
+    if (!node) {
+      throw createPrismError(
+        ERROR_CODES.DOM_ROOT_DETACHED,
+        `Prism render invariant failed: required root missing (${selector})`,
+        { selector },
+      );
+    }
+    if (!node.isConnected) {
+      throw createPrismError(
+        ERROR_CODES.DOM_ROOT_DETACHED,
+        `Prism render invariant failed: required root disconnected (${selector})`,
+        { selector },
+      );
+    }
+    return node;
   };
 
   const nodeIdentity = (node) => {
@@ -122,6 +163,13 @@ export const createDomRuntime = (options = {}) => {
   };
 
   const claimNode = (owner, node) => {
+    if (renderFence) {
+      throw createPrismError(
+        ERROR_CODES.DOM_RENDERING_LOCKED,
+        'DOM claim attempted while render fence is active',
+        { owner },
+      );
+    }
     if (!node || node.nodeType !== Node.ELEMENT_NODE) {
       throw createPrismError(
         ERROR_CODES.DOM_ROOT_DETACHED,
@@ -144,6 +192,7 @@ export const createDomRuntime = (options = {}) => {
     const ownerSet = ownershipClaims[owner] || [];
     ownerSet.push(node);
     ownershipClaims[owner] = ownerSet;
+    outOfBand.lifecycle.claims += 1;
     return node;
   };
 
@@ -158,6 +207,7 @@ export const createDomRuntime = (options = {}) => {
   };
 
   const verifyStructuralRoots = ({ strict = false } = {}) => {
+    outOfBand.structural.attempts += 1;
     if (!rootReferences || Object.values(rootReferences).some(node => !node)) {
       rootReferences = resolveOwnedRoots();
       Object.keys(rootRegistry).forEach(key => {
@@ -173,6 +223,7 @@ export const createDomRuntime = (options = {}) => {
       counts: snapshot(),
       ownersKnown: Object.keys(ownershipClaims).length,
     };
+    if (strict) outOfBand.structural.strict += 1;
     health.structural = result;
     if (strict && invalid.length) {
       throw createPrismError(
@@ -185,26 +236,30 @@ export const createDomRuntime = (options = {}) => {
   };
 
   const verifyRuntimeProjection = () => {
+    const projectedMarker = Boolean(
+      document.body.dataset.prismObservationProjected === 'true'
+      || document.body.dataset.observationProjected === 'true'
+      || document.body.getAttribute('data-prism-observation-projected') === 'true'
+    );
     const kernel = runtime?.kernel;
     const hasRoute = document.body.dataset.prismObservationProjected === 'true'
       || document.body.dataset.prismProjectionRoute != null
       || document.body.dataset.observationRoute != null;
     const counts = snapshot();
+    const countProjection = Math.max(counts.projection, projectedMarker ? 1 : 0);
     const route = document.body.dataset.prismProjectionRoute || document.body.dataset.observationRoute || null;
     const routeMatch = Boolean(kernel?.state?.currentObservation)
       ? true
       : Boolean(route);
     const repositoryReady = Boolean(kernel?.state?.repositoryState || runtime?.kernel?.state?.repositoryState);
     const runtimeProjectionMatch = runtime ? Boolean(kernel?.state?.subjectId) && Boolean(kernel?.state?.currentObservation || route) : true;
-    const projectedMarker = Boolean(
-      document.body.dataset.prismObservationProjected
-      || document.body.dataset.observationProjected
-      || document.body.getAttribute('data-prism-observation-projected') === 'true'
-    );
-    const valid = counts.projection >= 1 && hasRoute && runtimeProjectionMatch && projectedMarker;
+    const valid = countProjection >= 1 && hasRoute && runtimeProjectionMatch && projectedMarker;
     const result = {
       valid,
-      counts,
+      counts: {
+        ...counts,
+        projection: countProjection,
+      },
       projectedRoute: document.body.dataset.prismProjectionRoute || null,
       projectedObservation: document.body.dataset.observationRoute || null,
       observation: document.body.dataset.sceneObservation || document.body.dataset.observation,
@@ -281,6 +336,29 @@ export const createDomRuntime = (options = {}) => {
     };
   };
 
+  const beginRenderFence = ({ phase = 'system', owner = 'system' } = {}) => {
+    if (renderFence) {
+      throw createPrismError(
+        ERROR_CODES.DOM_RENDERING_LOCKED,
+        'Prism render fence already active',
+        { phase, owner },
+      );
+    }
+    renderFence = true;
+    outOfBand.lifecycle.fences += 1;
+    recordChannel('lifecycle', 'render-fence-begin', { phase, owner });
+    return {
+      commit: () => {
+        renderFence = false;
+        recordChannel('lifecycle', 'render-fence-commit', { phase, owner });
+      },
+      rollback: () => {
+        renderFence = false;
+        recordChannel('lifecycle', 'render-fence-rollback', { phase, owner });
+      },
+    };
+  };
+
   const verify = ({ strict = false } = {}) => {
     const structural = verifyStructuralRoots({ strict });
     const runtime = verifyRuntimeProjection();
@@ -305,6 +383,7 @@ export const createDomRuntime = (options = {}) => {
       externalProjectionInconsistent,
       ownership: ownership.valid,
     });
+    outOfBand.lifecycle.verification += 1;
     if (!ownership.valid && strict) {
       throw createPrismError(
         ERROR_CODES.OWNERSHIP_REGISTRY_GAP,
@@ -318,6 +397,13 @@ export const createDomRuntime = (options = {}) => {
   };
 
   const claim = (owner, selector, root = document) => {
+    if (renderFence) {
+      throw createPrismError(
+        ERROR_CODES.DOM_RENDERING_LOCKED,
+        'DOM claim attempted while render fence is active',
+        { owner, selector },
+      );
+    }
     const base = typeof root === 'string' ? normalizeRootSelector(root) : root;
     const nodes = [...(root?.querySelectorAll ? base?.querySelectorAll?.(selector) : [])];
     const fallback = [];
@@ -354,6 +440,7 @@ export const createDomRuntime = (options = {}) => {
       }
       rootClaims.get(owner).add(selector);
       record('dom-claim', { owner, selector, count: targets.length });
+      outOfBand.lifecycle.claims += 1;
     } else {
       record('dom-claim-empty', { owner, selector, count: 0 });
     }
@@ -361,6 +448,13 @@ export const createDomRuntime = (options = {}) => {
   };
 
   const assertOwnership = (owner, node) => {
+    if (renderFence) {
+      throw createPrismError(
+        ERROR_CODES.DOM_RENDERING_LOCKED,
+        'DOM ownership assertion attempted while render fence is active',
+        { owner },
+      );
+    }
     if (!node) throw new Error(`DOM ownership assertion failed: ${owner} received no node`);
     const previous = owners.get(node);
     if (previous && previous !== owner) {
@@ -411,27 +505,29 @@ const rootsForObservation = new Set(['body', '[data-observatory-shell]', '.obser
     if (!interesting.length) return;
 
     const detached = detachedRoots();
-    if (Object.keys(detached).length) {
-      const detail = {
-        at: Math.round(performance.now() - started),
-        detached,
-      };
-      mutations.push(detail);
-      diagnostics.mutations.push(detail);
-      diagnostic('dom-root-detached', detail);
-      record('dom-root-detached', { ...detached });
-      return;
-    }
+      if (Object.keys(detached).length) {
+        const detail = {
+          at: Math.round(performance.now() - started),
+          detached,
+        };
+        mutations.push(detail);
+        diagnostics.mutations.push(detail);
+        diagnostic('dom-root-detached', detail);
+        record('dom-root-detached', { ...detached });
+        outOfBand.lifecycle.mutations += 1;
+        return;
+      }
 
-    const summary = {
-      at: Math.round(performance.now() - started),
-      observedMutations: records.length,
-      ownedMutations: interesting.length,
-    };
-    mutations.push(summary);
-    diagnostics.mutations.push(summary);
-    diagnostic('dom-mutation-filtered', summary);
-  }) : null;
+      const summary = {
+        at: Math.round(performance.now() - started),
+        observedMutations: records.length,
+        ownedMutations: interesting.length,
+      };
+      mutations.push(summary);
+      diagnostics.mutations.push(summary);
+      diagnostic('dom-mutation-filtered', summary);
+      outOfBand.lifecycle.mutations += 1;
+    }) : null;
 
   const observeTargets = () => {
     const selectors = [...rootsForObservation];
@@ -481,6 +577,9 @@ const rootsForObservation = new Set(['body', '[data-observatory-shell]', '.obser
       events: [...diagnostics.events],
       snapshots: [...diagnostics.snapshots],
       errors: [...(diagnostics.errors || [])],
+      channels: {
+        outOfBand,
+      },
     },
     ownership: {
       owners: Object.entries(ownershipClaims).map(([owner, nodes]) => ({
@@ -536,6 +635,8 @@ const rootsForObservation = new Set(['body', '[data-observatory-shell]', '.obser
         },
       }),
       projections: () => ({ ...outOfBand.projections }),
+      lifecycle: () => ({ ...outOfBand.lifecycle }),
+      structural: () => ({ ...outOfBand.structural }),
       mark: diagnostic,
       setProjectionTelemetry: (name, value) => {
         outOfBand.projections[name] = value;
@@ -544,6 +645,8 @@ const rootsForObservation = new Set(['body', '[data-observatory-shell]', '.obser
     },
     dispose: () => observer?.disconnect?.(),
     started,
+    beginRenderFence,
+    requireConnectedRoot,
   });
 
   start();

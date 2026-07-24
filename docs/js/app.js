@@ -91,6 +91,23 @@ const publishDiagnosticsHandle = ({ runtime, domRuntime, kernel, diagnostics, co
   return Object.freeze(payload);
 };
 
+const attachDebugBus = (value) => {
+  if (typeof window === 'undefined' || !window) return;
+  try {
+    Object.defineProperty(window, '__prismRuntimeDebug', {
+      configurable: true,
+      writable: true,
+      value,
+    });
+  } catch {
+    try {
+      window.__prismRuntimeDebug = value;
+    } catch {
+      // host CSP or security policy blocked debug bus injection.
+    }
+  }
+};
+
 const ensureRuntimeRoot = () => {
   const shellRoot = document.querySelector('#prism-portal-root') || (() => {
     const created = document.createElement('div');
@@ -252,7 +269,19 @@ const startSystemTransaction = ({
 }) => {
   const phase = context?.phase || 'systems';
   domRuntime.mark('system-start-begin', { id: system.id, phase });
-  const started = startSystemInstance(system, domRuntime, runtime, context);
+  const fence = domRuntime?.beginRenderFence?.({ owner: system.id, phase });
+  let started;
+  try {
+    started = startSystemInstance(system, domRuntime, runtime, context);
+  } catch (error) {
+    try {
+      fence?.rollback?.();
+    } catch {}
+    throw error;
+  }
+  if (fence) {
+    fence.commit();
+  }
   if (started) {
     started._systemContext = context;
   }
@@ -386,26 +415,13 @@ const start = async () => {
   setRuntimeContext(runtime);
 
   const diagnostics = createDiagnosticsHandle(runtime, domRuntime, kernel);
-  const exposePrismHandle = (value) => {
-    try {
-      if (typeof window === 'undefined' || !window) return;
-      Object.defineProperty(window, 'prism', {
-        configurable: true,
-        writable: false,
-        value,
-      });
-    } catch {
-      // CSP or host policy may block Object.defineProperty on window.
-    }
-  };
-
   const minimalBootHandle = Object.freeze({
     startup: () => diagnostics.startup(),
     phase: () => diagnostics.phase(),
     activePhase: () => diagnostics.activePhase,
   });
   if (config.debug) {
-    exposePrismHandle({
+    attachDebugBus({
       runtime: minimalBootHandle,
       debug: diagnostics,
       activePhase: diagnostics.activePhase,
@@ -546,6 +562,31 @@ const start = async () => {
         if (!config.runtime) return;
         const external = domRuntime.detectExternalProjectionEnvironment?.();
         const report = domRuntime.verify({ strict: true });
+        const requiredHeaders = document.querySelectorAll('header').length;
+        const requiredMain = document.querySelectorAll('main').length;
+        const portalRoots = document.querySelectorAll('#prism-portal-root').length;
+        const effectShellRoots = document.querySelectorAll('#prism-effects-shell').length;
+        if (requiredHeaders === 0) {
+          throw createPrismError(ERROR_CODES.SYSTEM_START_FAILED, 'Startup verification failed: header root missing');
+        }
+        if (requiredMain === 0) {
+          throw createPrismError(ERROR_CODES.SYSTEM_START_FAILED, 'Startup verification failed: main root missing');
+        }
+        if (portalRoots === 0 && config.shell) {
+          runtime.degraded = true;
+          domRuntime?.mark?.('runtime-portal-missing', { portalRoots });
+        }
+        if (effectShellRoots === 0 && config.shell && config.gpu) {
+          runtime.degraded = true;
+          domRuntime?.mark?.('runtime-gpu-shell-missing', { effectShellRoots });
+        }
+        if (requiredHeaders > 1 || requiredMain > 1) {
+          runtime.degraded = true;
+          domRuntime?.mark?.('runtime-duplicate-core-structure', {
+            headers: requiredHeaders,
+            main: requiredMain,
+          });
+        }
         if (config.diagnostics) {
           domRuntime.diagnostics.setProjectionTelemetry?.('attempt', report);
         }
@@ -628,7 +669,7 @@ const start = async () => {
         }
 
         if (config.debug) {
-          exposePrismHandle({
+          attachDebugBus({
             runtime,
             dom: domRuntime,
             debug: diagnostics,
