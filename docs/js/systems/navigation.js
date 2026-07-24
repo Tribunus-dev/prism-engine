@@ -14,7 +14,7 @@ export const chapterMap = [
 const normalizeChapterRoute = (context = {}) => {
   const route = context?.runtime?.getProjection?.()?.route
     || context?.runtime?.currentRoute
-    || context?.route;
+    || 'index.html';
   if (!route) return 'index.html';
   return String(route).split('#')[0];
 };

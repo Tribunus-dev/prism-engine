@@ -10,6 +10,10 @@ const canonicalObjectSource = await read('../js/systems/canonical-object.js');
 const computeImageSource = await read('../js/renderers/computeimage.js');
 const observationGraphSource = await read('../js/core/observation-graph.js');
 const stateProjectionSource = await read('../js/systems/state-projection.js');
+const navigationSystemSource = await read('../js/systems/navigation.js');
+const siteShellSource = await read('../js/site-shell.js');
+const meaningRuntimeSource = await read('../prism-meaning-runtime.md');
+const interactionRuntimeSource = await read('../prism-interaction-runtime.md');
 
 if (!runtimeSource.includes('getCanonicalSubject:')) {
   checks.push('create-runtime.js is missing getCanonicalSubject');
@@ -58,6 +62,35 @@ if (canonicalObjectSource.includes('kernel?.ensureComputeImageSubject') || canon
 
 if (!computeImageSource.includes("'representation'") && !computeImageSource.includes('"representation"')) {
   checks.push('computeimage.js does not expose representation mode in renderer modes list');
+}
+
+if (navigationSystemSource.includes('|| context?.route')) {
+  checks.push('navigation.js still has context.route fallback and should use canonical runtime projection only');
+}
+if (observationGraphSource.includes('|| context?.route')) {
+  checks.push('observation-graph.js still has route fallback and should rely on runtime projection only');
+}
+if (siteShellSource.includes('currentChapter()')) {
+  checks.push('site-shell.js should pass canonical route context into currentChapter calls');
+}
+if (/^##\s+Belief state|^##\s+Conservation laws|^##\s+Continuity|^##\s+Living objects|^##\s+Self-description/m.test(meaningRuntimeSource)) {
+  checks.push('prism-meaning-runtime.md appears to re-define semantic sections that should live in prism-semantics.md');
+}
+if (/^##\s+Kernel observations|^##\s+Observation entity|^##\s+Observer modes|^##\s+Interaction events|^##\s+Visual state machine/m.test(interactionRuntimeSource)) {
+  checks.push('prism-interaction-runtime.md appears to re-define canonical interaction sections that should live in prism-runtime.md');
+}
+
+if (!/##\s+Canonical source/i.test(meaningRuntimeSource)) {
+  checks.push('prism-meaning-runtime.md should include a canonical source section');
+}
+if (!/##\s+Compatibility guidance/i.test(meaningRuntimeSource)) {
+  checks.push('prism-meaning-runtime.md should include compatibility guidance');
+}
+if (!/##\s+Canonical source/i.test(interactionRuntimeSource)) {
+  checks.push('prism-interaction-runtime.md should include a canonical source section');
+}
+if (!/##\s+Compatibility guidance/i.test(interactionRuntimeSource)) {
+  checks.push('prism-interaction-runtime.md should include compatibility guidance');
 }
 
 if (checks.length) {

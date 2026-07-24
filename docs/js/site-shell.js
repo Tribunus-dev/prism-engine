@@ -1,6 +1,6 @@
 import { chapterMap, currentChapter } from './systems/navigation.js';
 
-const initMythology = (domRuntime) => {
+const initMythology = (domRuntime, context = {}) => {
   const owner = 'site-shell';
   const acts = [
     "I · NATURE",
@@ -12,7 +12,7 @@ const initMythology = (domRuntime) => {
     "VII · FUTURE",
     "I · NATURE",
   ];
-  const current = currentChapter();
+  const current = currentChapter(context);
   document.body.dataset.prismAct = String(
     Math.min(
       5,
@@ -65,9 +65,9 @@ const initMythology = (domRuntime) => {
   );
   signatureGroups.forEach((group) => observer.observe(group));
 };
-const initSignatureMoment = (domRuntime) => {
+const initSignatureMoment = (domRuntime, context = {}) => {
   const owner = 'site-shell';
-  const current = currentChapter();
+  const current = currentChapter(context);
   const moments = [
     null,
     {
@@ -168,7 +168,7 @@ const initPrismAtmosphere = (kernel) => {
   };
   kernel?.on("scroll", markScrolling);
 };
-const initActCorrection = () => {
+const initActCorrection = (context = {}) => {
   const acts = [
     "I · NATURE",
     "I · NATURE",
@@ -180,7 +180,7 @@ const initActCorrection = () => {
     "V · FUTURE",
   ];
   const accentStage = [1, 1, 2, 2, 4, 3, 5, 5];
-  const current = currentChapter();
+  const current = currentChapter(context);
   document.body.dataset.prismAct = String(accentStage[current]);
   const marker = document.querySelector(".mythology-marker");
   if (marker) {
@@ -188,9 +188,9 @@ const initActCorrection = () => {
     marker.setAttribute("aria-label", `Prism act ${acts[current]}`);
   }
 };
-const initComputeImageSignature = (kernel, domRuntime) => {
+const initComputeImageSignature = (kernel, domRuntime, context = {}) => {
   const owner = 'site-shell';
-  if (currentChapter() !== 5 || document.querySelector(".signature-moment"))
+  if (currentChapter(context) !== 5 || document.querySelector(".signature-moment"))
     return;
   const target = document.querySelector(".boundary,.validation,.adds");
   if (!target) return;
@@ -202,9 +202,9 @@ const initComputeImageSignature = (kernel, domRuntime) => {
   target.parentNode.insertBefore(panel, target);
   domRuntime?.claimNode?.(owner, panel);
 };
-const initStartHereSignature = (domRuntime) => {
+const initStartHereSignature = (domRuntime, context = {}) => {
   const owner = 'site-shell';
-  if (currentChapter() !== 1) return;
+  if (currentChapter(context) !== 1) return;
   const target = document.querySelector(".guide-flow");
   if (!target) return;
   const panel = document.createElement("aside");
@@ -596,11 +596,11 @@ export const createSiteShellSystem = () => {
     const kernel = context?.kernel;
     initDiscoveryRooms(domRuntime, context);
     initStoryHooks(context);
-    initMythology(domRuntime);
-    initActCorrection();
-    initSignatureMoment(domRuntime);
-    initComputeImageSignature(kernel, domRuntime);
-    initStartHereSignature(domRuntime);
+    initMythology(domRuntime, context);
+    initActCorrection(context);
+    initSignatureMoment(domRuntime, context);
+    initComputeImageSignature(kernel, domRuntime, context);
+    initStartHereSignature(domRuntime, context);
     initPrismStages();
     initRepresentationLayers();
     initLivingArchitecture();
