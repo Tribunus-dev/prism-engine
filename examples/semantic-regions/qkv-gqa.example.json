@@ -1,0 +1,31 @@
+{
+  "schema": "prism.semantic-regions.v1",
+  "tensor": "model.layers.0.self_attn.qkv_proj.weight",
+  "shape": [6144, 2048],
+  "regions": [
+    {
+      "role": "query_projection",
+      "axis": 0,
+      "start": 0,
+      "end": 4096,
+      "allowed_formats": ["fp16", "int8"],
+      "source": "verified GQA architecture contract"
+    },
+    {
+      "role": "key_projection",
+      "axis": 0,
+      "start": 4096,
+      "end": 5120,
+      "allowed_formats": ["fp16", "int8"],
+      "source": "verified GQA architecture contract"
+    },
+    {
+      "role": "value_projection",
+      "axis": 0,
+      "start": 5120,
+      "end": 6144,
+      "allowed_formats": ["fp16", "int8"],
+      "source": "verified GQA architecture contract"
+    }
+  ]
+}

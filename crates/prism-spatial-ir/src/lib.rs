@@ -14,20 +14,6 @@
 //!   abstracted from any specific target — [`hardware`].
 //! - **Level 3 (Physical Target):** Backend-specific lowering via the
 //!   [`target::SpatialTarget`] trait.
-//!
-//! # Architecture (ADR-031)
-//!
-//! | Module      | Purpose |
-//! |-------------|---------|
-//! | `graph`     | SpatialGraph, node/edge types, shape contracts |
-//! | `hardware`  | VirtualComputeUnit, VirtualMemoryRegion, ExecutionBoundary |
-//! | `target`    | SpatialTarget trait, TargetCapabilities |
-//! | `legalize`  | Three-tier legality checks, LegalizedGraph |
-//! | `mutation`  | MutationOp enum, MutationApplication |
-//! | `cost`      | CostEstimate, CostModel trait |
-//! | `plan`      | SpatialCompilationPlan |
-//! | `bonsai_gen`| Bonsai 27B → SpatialIR graph and plan generators |
-//! | `calibration_report` | M1 calibration report structure |
 
 pub mod bonsai_gen;
 pub mod calibration_report;
@@ -43,6 +29,8 @@ pub mod memory;
 pub mod mutation;
 pub mod plan;
 pub mod scheduler;
+pub mod semantic_region;
+pub mod semantic_region_schedule;
 pub mod target;
 pub mod three_thread;
 pub mod tiling;
@@ -76,6 +64,12 @@ pub use legalize::{
 pub use scheduler::{
     AotScheduler, BindingResolver, BufferStorage, HeterogeneousExecutor, ResolvedBuffer,
     ResolvedStep, RouteDispatch, RoutedExecutor,
+};
+pub use semantic_region::{
+    lower_contiguous_axis0, PhysicalRegionError, PhysicalRegionPlan, PhysicalRegionRealization,
+};
+pub use semantic_region_schedule::{
+    project_region_schedule, CoalescedRegionView, RegionScheduleError, RegionScheduleProjection,
 };
 pub use target::{
     probe_apple_silicon, AppleSiliconTarget, KernelDescriptor, KernelManifest, SpatialTarget,
