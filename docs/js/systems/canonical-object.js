@@ -9,7 +9,7 @@ export const createCanonicalObjectSystem = () => {
     const specimen = document.querySelector('[data-computeimage-life] .computeimage-specimen, [data-computeimage-renderer]');
     if (!specimen) return { stop() {} };
     const repositoryState = repository?.state;
-    const computation = kernel?.ensureComputeImageSubject?.({
+    const computation = context?.runtime?.getCanonicalSubject?.() || kernel?.ensureComputeImageSubject?.({
       claims,
       sourceRefs: claims.flatMap(claim => claim.sourceRefs || []),
       evidenceBoundary: repositoryState?.evidenceBoundary || 'repository evidence pending',
@@ -19,7 +19,7 @@ export const createCanonicalObjectSystem = () => {
       },
     }) || kernel?.subject?.computeImage;
     if (!computation) return { stop() {} };
-    if (kernel?.subject) kernel.subject.computeImage = computation;
+    context.runtime.stateSubject = computation;
     specimen.dataset.subjectId = computation.id;
     specimen.dataset.canonicalObject = 'true';
     specimen.tabIndex = 0;
