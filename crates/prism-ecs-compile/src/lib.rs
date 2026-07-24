@@ -34,6 +34,7 @@ pub mod representation_cache;
 pub mod search;
 pub mod semantic_region_discovery;
 pub mod semantic_region_probe;
+pub mod semantic_region_search;
 pub mod semantic_region_spec;
 pub mod workload_search;
 pub use search::{
@@ -47,6 +48,11 @@ pub use semantic_region_discovery::{
 pub use semantic_region_probe::{
     selector_digest, MappedTensorRegionProbeContext, RegionProbeError, RegionSensitivityReceipt,
     RegionView,
+};
+pub use semantic_region_search::{
+    build_palettes, enforce_regularization, objective_score, select_bounded_plan,
+    RegionCandidatePalette, RegionRegularizationPolicy, RegionTemplateId, RegionalCandidate,
+    RegionalSearchError, RegionalSearchObjectives,
 };
 pub use semantic_region_spec::{
     SemanticRegionDiscoveryReceipt, SemanticRegionSpec, SemanticRegionSpecEntry,
