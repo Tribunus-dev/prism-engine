@@ -1,6 +1,6 @@
+import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const root = process.cwd();
 const docsRoot = resolve(root, 'docs');
@@ -9,6 +9,7 @@ const report = [];
 const ontology = await import(pathToFileURL(resolve(docsRoot, 'js/core/ontology.js')).href);
 const transformations = await import(pathToFileURL(resolve(docsRoot, 'js/core/transformations.js')).href);
 const projections = await import(pathToFileURL(resolve(docsRoot, 'js/core/observation-projections.js')).href);
+const observationGraph = await import(pathToFileURL(resolve(docsRoot, 'js/core/observation-graph.js')).href);
 
 const claimClassValues = new Set(Object.values(ontology.CLAIM_CLASSES || {}));
 const repositoryState = JSON.parse(await readFile(resolve(docsRoot, 'repository-state.json'), 'utf8'));
@@ -75,29 +76,8 @@ for (const route of Object.values(projections.PROJECTIONS || {})) {
   }
 }
 
-const graphSource = await readFile(resolve(docsRoot, 'js/core/observation-graph.js'), 'utf8');
-
-const extractObject = (name) => {
-  const match = graphSource.match(new RegExp(`const\\s+${name}\\s*=\\s*\\{([\\s\\S]*?)\\n\\s*};`));
-  return match ? `{${match[1]} }` : '';
-};
-
-const scenesBlock = extractObject('scenes');
-const pageScenesBlock = extractObject('pageScenes');
-
-if (!scenesBlock || !pageScenesBlock) {
-  report.push('unable to parse scene/pageScenes blocks from observation-graph.js');
-}
-
-const scenes = new Set();
-for (const match of scenesBlock.matchAll(/^\s{6}((?:'[^']+'|\"[^\"]+\"|[a-zA-Z0-9_-]+))\s*:\s*\{\s*$/gm)) {
-  scenes.add(match[1].replace(/[\"']/g, ''));
-}
-
-const pageScenes = new Map();
-for (const match of pageScenesBlock.matchAll(/^\s{6}['"]([^'"]+)['"]\s*:\s*['"]([^'"]+)['"]/gm)) {
-  pageScenes.set(match[1], match[2]);
-}
+const scenes = new Set(Object.keys(observationGraph.SCENES || {}));
+const pageScenes = new Map(Object.entries(observationGraph.PAGE_SCENES || {}));
 
 for (const [page, scene] of pageScenes) {
   if (!scenes.has(scene)) {
@@ -107,9 +87,15 @@ for (const [page, scene] of pageScenes) {
 if (!scenes.has('compute-image') || !scenes.has('scheduler') || !scenes.has('fabric')) {
   report.push('observation-graph scenes are missing canonical journey milestones');
 }
-
 if (!scenes.has('origin')) report.push('observation graph missing required origin scene marker');
 if (!pageScenes.size || !scenes.size) report.push('observation graph metadata is incomplete');
+
+for (const route of Object.values(projections.PROJECTIONS || {})) {
+  if (!route?.route) continue;
+  if (!pageScenes.has(route.route)) {
+    report.push(`pageScenes missing route ${route.route}`);
+  }
+}
 
 if (report.length) {
   console.log('Observatory runtime validation FAILED');
