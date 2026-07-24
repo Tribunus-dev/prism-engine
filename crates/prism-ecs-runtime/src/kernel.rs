@@ -1358,7 +1358,7 @@ fn execute_register_model(
 ) -> Result<u64, RuntimeError> {
     use prism_ecs_constitutional::artifact::{ArtifactDigest, ArtifactMetadata, ArtifactPath};
     use prism_ecs_constitutional::lifecycle::ArtifactLifecycle;
-    use prism_ecs_constitutional::residency::{ModelArtifactRef, ModelId, ModelLifecycle};
+    use prism_ecs_constitutional::residency::{ModelArtifactRef, ModelFormat, ModelId, ModelLifecycle, ModelName};
     use prism_ecs_constitutional::types::DomainId;
 
     if name.trim().is_empty() || source_path.trim().is_empty() || format.trim().is_empty() {
@@ -1405,6 +1405,8 @@ fn execute_register_model(
     );
     world
         .add_component(model.entity, ModelId(DomainId(stable_id)))
+        .and_then(|_| world.add_component(model.entity, ModelName(name.to_owned())))
+        .and_then(|_| world.add_component(model.entity, ModelFormat(format.to_owned())))
         .and_then(|_| {
             world.add_component(
                 model.entity,
@@ -1475,6 +1477,14 @@ mod tests {
         assert_eq!(
             world.get_component::<prism_ecs_constitutional::residency::ModelLifecycle>(model),
             Some(&prism_ecs_constitutional::residency::ModelLifecycle::Created)
+        );
+        assert_eq!(
+            world.get_component::<prism_ecs_constitutional::residency::ModelName>(model),
+            Some(&prism_ecs_constitutional::residency::ModelName("demo".into()))
+        );
+        assert_eq!(
+            world.get_component::<prism_ecs_constitutional::residency::ModelFormat>(model),
+            Some(&prism_ecs_constitutional::residency::ModelFormat("safetensors".into()))
         );
         let artifact = Entity::new(model_ref.artifact_id, 0);
         assert_eq!(world.entity_kind(artifact), Some(EntityKind::Artifact));

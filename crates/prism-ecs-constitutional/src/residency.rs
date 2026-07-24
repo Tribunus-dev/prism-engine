@@ -14,7 +14,7 @@ use prism_ecs_core::{Entity, EntityKind, World};
 use serde::{Deserialize, Serialize};
 
 // ── Component Schema IDs ──────────────────────────────────────────────────
-// Artifact occupies IDs 1-4, model/residency use 5-12.
+// Artifact occupies IDs 1-4, model/residency use 5-14.
 
 pub const SCHEMA_MODEL_ID: u64 = 5;
 pub const SCHEMA_MODEL_ARTIFACT_REF: u64 = 6;
@@ -24,6 +24,8 @@ pub const SCHEMA_RESIDENCY_MEMORY_CLAIM: u64 = 9;
 pub const SCHEMA_RESIDENCY_FORMAT: u64 = 10;
 pub const SCHEMA_RESIDENCY_LIFECYCLE: u64 = 11;
 pub const SCHEMA_ALLOCATION_TOKEN: u64 = 12;
+pub const SCHEMA_MODEL_NAME: u64 = 13;
+pub const SCHEMA_MODEL_FORMAT: u64 = 14;
 
 // ── Model Components ─────────────────────────────────────────────────────
 
@@ -37,6 +39,14 @@ pub struct ModelArtifactRef {
     pub artifact_id: u64,
     pub digest: ArtifactDigest,
 }
+
+/// Human-readable model identity retained on the canonical ECS model entity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelName(pub String);
+
+/// Source/serialization format retained alongside the model identity.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelFormat(pub String);
 
 /// Model lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -128,6 +138,12 @@ pub fn validate_residency_schemas(schema_registry: &SchemaRegistry) -> Result<()
     schema_registry
         .verify_type::<ModelLifecycle>(ComponentSchemaId(SCHEMA_MODEL_LIFECYCLE))
         .map_err(|e| format!("ModelLifecycle schema: {e}"))?;
+    schema_registry
+        .verify_type::<ModelName>(ComponentSchemaId(SCHEMA_MODEL_NAME))
+        .map_err(|e| format!("ModelName schema: {e}"))?;
+    schema_registry
+        .verify_type::<ModelFormat>(ComponentSchemaId(SCHEMA_MODEL_FORMAT))
+        .map_err(|e| format!("ModelFormat schema: {e}"))?;
     schema_registry
         .verify_type::<ResidencyDeviceRef>(ComponentSchemaId(SCHEMA_RESIDENCY_DEVICE_REF))
         .map_err(|e| format!("ResidencyDeviceRef schema: {e}"))?;
@@ -612,6 +628,8 @@ pub fn replay_model_deployed(
 
 impl prism_ecs_core::Component for ModelId {}
 impl prism_ecs_core::Component for ModelArtifactRef {}
+impl prism_ecs_core::Component for ModelName {}
+impl prism_ecs_core::Component for ModelFormat {}
 impl prism_ecs_core::Component for ModelLifecycle {}
 impl prism_ecs_core::Component for ResidencyDeviceRef {}
 impl prism_ecs_core::Component for ResidencyMemoryClaim {}
@@ -653,6 +671,16 @@ impl DurableComponent for ModelArtifactRef {
         id: SCHEMA_MODEL_ARTIFACT_REF as u32,
         version: 1,
     };
+}
+
+impl ClassifiedComponent for ModelName { type Class = DurableClass; }
+impl DurableComponent for ModelName {
+    const SCHEMA_KEY: SchemaKey = SchemaKey { namespace: "prism.residency", id: SCHEMA_MODEL_NAME as u32, version: 1 };
+}
+
+impl ClassifiedComponent for ModelFormat { type Class = DurableClass; }
+impl DurableComponent for ModelFormat {
+    const SCHEMA_KEY: SchemaKey = SchemaKey { namespace: "prism.residency", id: SCHEMA_MODEL_FORMAT as u32, version: 1 };
 }
 
 impl ClassifiedComponent for ModelLifecycle {
