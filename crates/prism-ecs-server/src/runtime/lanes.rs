@@ -13,6 +13,7 @@ use crate::runtime::server_types::{
     AccelerateExecutionReceipt, ArtifactDigest, CoreMlAuxiliaryReceipt, DispatchId, LaneDispatch,
     LaneExecutionReceipt, MetalExecutionReceipt,
 };
+use prism_ecs_runtime::{BackendExecutionRegistry, KernelDispatchSpec};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -41,6 +42,11 @@ fn fake_timestamp() -> String {
 pub struct LaneRouter {
     /// Cached lane execution receipts, keyed by dispatch id.
     receipts: Mutex<HashMap<DispatchId, LaneExecutionReceipt>>,
+    /// The sole backend resource owner for kernel-backed lane execution.
+    /// Legacy receipt methods remain available for compatibility, while new
+    /// callers must use `dispatch_metal_kernel` to obtain an authoritative
+    /// result from the persistent ECS registry.
+    kernel_registry: BackendExecutionRegistry,
 }
 
 pub struct LaneCapabilities { pub coreml_ane: bool, pub metal: bool, pub accelerate: bool }
@@ -51,7 +57,24 @@ impl LaneRouter {
     pub fn new() -> Self {
         Self {
             receipts: Mutex::new(HashMap::new()),
+            kernel_registry: BackendExecutionRegistry::new(),
         }
+    }
+
+    /// Dispatch a registered Metal kernel through the ECS-owned backend
+    /// registry. This is the execution boundary used by modality and model
+    /// work items; it cannot claim completion until the backend returns.
+    pub fn dispatch_metal_kernel(
+        &self,
+        spec: &KernelDispatchSpec,
+    ) -> Result<prism_ecs_kernel::KernelOutput, String> {
+        self.kernel_registry
+            .dispatch("metal", spec)
+            .map_err(|error| format!("Metal ECS dispatch failed: {error}"))
+    }
+
+    pub fn kernel_registry(&self) -> BackendExecutionRegistry {
+        self.kernel_registry.clone()
     }
 
     /// Dispatch a Metal prefill (prompt evaluation) operation.

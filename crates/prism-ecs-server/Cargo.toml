@@ -20,6 +20,8 @@ prism-multimodal = { path = "../prism-multimodal" }
 prism-ecs-duckdb = { path = "../prism-ecs-duckdb" }
 prism-ecs-quantization = { path = "../prism-ecs-quantization" }
 prism-ecs-compile = { path = "../prism-ecs-compile" }
+prism-ecs-runtime = { path = "../prism-ecs-runtime" }
+prism-ecs-kernel = { path = "../prism-ecs-kernel" }
 prism-spatial-ir = { path = "../prism-spatial-ir" }
 half = { workspace = true }
 rand = { workspace = true }
