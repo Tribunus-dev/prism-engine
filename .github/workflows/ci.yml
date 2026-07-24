@@ -86,6 +86,8 @@ jobs:
         run: node docs/scripts/validate-observatory-runtime.mjs
       - name: Validate runtime architecture doc freeze state
         run: node docs/scripts/validate-doc-freeze.mjs
+      - name: Validate explicit runtime construction
+        run: node docs/scripts/validate-runtime-construction.mjs
       - name: Clippy (lib only, skip broken bins/tests)
         run: cargo clippy -p tribunus-compute-core --features backend-cpu --lib -- -D warnings
       - name: Report sccache statistics

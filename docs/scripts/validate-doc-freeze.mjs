@@ -14,7 +14,7 @@ const docs = [
     path: 'docs/prism-meaning-runtime.md',
     mustContain: [
       'Status: frozen for this sprint',
-      'authoritative operational definitions are now in:',
+      'archived as a compatibility naming layer only',
       '`prism-runtime.md`',
       '`prism-semantics.md`',
       'Do not introduce new Meaning Runtime abstractions',
@@ -24,7 +24,7 @@ const docs = [
     path: 'docs/prism-interaction-runtime.md',
     mustContain: [
       'Status: frozen for this sprint',
-      'authoritative interaction orchestration is now in:',
+      'archived as a compatibility naming layer',
       '`prism-runtime.md`',
       '`prism-experience-architecture.md`',
       'Do not add new interaction runtime layers',

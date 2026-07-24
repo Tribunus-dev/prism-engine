@@ -2,15 +2,14 @@
 
 Status: frozen for this sprint (2026-07-24)
 
-This document is frozen. The authoritative operational definitions are now in:
-- [`prism-runtime.md`](prism-runtime.md)
-- [`prism-semantics.md`](prism-semantics.md)
+This document is archived as a compatibility naming layer only. The canonical semantics and runtime constraints are now authored in [`prism-runtime.md`](prism-runtime.md) and [`prism-semantics.md`](prism-semantics.md).
 
-The Meaning Runtime is the prior naming for the canonical semantic layers already embodied by the above sources.
+Do not introduce new Meaning Runtime abstractions while this freeze is in place; evolve semantic meaning only in the canonical sources.
 
-Do not introduce new Meaning Runtime abstractions while this freeze is in place; evolve meaning semantics only in the canonical sources.
-
-The Meaning Runtime determines what an object means as it moves through Prism. It sits between the canonical ontology and any renderer.
+Compatibility notes
+- Meaningful intent, knowledge, belief, evidence, and transition behavior is defined in `prism-semantics.md`.
+- Kernel, observation, and rendering behavior remains canonicalized in `prism-runtime.md`.
+- This document should not be used as a separate implementation source for architecture changes.
 
 ## Belief state
 

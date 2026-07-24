@@ -8,4 +8,4 @@ The protocol applies to Intent, Representation, Plan, ComputeImage, Receipt, Exe
 
 An inspection is read-only. It cannot mutate identity, strengthen a claim, or create a replacement subject. Mutations must arrive through a recorded observation event with provenance.
 
-The runtime kernel owns the inspection surface, and inspection is wired through the shared runtime context in `runtimeContext().kernel` during execution. “Observation Protocol” remains the compatibility name for existing documentation.
+The runtime kernel owns the inspection surface and exposes it through the runtime context created in `app.js` (`context.kernel`) during execution. “Observation Protocol” remains the compatibility name for existing documentation.
