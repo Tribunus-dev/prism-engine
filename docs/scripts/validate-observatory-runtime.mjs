@@ -101,6 +101,32 @@ for (const [page, scene] of pageScenes) {
     report.push(`pageScene ${page} references unknown scene ${scene}`);
   }
 }
+const canonicalJourneySource = await readFile(resolve(docsRoot, 'js/renderers/canonical-journey.js'), 'utf8');
+const canonicalObjectSource = await readFile(resolve(docsRoot, 'js/systems/canonical-object.js'), 'utf8');
+const canonicalStages = new Set();
+for (const match of canonicalObjectSource.matchAll(/([a-zA-Z0-9-]+):\s*'([^']+)'/g)) {
+  const value = match[2];
+  if (value) canonicalStages.add(value);
+}
+const stageMappings = canonicalJourneySource.match(/const\s+mapping\s*=\s*\{([\s\S]*?)\};/m);
+if (stageMappings) {
+  const mappingBody = stageMappings[1];
+  for (const match of mappingBody.matchAll(/([a-zA-Z0-9_-]+)\s*:\s*\[/g)) {
+    canonicalStages.add(match[1]);
+  }
+}
+const requiredStages = ['source', 'execution', 'receipt', 'fabric'];
+for (const required of requiredStages) {
+  if (!canonicalStages.has(required)) {
+    report.push(`canonical journey runtime configuration missing required stage: ${required}`);
+  }
+}
+for (const stage of canonicalStages) {
+  if (!/^[a-z-]+$/.test(stage)) {
+    report.push(`unexpected canonical journey stage token: ${stage}`);
+  }
+}
+
 if (!scenes.has('compute-image') || !scenes.has('scheduler') || !scenes.has('fabric')) {
   report.push('observation-graph scenes are missing canonical journey milestones');
 }
