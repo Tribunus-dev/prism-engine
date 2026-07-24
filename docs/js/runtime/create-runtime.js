@@ -8,7 +8,19 @@ import { createPrismError, ERROR_CODES } from './errors.js';
 /* Composition boundary for the Observatory. Side-effect systems remain
  * application orchestration is centralized here and receives its collaborators
  * explicitly so systems follow one explicit canonical path. */
-export const createRuntime = ({ kernel, domRuntime, registries, adapters, continuity, repository = createRepositoryService(), projection = createRouteProjection({ routeForLocation: projectionForLocation, primaryRoute: primaryProjection }) }) => {
+export const createRuntime = ({
+  kernel,
+  domRuntime,
+  registries,
+  adapters,
+  continuity,
+  repository = createRepositoryService(),
+  projection,
+}) => {
+  const runtimeProjection = projection || createRouteProjection({
+    routeForLocation: projectionForLocation,
+    primaryRoute: primaryProjection,
+  });
   const buildCanonicalSubject = snapshot => {
     const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
     const evidenceBoundary = (snapshot?.state?.evidenceBoundary
@@ -51,7 +63,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
     registries,
     repository,
     stateSubject: null,
-    projection,
+    projection: runtimeProjection,
     currentProjection: null,
     currentRoute: null,
     subjectFromRepository: snapshot => buildCanonicalSubject(snapshot || kernel?.state?.repositoryState || {}),
@@ -74,7 +86,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
         kernel.emit('continuity', kernel.state.continuity);
       }
       domRuntime?.mark('observation-graph-loaded');
-      const route = projection.project(window?.location?.pathname);
+      const route = runtimeProjection.project(window?.location?.pathname);
       runtime.currentProjection = route;
       runtime.currentRoute = route?.route || null;
       if (!route?.observation) {

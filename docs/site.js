@@ -63,5 +63,5 @@ if (new URLSearchParams(location.search).get('prismRuntime') !== 'off') {
   ensureHeadMeta();
   window.addEventListener('error', event => { console.error('[prism]', event.error || event.message || 'runtime error'); });
   window.addEventListener('unhandledrejection', event => { console.error('[prism]', event.reason || 'runtime rejection'); });
-  import('./js/app.js').catch(error => { console.error('[prism] module load failed', error); });
+  import('/js/app.js').catch(error => { console.error('[prism] module load failed', error); });
 }
