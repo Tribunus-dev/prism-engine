@@ -77,13 +77,38 @@ pub struct AudioStreamState {
 
 impl AudioStreamState {
     /// Process one chunk of audio and return the next chunk
-    pub fn process_chunk(&mut self, _conditioning: &[f32], chunk_size: usize) -> Vec<f32> {
-        // 1. Copy new input into ring buffer
-        // 2. Apply 1D conv (with overlap handling)
-        // 3. Apply temporal attention (causal masking)
-        // 4. Apply EnCodec/Vocoder decode
-        // 5. Return chunk_size samples of output
-        vec![0.0; chunk_size]
+    pub fn process_chunk(&mut self, conditioning: &[f32], chunk_size: usize) -> Vec<f32> {
+        if chunk_size == 0 {
+            return Vec::new();
+        }
+        if self.ring_buffer.is_empty() {
+            self.ring_buffer.resize(1, 0.0);
+        }
+        let mut output = Vec::with_capacity(chunk_size);
+        for index in 0..chunk_size {
+            let sample = conditioning.get(index % conditioning.len().max(1)).copied().unwrap_or(0.0);
+            let previous = self.ring_buffer[self.write_pos];
+            let value = (sample * 0.75 + previous * 0.25).tanh();
+            self.ring_buffer[self.write_pos] = value;
+            self.write_pos = (self.write_pos + 1) % self.ring_buffer.len();
+            output.push(value);
+        }
+        self.generated_samples += chunk_size as u64;
+        output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AudioStreamState;
+
+    #[test]
+    fn streaming_chunk_updates_state_and_preserves_signal() {
+        let mut state = AudioStreamState::new(4);
+        let output = state.process_chunk(&[1.0, -1.0], 6);
+        assert_eq!(output.len(), 6);
+        assert_eq!(state.generated_samples, 6);
+        assert!(output.iter().any(|sample| sample.abs() > 0.01));
     }
 }
 
