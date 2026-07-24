@@ -4,9 +4,9 @@ export const createComputeImageRenderer = (context) => {
   const instances = new WeakMap();
   const resolveComputation = (computation) => {
     if (computation) return computation;
-    if (context?.runtime?.getCanonicalSubject) return context.runtime.getCanonicalSubject();
-    if (context?.runtime?.stateSubject) return context.runtime.stateSubject;
-    return context?.kernel?.ensureComputeImageSubject?.() || context?.kernel?.subject?.computeImage || null;
+    return context?.runtime?.getCanonicalSubject?.()
+      || context?.runtime?.stateSubject
+      || null;
   };
   const mount = (element, computation) => {
     if (!element) return null;

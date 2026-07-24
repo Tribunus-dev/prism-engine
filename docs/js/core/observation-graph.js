@@ -151,11 +151,7 @@ export const createObservationGraphSystem = () => {
       || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];
-    const canonicalSubject = context?.runtime?.getCanonicalSubject?.()
-      || context?.runtime?.stateSubject
-      || kernel?.subject?.computeImage
-      || kernel?.subject
-      || kernel?.ensureComputeImageSubject?.();
+    const canonicalSubject = context?.runtime?.getCanonicalSubject?.() || context?.runtime?.stateSubject;
     const objectId = canonicalSubject?.id || '';
 
     if (!scene) return { stop() {} };

@@ -34,21 +34,30 @@ if (!/modes\s*=\s*\{[^}]*representation:\s*[\'\"]representation[\'\"]/.test(cano
 if (!computeImageSource.includes('context?.runtime?.getCanonicalSubject')) {
   checks.push('computeimage.js is not consuming runtime.getCanonicalSubject');
 }
+if (computeImageSource.includes('kernel?.subject?.computeImage') || computeImageSource.includes('kernel?.subject?.')) {
+  checks.push('computeimage.js must not fall back to kernel-local subject construction');
+}
 
 if (!observationGraphSource.includes('context?.runtime?.getCanonicalSubject') && !observationGraphSource.includes('context?.runtime?.stateSubject')) {
   checks.push('observation-graph.js is not consuming canonical runtime subject');
+}
+if (observationGraphSource.includes('kernel?.subject?.computeImage') || observationGraphSource.includes('kernel?.ensureComputeImageSubject')) {
+  checks.push('observation-graph.js must not fall back to kernel-local subject construction');
 }
 
 if (!stateProjectionSource.includes('runtime?.getCanonicalSubject') && !stateProjectionSource.includes('runtime?.stateSubject')) {
   checks.push('state-projection.js is not reading canonical subject through runtime state');
 }
+if (stateProjectionSource.includes('kernel?.subject?.computeImage') || stateProjectionSource.includes('kernel?.subject?.')) {
+  checks.push('state-projection.js must not fall back to kernel-local subject construction');
+}
+
+if (canonicalObjectSource.includes('kernel?.ensureComputeImageSubject') || canonicalObjectSource.includes('kernel?.subject?.computeImage')) {
+  checks.push('canonical-object.js must not fallback to kernel-local subject construction');
+}
 
 if (!computeImageSource.includes("'representation'") && !computeImageSource.includes('"representation"')) {
   checks.push('computeimage.js does not expose representation mode in renderer modes list');
-}
-
-if (!computeImageSource.includes('kernel?.ensureComputeImageSubject?.()') && !computeImageSource.includes('kernel?.subject?.computeImage')) {
-  checks.push('computeimage.js lost direct ComputeImage fallback coverage; keep at least one safe fallback');
 }
 
 if (checks.length) {

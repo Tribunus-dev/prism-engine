@@ -8,6 +8,7 @@ const report = [];
 
 const ontology = await import(pathToFileURL(resolve(docsRoot, 'js/core/ontology.js')).href);
 const transformations = await import(pathToFileURL(resolve(docsRoot, 'js/core/transformations.js')).href);
+const projections = await import(pathToFileURL(resolve(docsRoot, 'js/core/observation-projections.js')).href);
 
 const claimClassValues = new Set(Object.values(ontology.CLAIM_CLASSES || {}));
 const repositoryState = JSON.parse(await readFile(resolve(docsRoot, 'repository-state.json'), 'utf8'));
@@ -62,6 +63,18 @@ for (const transformation of Object.values(transformations.TRANSFORMATIONS || {}
   if (errors.length) report.push(...errors);
 }
 
+for (const route of Object.values(projections.PROJECTIONS || {})) {
+  for (const claim of route?.claims || []) {
+    if (!claim?.id || !claim?.class) {
+      report.push(`projection ${route.route || '<unknown>'} has invalid claim metadata`);
+      continue;
+    }
+    if (!claimClassValues.has(claim.class)) {
+      report.push(`projection ${route.route || '<unknown>'} claim ${claim.id} has invalid class ${claim.class}`);
+    }
+  }
+}
+
 const graphSource = await readFile(resolve(docsRoot, 'js/core/observation-graph.js'), 'utf8');
 
 const extractObject = (name) => {
@@ -90,6 +103,9 @@ for (const [page, scene] of pageScenes) {
   if (!scenes.has(scene)) {
     report.push(`pageScene ${page} references unknown scene ${scene}`);
   }
+}
+if (!scenes.has('compute-image') || !scenes.has('scheduler') || !scenes.has('fabric')) {
+  report.push('observation-graph scenes are missing canonical journey milestones');
 }
 
 if (!scenes.has('origin')) report.push('observation graph missing required origin scene marker');
