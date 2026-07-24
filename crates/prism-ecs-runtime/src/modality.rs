@@ -19,3 +19,11 @@ pub struct ModalityWork {
 }
 
 impl Component for ModalityWork {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModalityExecution {
+    pub output_digest: String,
+    pub output_bytes: u64,
+}
+
+impl Component for ModalityExecution {}

@@ -128,14 +128,21 @@ impl ModalityProvider for PrismInferenceServer {
         model_path: &str,
         request: ImageGenerationRequest,
     ) -> Result<ImageGenerationResult, ImageGenerationError> {
-        self.submit_modality_work(
+        let work_entity = self.submit_modality_work(
             prism_ecs_runtime::ModalityKind::Image,
             model_path,
             &request.prompt,
             "",
         )
         .map_err(|error| ImageGenerationError::MissingComponent { component: error })?;
-        crate::image::generate_image(model_path, request)
+        let result = crate::image::generate_image(model_path, request)?;
+        self.complete_modality_work(
+            work_entity,
+            result.receipt.output_digest.to_string(),
+            result.image.bytes.len() as u64,
+        )
+        .map_err(|error| ImageGenerationError::MissingComponent { component: error })?;
+        Ok(result)
     }
 
     fn generate_audio(
@@ -144,14 +151,21 @@ impl ModalityProvider for PrismInferenceServer {
         text: &str,
         params: crate::audio::AudioParams,
     ) -> Result<crate::audio::AudioGenerationReceipt, crate::audio::PrismAudioError> {
-        self.submit_modality_work(
+        let work_entity = self.submit_modality_work(
             prism_ecs_runtime::ModalityKind::Audio,
             model_path,
             text,
             "",
         )
         .map_err(crate::audio::PrismAudioError::GenerationFailed)?;
-        crate::audio::generate_speech(model_path, text, params)
+        let result = crate::audio::generate_speech(model_path, text, params)?;
+        self.complete_modality_work(
+            work_entity,
+            result.output_digest.clone(),
+            (result.pcm_samples.len() * std::mem::size_of::<f32>()) as u64,
+        )
+        .map_err(crate::audio::PrismAudioError::GenerationFailed)?;
+        Ok(result)
     }
 
     fn generate_video(
@@ -160,14 +174,23 @@ impl ModalityProvider for PrismInferenceServer {
         prompt: &str,
         params: crate::video::VideoParams,
     ) -> Result<crate::video::VideoGenerationReceipt, crate::video::PrismVideoError> {
-        self.submit_modality_work(
+        let work_entity = self.submit_modality_work(
             prism_ecs_runtime::ModalityKind::Video,
             model_path,
             prompt,
             "",
         )
         .map_err(crate::video::PrismVideoError::GenerationFailed)?;
-        crate::video::generate_video(model_path, prompt, params)
+        let result = crate::video::generate_video(model_path, prompt, params)?;
+        let mut hasher = blake3::Hasher::new();
+        let mut bytes = 0u64;
+        for (_, _, frame) in &result.frames {
+            hasher.update(frame);
+            bytes += frame.len() as u64;
+        }
+        self.complete_modality_work(work_entity, hasher.finalize().to_hex().to_string(), bytes)
+            .map_err(crate::video::PrismVideoError::GenerationFailed)?;
+        Ok(result)
     }
 
     fn generate_embeddings(&self, _model_path: &str, _text: &str) -> Result<Vec<f32>, String> {

@@ -228,6 +228,29 @@ impl PrismInferenceServer {
         }
     }
 
+    /// Commit provider output provenance to the same ECS entity that was
+    /// admitted for modality execution.
+    pub fn complete_modality_work(
+        &self,
+        entity: u64,
+        output_digest: impl Into<String>,
+        output_bytes: u64,
+    ) -> Result<(), String> {
+        let kernel = self
+            .ecs_kernel
+            .read()
+            .clone()
+            .ok_or_else(|| "ECS kernel is not attached".to_string())?;
+        kernel
+            .submit(CommandEnvelope::new(Command::CompleteModalityWork {
+                entity,
+                output_digest: output_digest.into(),
+                output_bytes,
+            }))
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     /// Creates a new inference session and returns its [`SessionId`].
     ///
     /// Delegates to the session manager for admission and initial state

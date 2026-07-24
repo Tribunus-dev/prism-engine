@@ -70,6 +70,11 @@ pub enum Command {
         prompt: String,
         output_path: String,
     },
+    CompleteModalityWork {
+        entity: u64,
+        output_digest: String,
+        output_bytes: u64,
+    },
 
     // ── Lifecycle (typed, domain-specific) ──
     Lifecycle(LifecycleCommand),
@@ -100,6 +105,7 @@ pub enum CommandResult {
         epoch: u64,
     },
     ModalitySubmitted { entity_id: u64 },
+    ModalityCompleted { entity_id: u64, output_digest: String },
 
     // Lifecycle
     Lifecycle(LifecycleCommandResult),
@@ -136,6 +142,7 @@ impl CommandEnvelope {
             Command::AdvanceInference { .. } => 0,
             Command::BindInferenceKv { .. } => 0,
             Command::CreateModalityWork { .. } => 0,
+            Command::CompleteModalityWork { .. } => 0,
             Command::Lifecycle(lc) => lc.type_id().discriminant(),
         };
         Self {
@@ -159,6 +166,7 @@ impl CommandEnvelope {
             AdvanceInference { .. } => 4,
             BindInferenceKv { .. } => 5,
             CreateModalityWork { .. } => 6,
+            CompleteModalityWork { .. } => 7,
             Lifecycle(_) => self.command_type_id as u64,
         })
     }
@@ -445,6 +453,31 @@ impl KernelHandle {
                 output_path,
             )
             .map(|entity_id| CommandResult::ModalitySubmitted { entity_id }),
+            Command::CompleteModalityWork {
+                entity,
+                output_digest,
+                output_bytes,
+            } => {
+                if output_digest.trim().is_empty() {
+                    Err(RuntimeError::Dispatch(
+                        "modality output digest must not be empty".into(),
+                    ))
+                } else {
+                    world
+                        .add_component(
+                            prism_ecs_core::Entity::new(entity, 0),
+                            crate::modality::ModalityExecution {
+                                output_digest: output_digest.clone(),
+                                output_bytes,
+                            },
+                        )
+                        .map(|_| CommandResult::ModalityCompleted {
+                            entity_id: entity,
+                            output_digest,
+                        })
+                        .map_err(|error| RuntimeError::Dispatch(error.to_string()))
+                }
+            }
             Command::Lifecycle(lc) => execute_lifecycle(&mut world, lc),
         };
 
@@ -713,6 +746,28 @@ impl RuntimeKernel {
                             "replay modality entity mismatch: generated {entity_id}, stored {expected}"
                         )));
                     }
+                }
+            }
+            Command::CompleteModalityWork {
+                entity,
+                output_digest,
+                output_bytes,
+            } => {
+                world
+                    .add_component(
+                        prism_ecs_core::Entity::new(entity, 0),
+                        crate::modality::ModalityExecution {
+                            output_digest: output_digest.clone(),
+                            output_bytes,
+                        },
+                    )
+                    .map_err(|error| RuntimeError::Journal(error.to_string()))?;
+                match stored_result {
+                    CommandResult::ModalityCompleted {
+                        entity_id: expected,
+                        output_digest: expected_digest,
+                    } if entity == expected && output_digest == expected_digest => {}
+                    _ => return Err(RuntimeError::Journal("replay modality completion mismatch".into())),
                 }
             }
             // Re-execute lifecycle commands so entity ID allocation stays
