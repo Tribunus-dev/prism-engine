@@ -55,7 +55,7 @@ export const createObservatoryShellSystem = () => {
       if (!observation) return;
       shell.querySelector('.observatory-context strong').textContent = observation.instrument || labels[scene.observation] || 'Observation';
       shell.querySelector('[data-observatory-question]').textContent = observation.question || `${observation.phase || 'observation'} is now in view.`;
-      shell.querySelector('.observatory-causality span:nth-of-type(3) b').textContent = observation.knowledgeState || scene.knowledge || 'knowledge source';
+      shell.querySelector('.observatory-causality span:nth-of-type(3) b').textContent = observation.knowledgeState || scene.knowledge || 'illustrative';
       shell.querySelector('.observatory-state').textContent = observation.existence || scene.existence || 'active';
       shell.dataset.observationId = observation.id || '';
     };
@@ -124,10 +124,10 @@ export const createObservatoryShellSystem = () => {
     const record = (action, target) => {
       const label = target?.textContent?.trim().replace(/\s+/g, ' ').slice(0, 72) || 'instrument surface';
       receipt.querySelector('strong').textContent = `${action} observed`;
-      receipt.querySelector('small').textContent = `${label} · ${scene.knowledge || 'illustrative-example'}`;
+      receipt.querySelector('small').textContent = `${label} · ${scene.knowledge || 'illustrative'}`;
       kernel?.setOpticalState(action === 'hover' ? 'focus' : action === 'interaction' ? 'exploration' : 'observation');
       kernel?.record({ type: action, visible: label, transformed: 'focus changed', hidden: 'unselected surfaces', evidenceIncreased: scene.knowledge || 'none' });
-      kernel?.receipt({ observation: label, knowledgeSource: scene.knowledge || 'illustrative-example', outcome: action });
+      kernel?.receipt({ observation: label, knowledgeSource: scene.knowledge || 'illustrative', outcome: action });
     };
     const documentClickHandler = event => {
       const target = event.target.closest('button, a, summary, [role="button"]');

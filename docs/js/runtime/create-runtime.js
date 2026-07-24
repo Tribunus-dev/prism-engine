@@ -1,5 +1,5 @@
 import { PROJECTIONS, primaryProjection, projectionForLocation } from '../core/observation-projections.js';
-import { CLAIM_CLASSES, KNOWLEDGE_STATES, validateClaim } from '../core/ontology.js';
+import { CLAIM_CLASSES, EXISTENCE_STATES, KNOWLEDGE_STATES, validateClaim } from '../core/ontology.js';
 import { TRANSFORMATIONS, validateTransformations } from '../core/transformations.js';
 import { createRepositoryService } from './repository-service.js';
 import { createRouteProjection } from './route-projection.js';
@@ -21,18 +21,26 @@ export const createRuntime = ({
     routeForLocation: projectionForLocation,
     primaryRoute: primaryProjection,
   });
+  const normalizeKnowledgeState = (value) => Object.values(KNOWLEDGE_STATES).includes(value) ? value : KNOWLEDGE_STATES.OBSERVED;
+  const normalizeExistenceState = (value) => Object.values(EXISTENCE_STATES).includes(value) ? value : EXISTENCE_STATES.ACTIVE;
+  const normalizeBeliefState = (value) => Object.values(KNOWLEDGE_STATES).includes(value) ? value : KNOWLEDGE_STATES.OBSERVED;
+  const resolveCanonicalSubjectId = (snapshot, claims) => (
+    snapshot?.state?.subjectId
+    || snapshot?.subjectId
+    || claims.find(claim => typeof claim?.subjectId === 'string' && claim.subjectId.trim())?.subjectId
+    || 'computational-subject:prism-model'
+  );
   const buildCanonicalSubject = snapshot => {
     const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
     const evidenceBoundary = (snapshot?.state?.evidenceBoundary
       || snapshot?.evidenceBoundary
       || 'repository evidence pending');
-    const fromClaims = nextClaims.find(claim => typeof claim?.subjectId === 'string' && claim.subjectId.trim())?.subjectId;
 
     return {
-      id: snapshot?.subjectId || fromClaims || 'computational-subject:prism-model',
+      id: resolveCanonicalSubjectId(snapshot, nextClaims),
       kind: 'ComputeImage',
-      name: 'ComputeImage Runtime Subject',
-      intent: 'one-subject-canonical-journey',
+      name: snapshot?.name || 'ComputeImage Runtime Subject',
+      intent: snapshot?.intent || 'one-subject-canonical-journey',
       representations: snapshot?.representations || [],
       plans: snapshot?.plans || [],
       execution: snapshot?.execution || [],
@@ -48,12 +56,13 @@ export const createRuntime = ({
         boundary: snapshot?.provenance?.boundary || evidenceBoundary,
       },
       evidenceLevel: snapshot?.state?.evidenceLevel || snapshot?.evidenceLevel,
-      knowledge: snapshot?.knowledge || 'observed',
-      belief: snapshot?.belief || 'observed',
-      existence: snapshot?.existence || 'active',
+      knowledge: normalizeKnowledgeState(snapshot?.knowledge),
+      belief: normalizeBeliefState(snapshot?.belief),
+      existence: normalizeExistenceState(snapshot?.existence),
       objects: snapshot?.objects || {},
       capabilities: snapshot?.capabilities || [],
       claims: nextClaims,
+      state: snapshot?.state || {},
     };
   };
 
