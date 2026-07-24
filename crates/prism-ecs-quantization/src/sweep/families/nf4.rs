@@ -7,14 +7,14 @@ use rayon::prelude::*;
 use serde_json::{json, Value};
 
 use crate::contract::NF4_TILE640_CODE_BYTES;
+use crate::nf4tile640::{
+    nf4_codebook, nf4_quantize_with_codebook, pack_nf4_tile_with_group_size,
+    unpack_nf4_weights_with_group_size_and_codebook, validate_tile_group_size, TILE_ELEMENTS,
+};
 use crate::sweep::candidate::PackedTileLayout;
 use crate::sweep::families::FamilyCandidate;
 use crate::sweep::spec::{
     AffineMode, ClippingPolicy, GroupOptimizer, Nf4CodebookId, Nf4SweepGrid, ScalePolicy,
-};
-use crate::nf4tile640::{
-    nf4_codebook, nf4_quantize_with_codebook, pack_nf4_tile_with_group_size,
-    unpack_nf4_weights_with_group_size_and_codebook, validate_tile_group_size, TILE_ELEMENTS,
 };
 
 // ── Nf4Params ─────────────────────────────────────────────────────────────
@@ -539,11 +539,10 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
                 for clip in &grid.clip_policies {
                     for opt in &grid.optimizers {
                         // Validate combinations
-                        match (&affine, &opt) {
-                            (AffineMode::ScaleOnly, GroupOptimizer::AffineAlternating { .. }) => {
-                                continue;
-                            }
-                            _ => {}
+                        if let (AffineMode::ScaleOnly, GroupOptimizer::AffineAlternating { .. }) =
+                            (&affine, &opt)
+                        {
+                            continue;
                         }
 
                         let params = Nf4Params {
@@ -668,12 +667,12 @@ pub fn generate_nf4_candidates(grid: &Nf4SweepGrid) -> Vec<FamilyCandidate> {
 mod tests {
     use super::*;
     use crate::contract::NF4_TILE640_CODE_BYTES;
-    use crate::sweep::spec::Nf4SweepGrid;
     use crate::nf4tile640::{
         pack_nf4_tile_with_group_size, unpack_nf4_weights_with_group_size,
         unpack_nf4_weights_with_group_size_and_codebook, validate_tile_group_size,
         PRISM_NF4_CODEBOOK, TILE_ELEMENTS,
     };
+    use crate::sweep::spec::Nf4SweepGrid;
 
     fn make_test_tile() -> [f32; 640] {
         // Deterministic linspace from -1 to 1
@@ -801,9 +800,7 @@ mod tests {
 
     #[test]
     fn nf4_candidates_skip_invalid_group_sizes() {
-        use crate::sweep::spec::{
-            AffineMode, ClippingPolicy, GroupOptimizer, Nf4CodebookId,
-        };
+        use crate::sweep::spec::{AffineMode, ClippingPolicy, GroupOptimizer, Nf4CodebookId};
 
         let grid = Nf4SweepGrid {
             codebooks: vec![Nf4CodebookId::PrismCurrent],
@@ -1087,9 +1084,7 @@ mod tests {
 
     #[test]
     fn nf4_candidates_skip_invalid_combos() {
-        use crate::sweep::spec::{
-            AffineMode, ClippingPolicy, GroupOptimizer, Nf4CodebookId,
-        };
+        use crate::sweep::spec::{AffineMode, ClippingPolicy, GroupOptimizer, Nf4CodebookId};
 
         let grid = Nf4SweepGrid {
             codebooks: vec![Nf4CodebookId::PrismCurrent],

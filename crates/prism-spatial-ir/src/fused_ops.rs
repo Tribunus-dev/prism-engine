@@ -261,7 +261,7 @@ pub fn evaluate_fusion_strategies_with_generation_and_measurements(
     let op_count = permutation.ops.len().max(1);
     let bytes = element_count.saturating_mul(4);
     let stage_count = if op_count <= 2 { 1 } else { 2 };
-    let split = (op_count + stage_count - 1) / stage_count;
+    let split = op_count.div_ceil(stage_count);
     let stages = permutation
         .ops
         .chunks(split)
@@ -422,8 +422,8 @@ impl FusedPermutation {
             hasher.update(op.label().as_bytes());
             hasher.update(b"\0");
         }
-        hasher.update(&self.threadgroup_width.to_le_bytes());
-        hasher.update(&self.threadgroup_height.to_le_bytes());
+        hasher.update(self.threadgroup_width.to_le_bytes());
+        hasher.update(self.threadgroup_height.to_le_bytes());
         hasher.finalize().into()
     }
 
@@ -937,12 +937,11 @@ mod tests {
 
     // -- Default geometry constants ---------------------------------------
 
-    #[test]
-    fn default_geometry_is_valid() {
+    const _: () = {
         assert!(DEFAULT_FUSED_TG_WIDTH <= 256);
         assert!(DEFAULT_FUSED_TG_HEIGHT <= 64);
         assert!(DEFAULT_FUSED_TG_WIDTH * DEFAULT_FUSED_TG_HEIGHT <= 1024);
-    }
+    };
 
     #[test]
     fn default_geometry_passes_validation() {

@@ -244,7 +244,6 @@ mod tests {
             let op2 = b
                 .create_op("test.produce", &[], &[], &[Type::Index])
                 .unwrap();
-            drop(b);
             (
                 crate::op::results(&world, op0)[0],
                 crate::op::results(&world, op1)[0],
@@ -256,7 +255,6 @@ mod tests {
         let body_block = {
             let mut b = OpBuilder::new(&mut world);
             let (block, _args) = b.create_block(&[]).expect("create body block");
-            drop(b);
             block
         };
 
@@ -266,18 +264,14 @@ mod tests {
             let region = b.create_region(RegionKind::SSACFG).expect("create region");
             b.add_block_to_region(region, body_block)
                 .expect("add block to region");
-            drop(b);
             region
         };
 
         // Create scf.for operation
         let scf_for = {
             let mut b = OpBuilder::new(&mut world);
-            let op = b
-                .create_op("scf.for", &[lb, ub, step], &[], &[])
-                .expect("create scf.for");
-            drop(b);
-            op
+            b.create_op("scf.for", &[lb, ub, step], &[], &[])
+                .expect("create scf.for")
         };
 
         // Attach RegionRef to the scf.for entity

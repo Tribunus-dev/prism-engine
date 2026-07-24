@@ -97,10 +97,9 @@ pub fn value_use_count(world: &prism_ecs_core::World, entity: Entity) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prism_ecs_core::{EntityKind, World};
     #[test]
     fn create_value_entity() {
-        use prism_ecs_core::{EntityKind, SpawnedEntity, World};
+        use prism_ecs_core::{EntityKind, World};
         let mut world = World::new();
         let value: Entity = world
             .spawn(EntityKind::Node, Some("test_val".into()))
@@ -133,7 +132,7 @@ mod tests {
 
     #[test]
     fn use_count_tracking() {
-        use prism_ecs_core::{EntityKind, SpawnedEntity, World};
+        use prism_ecs_core::{EntityKind, World};
         let mut world = World::new();
         let val: Entity = world
             .spawn(EntityKind::Node, Some("val".into()))

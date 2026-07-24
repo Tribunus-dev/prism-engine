@@ -182,10 +182,10 @@ impl AotScheduler {
                 .find(|window| {
                     window
                         .prefetch_step
-                        .map_or(false, |prefetch| prefetch <= step.step_id)
+                        .is_some_and(|prefetch| prefetch <= step.step_id)
                         && window
                             .eviction_step
-                            .map_or(true, |evict| step.step_id < evict)
+                            .is_none_or(|evict| step.step_id < evict)
                 })
                 .map(|window| window.window_id)
                 .unwrap_or(0);
@@ -239,10 +239,10 @@ impl AotScheduler {
                 .find(|window| {
                     window
                         .prefetch_step
-                        .map_or(false, |prefetch| prefetch <= step.step_id)
+                        .is_some_and(|prefetch| prefetch <= step.step_id)
                         && window
                             .eviction_step
-                            .map_or(true, |evict| step.step_id < evict)
+                            .is_none_or(|evict| step.step_id < evict)
                 })
                 .map(|window| window.window_id)
                 .unwrap_or(0);

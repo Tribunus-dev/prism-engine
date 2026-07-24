@@ -202,7 +202,7 @@ fn quantize_by_format(
         TensorFormat::Ternary158 => {
             // Ternary: quantize each value to {-1, 0, +1} with group scales
             let group_size = 128usize;
-            let num_groups = (f32_vals.len() + group_size - 1) / group_size;
+            let num_groups = f32_vals.len().div_ceil(group_size);
             let mut weights = Vec::with_capacity(f32_vals.len());
             let mut scales = Vec::with_capacity(num_groups);
 
@@ -253,7 +253,7 @@ fn quantize_by_format(
         TensorFormat::Binary1 => {
             // Binary: quantize to {+1, -1} (1 bit per value)
             let group_size = 128usize;
-            let num_groups = (f32_vals.len() + group_size - 1) / group_size;
+            let num_groups = f32_vals.len().div_ceil(group_size);
             let mut binary_bits: Vec<u8> = Vec::new();
             let mut scales = Vec::with_capacity(num_groups);
 
@@ -266,7 +266,7 @@ fn quantize_by_format(
                 let scale = if mean_abs > 1e-10 { mean_abs } else { 1.0 };
                 scales.push(scale);
 
-                let byte_count = (group.len() + 7) / 8;
+                let byte_count = group.len().div_ceil(8);
                 let mut bits = vec![0u8; byte_count];
                 for (i, &v) in group.iter().enumerate() {
                     if v > 0.0 {
@@ -371,7 +371,7 @@ fn discover_safetensors(dir: &Path) -> Result<Vec<std::path::PathBuf>, String> {
         if entry
             .path()
             .extension()
-            .map_or(false, |ext| ext == "safetensors")
+            .is_some_and(|ext| ext == "safetensors")
         {
             shards.push(entry.path());
         }
@@ -555,7 +555,7 @@ pub fn compile_assembly(
         let model_output = model_dir.join("model.cimage");
 
         // Determine whether the model needs compilation or is pre-compiled.
-        let is_cimage = model_file.extension().map_or(false, |e| e == "cimage");
+        let is_cimage = model_file.extension().is_some_and(|e| e == "cimage");
 
         if !is_cimage {
             // Attempt full compilation: load config.json adjacent to the model file.

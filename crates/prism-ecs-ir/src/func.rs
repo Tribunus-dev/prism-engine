@@ -406,16 +406,14 @@ mod tests {
         // ── Create func.func ──────────────────────────────────────────────
         let func_op: Entity = {
             let mut builder = OpBuilder::new(&mut world);
-            let func_op = builder
+            builder
                 .create_op(
                     "func.func",
                     &[], // no operands
                     &[], // no attributes (serde doesn't round-trip OpName/attributes)
                     &[], // no results
                 )
-                .unwrap();
-            drop(builder);
-            func_op
+                .unwrap()
         };
 
         // Attach FuncOp component.
@@ -456,16 +454,14 @@ mod tests {
         let return_op: Entity = {
             let mut builder = OpBuilder::new(&mut world);
             builder.set_insertion_point(block);
-            let return_op = builder
+            builder
                 .create_op(
                     "func.return",
                     &[], // no return values
                     &[], // no attributes
                     &[], // no results
                 )
-                .unwrap();
-            drop(builder);
-            return_op
+                .unwrap()
         };
 
         // Attach FuncOp component and mark as terminator.

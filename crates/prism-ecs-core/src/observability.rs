@@ -38,6 +38,12 @@ impl TraceContext {
     }
 }
 
+impl Default for TraceContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateRecord {
     pub sequence: u64,

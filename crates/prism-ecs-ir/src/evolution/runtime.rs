@@ -116,7 +116,7 @@ impl EvolutionRuntime {
                 std::env::var_os("PRISM_EVOLUTION_RUNTIME_PATH")
                     .map(std::path::PathBuf::from)
                     .and_then(|path| EvolutionRuntime::new_persistent(path).ok())
-                    .unwrap_or_else(EvolutionRuntime::new)
+                    .unwrap_or_default()
             })
             .clone()
     }

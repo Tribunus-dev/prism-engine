@@ -82,8 +82,14 @@ impl MappedTensorRegionProbeContext {
                         materialized_bytes: 0,
                     })
                 } else {
-                    let selected = (end - start)
-                        .saturating_mul(self.tensor_shape.iter().enumerate().filter(|(i, _)| *i != axis).map(|(_, value)| *value).product::<u64>());
+                    let selected = (end - start).saturating_mul(
+                        self.tensor_shape
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| *i != axis)
+                            .map(|(_, value)| *value)
+                            .product::<u64>(),
+                    );
                     Ok(RegionView {
                         element_offset: 0,
                         element_count: selected,
@@ -129,7 +135,9 @@ impl MappedTensorRegionProbeContext {
             operation_variance: variances[1],
             geometry_variance: variances[2],
             memory_variance: variances[3],
-            probe_valid: variances.iter().all(|value| value.is_finite() && *value >= 0.0),
+            probe_valid: variances
+                .iter()
+                .all(|value| value.is_finite() && *value >= 0.0),
             evidence_source: evidence_source.into(),
             materialized_bytes: view.materialized_bytes,
             cache_key: self.cache_key(representation),
@@ -164,7 +172,13 @@ mod tests {
 
     #[test]
     fn contiguous_row_range_needs_no_materialization() {
-        let view = context(RegionSelector::AxisSpan { axis: 0, start: 1, end: 3 }).bounded_view(2).unwrap();
+        let view = context(RegionSelector::AxisSpan {
+            axis: 0,
+            start: 1,
+            end: 3,
+        })
+        .bounded_view(2)
+        .unwrap();
         assert_eq!(view.element_offset, 2);
         assert_eq!(view.element_count, 4);
         assert_eq!(view.materialized_bytes, 0);
@@ -172,14 +186,24 @@ mod tests {
 
     #[test]
     fn nonleading_axis_records_materialization() {
-        let view = context(RegionSelector::AxisSpan { axis: 1, start: 0, end: 1 }).bounded_view(2).unwrap();
+        let view = context(RegionSelector::AxisSpan {
+            axis: 1,
+            start: 0,
+            end: 1,
+        })
+        .bounded_view(2)
+        .unwrap();
         assert!(!view.contiguous);
         assert_eq!(view.materialized_bytes, 12);
     }
 
     #[test]
     fn cache_key_separates_regions_and_calibration() {
-        let a = context(RegionSelector::AxisSpan { axis: 0, start: 0, end: 4 });
+        let a = context(RegionSelector::AxisSpan {
+            axis: 0,
+            start: 0,
+            end: 4,
+        });
         let mut b = a.clone();
         b.calibration_corpus_digest = "other".into();
         assert_ne!(a.cache_key("int8"), b.cache_key("int8"));

@@ -50,7 +50,9 @@ impl PhysicalRegionRealization {
     pub fn canonical_digest(&self) -> String {
         let mut canonical = self.clone();
         canonical.realization_digest.clear();
-        canonical.byte_ranges.sort_by_key(|range| (range.start, range.end));
+        canonical
+            .byte_ranges
+            .sort_by_key(|range| (range.start, range.end));
         canonical.tile_ids.sort();
         canonical.conversion_ops.sort();
         digest(&serde_json::to_vec(&canonical).expect("physical region serialization"))
@@ -82,17 +84,21 @@ impl PhysicalRegionPlan {
         let mut ranges = Vec::new();
         for realization in &self.realizations {
             if !expected.contains(&realization.semantic_region) {
-                return Err(PhysicalRegionError::MissingRegion(realization.semantic_region.0.clone()));
+                return Err(PhysicalRegionError::MissingRegion(
+                    realization.semantic_region.0.clone(),
+                ));
             }
             if !seen.insert(realization.semantic_region.clone()) {
-                return Err(PhysicalRegionError::DuplicateRegion(realization.semantic_region.0.clone()));
+                return Err(PhysicalRegionError::DuplicateRegion(
+                    realization.semantic_region.0.clone(),
+                ));
             }
             if realization.realization_digest != realization.canonical_digest() {
                 return Err(PhysicalRegionError::DigestMismatch);
             }
             ranges.extend(realization.byte_ranges.iter().cloned());
         }
-        for missing in expected.difference(&seen) {
+        if let Some(missing) = expected.difference(&seen).next() {
             return Err(PhysicalRegionError::MissingRegion(missing.0.clone()));
         }
         ranges.sort_by_key(|range| (range.start, range.end));
@@ -110,7 +116,9 @@ impl PhysicalRegionPlan {
     pub fn canonical_digest(&self) -> String {
         let mut canonical = self.clone();
         canonical.digest.clear();
-        canonical.realizations.sort_by(|a, b| a.semantic_region.cmp(&b.semantic_region));
+        canonical
+            .realizations
+            .sort_by(|a, b| a.semantic_region.cmp(&b.semantic_region));
         digest(&serde_json::to_vec(&canonical).expect("physical region plan serialization"))
     }
 
@@ -120,7 +128,8 @@ impl PhysicalRegionPlan {
             .into_iter()
             .map(PhysicalRegionRealization::seal)
             .collect::<Result<Vec<_>, _>>()?;
-        self.total_materialized_bytes = self.realizations.iter().map(|r| r.materialized_bytes).sum();
+        self.total_materialized_bytes =
+            self.realizations.iter().map(|r| r.materialized_bytes).sum();
         self.total_conversion_bytes = self
             .realizations
             .iter()
@@ -150,19 +159,33 @@ pub fn lower_contiguous_axis0(
             .ok_or_else(|| PhysicalRegionError::MissingRegion(assignment.region.0.clone()))?;
         let (start, end) = match descriptor.selector {
             RegionSelector::WholeTensor => (0, semantic.partition.parent_shape[0]),
-            RegionSelector::AxisSpan { axis: 0, start, end } => (start, end),
+            RegionSelector::AxisSpan {
+                axis: 0,
+                start,
+                end,
+            } => (start, end),
             _ => return Err(PhysicalRegionError::HiddenConversion),
         };
-        let byte_start = start.saturating_mul(row_elements).saturating_mul(element_size);
-        let byte_end = end.saturating_mul(row_elements).saturating_mul(element_size);
+        let byte_start = start
+            .saturating_mul(row_elements)
+            .saturating_mul(element_size);
+        let byte_end = end
+            .saturating_mul(row_elements)
+            .saturating_mul(element_size);
         realizations.push(PhysicalRegionRealization {
             semantic_region: assignment.region.clone(),
             logical_selector_digest: selector_digest(&descriptor.selector),
             packed_buffer: buffer.into(),
-            byte_ranges: vec![byte_start..byte_end],
+            byte_ranges: std::iter::once(byte_start..byte_end).collect(),
             tile_ids: vec![format!("tile:{}", assignment.region.0)],
-            execution_lane: assignment.preferred_lane.clone().unwrap_or_else(|| "cpu".into()),
-            residency_class: assignment.residency.clone().unwrap_or_else(|| "resident".into()),
+            execution_lane: assignment
+                .preferred_lane
+                .clone()
+                .unwrap_or_else(|| "cpu".into()),
+            residency_class: assignment
+                .residency
+                .clone()
+                .unwrap_or_else(|| "resident".into()),
             materialized_bytes: 0,
             conversion_ops: Vec::new(),
             realization_digest: String::new(),
@@ -199,10 +222,75 @@ mod tests {
 
     fn semantic() -> SemanticRegionPlan {
         let regions = vec![
-            SemanticRegionDescriptor { id: SemanticRegionId("q".into()), parent: LogicalTensorId("qkv".into()), selector: RegionSelector::AxisSpan { axis: 0, start: 0, end: 4 }, role: RegionRole::Generic { label: "q".into() }, origin: RegionOrigin::Explicit { source: "test".into() }, constraints: RegionConstraints { allowed_formats: vec!["fp16".into()], ..Default::default() }, provenance_refs: vec![] },
-            SemanticRegionDescriptor { id: SemanticRegionId("kv".into()), parent: LogicalTensorId("qkv".into()), selector: RegionSelector::AxisSpan { axis: 0, start: 4, end: 6 }, role: RegionRole::Generic { label: "kv".into() }, origin: RegionOrigin::Explicit { source: "test".into() }, constraints: RegionConstraints { allowed_formats: vec!["fp16".into()], ..Default::default() }, provenance_refs: vec![] },
+            SemanticRegionDescriptor {
+                id: SemanticRegionId("q".into()),
+                parent: LogicalTensorId("qkv".into()),
+                selector: RegionSelector::AxisSpan {
+                    axis: 0,
+                    start: 0,
+                    end: 4,
+                },
+                role: RegionRole::Generic { label: "q".into() },
+                origin: RegionOrigin::Explicit {
+                    source: "test".into(),
+                },
+                constraints: RegionConstraints {
+                    allowed_formats: vec!["fp16".into()],
+                    ..Default::default()
+                },
+                provenance_refs: vec![],
+            },
+            SemanticRegionDescriptor {
+                id: SemanticRegionId("kv".into()),
+                parent: LogicalTensorId("qkv".into()),
+                selector: RegionSelector::AxisSpan {
+                    axis: 0,
+                    start: 4,
+                    end: 6,
+                },
+                role: RegionRole::Generic { label: "kv".into() },
+                origin: RegionOrigin::Explicit {
+                    source: "test".into(),
+                },
+                constraints: RegionConstraints {
+                    allowed_formats: vec!["fp16".into()],
+                    ..Default::default()
+                },
+                provenance_refs: vec![],
+            },
         ];
-        SemanticRegionPlan { partition: SemanticRegionPartition { parent: LogicalTensorId("qkv".into()), parent_shape: vec![6, 2], regions, exhaustive: true, disjoint: true, digest: String::new() }, assignments: vec![RegionRepresentationAssignment { region: SemanticRegionId("q".into()), representation: "fp16".into(), codec: None, preferred_lane: Some("metal".into()), residency: None, assignment_evidence: vec![] }, RegionRepresentationAssignment { region: SemanticRegionId("kv".into()), representation: "fp16".into(), codec: None, preferred_lane: Some("metal".into()), residency: None, assignment_evidence: vec![] }], compile_verified: true, plan_digest: String::new() }.seal().unwrap()
+        SemanticRegionPlan {
+            partition: SemanticRegionPartition {
+                parent: LogicalTensorId("qkv".into()),
+                parent_shape: vec![6, 2],
+                regions,
+                exhaustive: true,
+                disjoint: true,
+                digest: String::new(),
+            },
+            assignments: vec![
+                RegionRepresentationAssignment {
+                    region: SemanticRegionId("q".into()),
+                    representation: "fp16".into(),
+                    codec: None,
+                    preferred_lane: Some("metal".into()),
+                    residency: None,
+                    assignment_evidence: vec![],
+                },
+                RegionRepresentationAssignment {
+                    region: SemanticRegionId("kv".into()),
+                    representation: "fp16".into(),
+                    codec: None,
+                    preferred_lane: Some("metal".into()),
+                    residency: None,
+                    assignment_evidence: vec![],
+                },
+            ],
+            compile_verified: true,
+            plan_digest: String::new(),
+        }
+        .seal()
+        .unwrap()
     }
 
     #[test]
@@ -216,7 +304,18 @@ mod tests {
 
     #[test]
     fn materialization_requires_explicit_conversion() {
-        let r = PhysicalRegionRealization { semantic_region: SemanticRegionId("q".into()), logical_selector_digest: "x".into(), packed_buffer: "b".into(), byte_ranges: vec![0..4], tile_ids: vec![], execution_lane: "cpu".into(), residency_class: "resident".into(), materialized_bytes: 4, conversion_ops: vec![], realization_digest: String::new() };
+        let r = PhysicalRegionRealization {
+            semantic_region: SemanticRegionId("q".into()),
+            logical_selector_digest: "x".into(),
+            packed_buffer: "b".into(),
+            byte_ranges: std::iter::once(0..4).collect(),
+            tile_ids: vec![],
+            execution_lane: "cpu".into(),
+            residency_class: "resident".into(),
+            materialized_bytes: 4,
+            conversion_ops: vec![],
+            realization_digest: String::new(),
+        };
         assert_eq!(r.seal(), Err(PhysicalRegionError::HiddenConversion));
     }
 }

@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use crate::ir_attrs::Attribute;
 use crate::ir_types::Type;
 
+type TypeInferer = dyn Fn(&[Type], &[Attribute]) -> Option<Vec<Type>>;
+
 /// Type inference registry — maps op names to their inference functions.
 ///
 /// ```ignore
@@ -19,7 +21,7 @@ use crate::ir_types::Type;
 /// let result = registry.infer("arith.addf", &[Type::f32(), Type::f32()], &[]);
 /// ```
 pub struct TypeInferenceRegistry {
-    inferers: HashMap<&'static str, Box<dyn Fn(&[Type], &[Attribute]) -> Option<Vec<Type>>>>,
+    inferers: HashMap<&'static str, Box<TypeInferer>>,
 }
 
 impl TypeInferenceRegistry {
@@ -31,11 +33,7 @@ impl TypeInferenceRegistry {
     }
 
     /// Register an inference function for an operation.
-    pub fn register(
-        &mut self,
-        op_name: &'static str,
-        inferer: Box<dyn Fn(&[Type], &[Attribute]) -> Option<Vec<Type>>>,
-    ) {
+    pub fn register(&mut self, op_name: &'static str, inferer: Box<TypeInferer>) {
         self.inferers.insert(op_name, inferer);
     }
 

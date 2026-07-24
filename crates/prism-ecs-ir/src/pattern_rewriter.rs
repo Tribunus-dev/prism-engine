@@ -43,7 +43,7 @@ pub enum OpRewrite {
         /// Entity of the operation to replace.
         target: Entity,
         /// Descriptions of the replacement operations.
-        replacements: SmallVec<[NewOpDesc; 4]>,
+        replacements: Box<SmallVec<[NewOpDesc; 4]>>,
     },
     /// Erase `target` op from the IR.
     EraseOp {
@@ -247,7 +247,7 @@ impl PatternRewriter {
             OpRewrite::ReplaceOp {
                 target,
                 replacements,
-            } => Self::do_replace(world, target, &replacements),
+            } => Self::do_replace(world, target, replacements.as_ref()),
             OpRewrite::EraseOp { target } => Self::do_erase(world, target),
             OpRewrite::CreateOp { desc, after } => Self::do_create(world, &desc, after),
         }
@@ -526,8 +526,7 @@ impl PatternRewriter {
                 .map(|r| r.0.clone())
                 .unwrap_or_default();
 
-            for j in (i + 1)..ops.len() {
-                let b = ops[j];
+            for b in ops.iter().skip(i + 1).copied() {
                 if world.get_component::<OpMarker>(b).is_none() {
                     continue;
                 }
@@ -644,12 +643,12 @@ mod tests {
             let mut actions: SmallVec<[OpRewrite; 4]> = SmallVec::new();
             actions.push(OpRewrite::ReplaceOp {
                 target: root_op,
-                replacements: smallvec::smallvec![NewOpDesc {
+                replacements: Box::new(smallvec::smallvec![NewOpDesc {
                     name: "test.replacement",
                     operands,
                     attributes: attrs,
                     result_types,
-                }],
+                }]),
             });
             Ok(Some(actions))
         }

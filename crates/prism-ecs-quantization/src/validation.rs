@@ -341,7 +341,7 @@ pub fn validate_operator_space_with_vectors(
         feature = "ffi"
     )))]
     {
-        return validate_operator_space_single(
+        validate_operator_space_single(
             source,
             in_features,
             out_features,
@@ -352,7 +352,7 @@ pub fn validate_operator_space_with_vectors(
             vectors,
             pre_unpacked,
             deadline,
-        );
+        )
     }
 }
 

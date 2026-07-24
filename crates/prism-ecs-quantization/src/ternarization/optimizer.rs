@@ -31,7 +31,7 @@ impl ScaleOptimizer {
     pub fn optimize(&self, candidate: &mut TernarizationCandidate, original: &[f32]) -> f64 {
         let mut total_loss = 0.0f64;
         let num_groups = if candidate.group_size > 0 {
-            (original.len() + candidate.group_size - 1) / candidate.group_size
+            original.len().div_ceil(candidate.group_size)
         } else {
             0
         };

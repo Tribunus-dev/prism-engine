@@ -145,13 +145,13 @@ fn dispatch_sgemv_resident(
     }
     let weights = inputs[0];
     let input = inputs[1];
-    if weights.len() % 2 != 0 || input.len() % 4 != 0 {
+    if !weights.len().is_multiple_of(2) || !input.len().is_multiple_of(4) {
         return Err(crate::KernelError::BindingMismatch(
             "Accelerate FP16 GEMV buffers are unaligned".into(),
         ));
     }
     let n = input.len() / 4;
-    if n == 0 || weights.len() % (n * 2) != 0 {
+    if n == 0 || !weights.len().is_multiple_of(n * 2) {
         return Err(crate::KernelError::BindingMismatch(
             "Accelerate GEMV shape mismatch".into(),
         ));

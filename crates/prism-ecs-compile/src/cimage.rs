@@ -3144,6 +3144,7 @@ mod tests {
             projected: true,
             projection_basis: "test".into(),
             mixed_precision_graph: "ternary-expert-int8-attention".into(),
+            ..crate::workload_search::WorkloadThroughputEvidence::default()
         };
         let schedule = crate::search::HeterogeneousScheduleEvidence {
             steps: 2,

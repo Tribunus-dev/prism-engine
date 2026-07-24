@@ -1,6 +1,6 @@
 //! Evidence-backed evolutionary memory and optional proposal interfaces.
 
-use crate::evolution::chromosome::{Chromosome, GenomeChromosomes};
+use crate::evolution::chromosome::GenomeChromosomes;
 use crate::evolution::foundation::CandidateGenome;
 use crate::evolution::objectives::{BehaviorDescriptor, ObjectiveVector};
 use crate::evolution::variation::VariationOperator;

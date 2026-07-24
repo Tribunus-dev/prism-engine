@@ -270,7 +270,7 @@ impl TinyGraph {
                     return Err(GraphError::InvalidSource(op.id));
                 }
             }
-            if op.shape.is_empty() || op.shape.iter().any(|dimension| *dimension == 0) {
+            if op.shape.is_empty() || op.shape.contains(&0) {
                 return Err(GraphError::ShapeMismatch(op.id));
             }
             if op
@@ -1181,12 +1181,12 @@ impl TinyGraph {
                             _ => None,
                         });
                         match (op.kind, left_scalar, right_scalar) {
-                            (UOpKind::Add, _, Some(value)) if value == 0.0 => Some(op.src[0]),
-                            (UOpKind::Add, Some(value), _) if value == 0.0 => Some(op.src[1]),
-                            (UOpKind::Sub, _, Some(value)) if value == 0.0 => Some(op.src[0]),
-                            (UOpKind::Mul, _, Some(value)) if value == 1.0 => Some(op.src[0]),
-                            (UOpKind::Mul, Some(value), _) if value == 1.0 => Some(op.src[1]),
-                            (UOpKind::Div, _, Some(value)) if value == 1.0 => Some(op.src[0]),
+                            (UOpKind::Add, _, Some(0.0)) => Some(op.src[0]),
+                            (UOpKind::Add, Some(0.0), _) => Some(op.src[1]),
+                            (UOpKind::Sub, _, Some(0.0)) => Some(op.src[0]),
+                            (UOpKind::Mul, _, Some(1.0)) => Some(op.src[0]),
+                            (UOpKind::Mul, Some(1.0), _) => Some(op.src[1]),
+                            (UOpKind::Div, _, Some(1.0)) => Some(op.src[0]),
                             _ => None,
                         }
                     }
@@ -1620,7 +1620,7 @@ impl TinyGraph {
                         .map(|op| KernelGroup { ops: vec![op] }),
                 ),
                 Some(stages) if stages > 1 && kernel.group.ops.len() > 1 => {
-                    let chunk = (kernel.group.ops.len() + stages - 1) / stages;
+                    let chunk = kernel.group.ops.len().div_ceil(stages);
                     groups.extend(
                         kernel
                             .group
@@ -2120,15 +2120,15 @@ impl TinyGraph {
                     let indices = values.get(&op.src[1]).unwrap();
                     let update_values = values.get(&op.src[2]).unwrap();
                     let mut output = base.clone();
-                    for update in 0..*updates {
-                        let raw = indices[update];
+                    for (update, raw) in indices.iter().take(*updates).enumerate() {
                         if !raw.is_finite()
-                            || raw < 0.0
+                            || *raw < 0.0
                             || raw.fract() != 0.0
-                            || raw >= *rows as f32
+                            || *raw >= *rows as f32
                         {
                             return Err(GraphError::ShapeMismatch(op.id));
                         }
+                        let raw = *raw;
                         let destination = raw as usize * *features;
                         let source = update * *features;
                         output[destination..destination + *features]
@@ -2166,7 +2166,7 @@ impl TinyGraph {
                             source_strides[axis + 1] * source_op.shape[axis + 1] as usize;
                     }
                     let mut output = vec![0.0; element_count(&op.shape)];
-                    for out_linear in 0..output.len() {
+                    for (out_linear, destination) in output.iter_mut().enumerate() {
                         let mut remainder = out_linear;
                         let mut source_linear = 0usize;
                         for out_axis in (0..op.shape.len()).rev() {
@@ -2174,7 +2174,7 @@ impl TinyGraph {
                             remainder /= op.shape[out_axis] as usize;
                             source_linear += coordinate * source_strides[permutation[out_axis]];
                         }
-                        output[out_linear] = input[source_linear];
+                        *destination = input[source_linear];
                     }
                     output
                 }
@@ -2475,7 +2475,7 @@ fn element_count(shape: &[u64]) -> usize {
 fn broadcast_shape(left: &[u64], right: &[u64]) -> Option<Vec<u64>> {
     let rank = left.len().max(right.len());
     let mut shape = vec![1; rank];
-    for axis in 0..rank {
+    for (axis, output_dim) in shape.iter_mut().take(rank).enumerate() {
         let left_dim = left
             .get(left.len().wrapping_sub(rank - axis))
             .copied()
@@ -2487,7 +2487,7 @@ fn broadcast_shape(left: &[u64], right: &[u64]) -> Option<Vec<u64>> {
         if left_dim != right_dim && left_dim != 1 && right_dim != 1 {
             return None;
         }
-        shape[axis] = left_dim.max(right_dim);
+        *output_dim = left_dim.max(right_dim);
     }
     Some(shape)
 }
@@ -3111,14 +3111,27 @@ fn scalar_is_left(op: &UOp, graph: &TinyGraph) -> bool {
 pub struct KernelGroup {
     pub ops: Vec<KernelOp>,
 }
+
+type BroadcastBinaryShape = (BroadcastBinaryOperation, Vec<u64>, Vec<u64>, Vec<u64>);
+
+type Convolution2dShape = (
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+    usize,
+);
+
 impl KernelGroup {
     fn ops_after_broadcast(&self) -> &[KernelOp] {
         self.ops.get(1..).unwrap_or(&[])
     }
 
-    pub fn broadcast_binary_shape(
-        &self,
-    ) -> Option<(BroadcastBinaryOperation, Vec<u64>, Vec<u64>, Vec<u64>)> {
+    pub fn broadcast_binary_shape(&self) -> Option<BroadcastBinaryShape> {
         match self.ops.first() {
             Some(KernelOp::BroadcastBinary {
                 operation,
@@ -3474,19 +3487,7 @@ impl KernelGroup {
         }
     }
 
-    pub fn conv2d_shape(
-        &self,
-    ) -> Option<(
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-    )> {
+    pub fn conv2d_shape(&self) -> Option<Convolution2dShape> {
         match self.ops.as_slice() {
             [KernelOp::Conv2d {
                 batch,

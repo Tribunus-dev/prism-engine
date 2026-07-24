@@ -122,9 +122,9 @@ pub enum OqError {
 pub fn apply_oq(_weights: &[u8], _config: &OqConfig) -> Result<Vec<QuantizedTensor>, OqError> {
     // oQ quantization is not yet implemented. When the feature is enabled,
     // this stub returns an error rather than panicking.
-    return Err(OqError::Unimplemented(
+    Err(OqError::Unimplemented(
         "oQ quantization not yet implemented".into(),
-    ));
+    ))
 }
 
 #[cfg(test)]

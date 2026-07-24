@@ -18,9 +18,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use crate::contract::SourceMatrixLayout;
-use crate::contract::{
-    QuantizationValidationProfile, TensorClass, WeightValidationReport,
-};
+use crate::contract::{QuantizationValidationProfile, TensorClass, WeightValidationReport};
 use crate::sweep::candidate::{
     quant_family_id_name, ByteAccounting, FamilyPolicyEntry, MatrixShape, PackedTileLayout,
     PerClassPolicy, QuantFamilyId, QuantSweepReceipt,
@@ -72,7 +70,7 @@ pub fn scan_tensors(source_dir: &Path) -> Result<Vec<TensorEntry>, String> {
     let mut dir = fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))?;
     while let Some(entry) = dir.next().transpose().map_err(|e| format!("entry: {e}"))? {
         let path = entry.path();
-        if path.extension().map_or(true, |e| e != "safetensors") {
+        if path.extension().is_none_or(|e| e != "safetensors") {
             continue;
         }
         let file = fs::File::open(&path).map_err(|e| format!("open {:?}: {e}", path))?;
@@ -222,188 +220,12 @@ fn matches_depth_by_entry(entry: &TensorEntry, depth_ranges: &[(usize, usize)]) 
         .iter()
         .any(|(start, end)| layer >= *start && layer <= *end)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sweep::spec::DepthAwareSelector;
-
-    #[test]
-    fn test_parse_depth_ranges() {
-        let ranges = vec!["0-3".to_string(), "20-25".to_string(), "42-46".to_string()];
-        let parsed = parse_depth_ranges(&ranges).unwrap();
-        assert_eq!(parsed, vec![(0, 3), (20, 25), (42, 46)]);
-    }
-
-    #[test]
-    fn test_parse_depth_ranges_invalid() {
-        assert!(parse_depth_ranges(&["abc".to_string()]).is_err());
-        assert!(parse_depth_ranges(&["5-3-2".to_string()]).is_err());
-        assert!(parse_depth_ranges(&["-3".to_string()]).is_err());
-    }
-
-    #[test]
-    fn test_matches_depth_by_entry_layer_index() {
-        let e = TensorEntry {
-            key: "model.layers.5.self_attn.q_proj.weight".into(),
-            dtype: "F32".into(),
-            shape: vec![4096, 4096],
-            tensor_class: TensorClass::DecoderAttentionProjection,
-            layer_index: Some(5),
-        };
-        let ranges = [(0, 3), (20, 25), (42, 46)];
-        assert!(!matches_depth_by_entry(&e, &ranges));
-        let ranges2 = [(4, 6), (20, 25)];
-        assert!(matches_depth_by_entry(&e, &ranges2));
-    }
-
-    #[test]
-    fn test_matches_depth_by_entry_fallback() {
-        // Key has "layers.N." pattern but layer_index is None
-        let e = TensorEntry {
-            key: "model.layers.12.self_attn.v_proj.weight".into(),
-            dtype: "F32".into(),
-            shape: vec![4096, 4096],
-            tensor_class: TensorClass::DecoderAttentionProjection,
-            layer_index: None, // fallback path
-        };
-        let ranges = [(10, 15)];
-        assert!(matches_depth_by_entry(&e, &ranges));
-        let ranges2 = [(0, 3)];
-        assert!(!matches_depth_by_entry(&e, &ranges2));
-    }
-
-    #[test]
-    fn test_matches_depth_by_entry_no_layer() {
-        // Key doesn't look like a layer at all
-        let e = TensorEntry {
-            key: "model.lm_head.weight".into(),
-            dtype: "F32".into(),
-            shape: vec![32000, 4096],
-            tensor_class: TensorClass::OutputHead,
-            layer_index: None,
-        };
-        let ranges = [(0, 100)];
-        assert!(!matches_depth_by_entry(&e, &ranges));
-    }
-
-    #[test]
-    fn test_depth_aware_selector_empty_class() {
-        // Empty tensor_class means select all classes
-        let entries = vec![
-            TensorEntry {
-                key: "model.layers.0.self_attn.q_proj.weight".into(),
-                dtype: "F32".into(),
-                shape: vec![4096, 4096],
-                tensor_class: TensorClass::DecoderAttentionProjection,
-                layer_index: Some(0),
-            },
-            TensorEntry {
-                key: "model.layers.25.self_attn.q_proj.weight".into(),
-                dtype: "F32".into(),
-                shape: vec![4096, 4096],
-                tensor_class: TensorClass::DecoderAttentionProjection,
-                layer_index: Some(25),
-            },
-        ];
-        let selector = TensorSelector::DepthAware(DepthAwareSelector {
-            tensor_class: String::new(),
-            depth_ranges: vec!["0-5".to_string()],
-            max_tensors: 10,
-        });
-        let selected = select_tensors(&entries, &[selector]);
-        assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].key, "model.layers.0.self_attn.q_proj.weight");
-    }
-
-    #[test]
-    fn test_depth_aware_selector_class_filter() {
-        let entries = vec![
-            TensorEntry {
-                key: "model.layers.0.self_attn.q_proj.weight".into(),
-                dtype: "F32".into(),
-                shape: vec![4096, 4096],
-                tensor_class: TensorClass::DecoderAttentionProjection,
-                layer_index: Some(0),
-            },
-            TensorEntry {
-                key: "model.layers.0.mlp.gate_proj.weight".into(),
-                dtype: "F32".into(),
-                shape: vec![4096, 11008],
-                tensor_class: TensorClass::DecoderMlpProjection,
-                layer_index: Some(0),
-            },
-        ];
-        // Filter only MLP projections
-        let selector = TensorSelector::DepthAware(DepthAwareSelector {
-            tensor_class: "DecoderMlpProjection".to_string(),
-            depth_ranges: vec!["0-5".to_string()],
-            max_tensors: 10,
-        });
-        let selected = select_tensors(&entries, &[selector]);
-        assert_eq!(selected.len(), 1);
-        assert_eq!(selected[0].tensor_class, TensorClass::DecoderMlpProjection);
-    }
-
-    #[test]
-    fn test_depth_aware_selector_max_tensors() {
-        let entries: Vec<TensorEntry> = (0..20)
-            .map(|i| TensorEntry {
-                key: format!("model.layers.{}.self_attn.q_proj.weight", i),
-                dtype: "F32".into(),
-                shape: vec![4096, 4096],
-                tensor_class: TensorClass::DecoderAttentionProjection,
-                layer_index: Some(i),
-            })
-            .collect();
-        let selector = TensorSelector::DepthAware(DepthAwareSelector {
-            tensor_class: String::new(),
-            depth_ranges: vec!["0-30".to_string()],
-            max_tensors: 5,
-        });
-        let selected = select_tensors(&entries, &[selector]);
-        assert_eq!(selected.len(), 5);
-    }
-
-    #[test]
-    fn test_depth_aware_serde_roundtrip() {
-        let sel = DepthAwareSelector {
-            tensor_class: "DecoderAttentionProjection".to_string(),
-            depth_ranges: vec!["0-3".to_string(), "20-25".to_string()],
-            max_tensors: 50,
-        };
-        let json = serde_json::to_string(&sel).unwrap();
-        let back: DepthAwareSelector = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.tensor_class, "DecoderAttentionProjection");
-        assert_eq!(back.depth_ranges, vec!["0-3", "20-25"]);
-        assert_eq!(back.max_tensors, 50);
-    }
-
-    #[test]
-    fn test_depth_aware_enum_serde_roundtrip() {
-        let sel = TensorSelector::DepthAware(DepthAwareSelector {
-            tensor_class: String::new(),
-            depth_ranges: vec!["0-3".to_string()],
-            max_tensors: 10,
-        });
-        let json = serde_json::to_string(&sel).unwrap();
-        let back: TensorSelector = serde_json::from_str(&json).unwrap();
-        match &back {
-            TensorSelector::DepthAware(d) => {
-                assert!(d.tensor_class.is_empty());
-                assert_eq!(d.depth_ranges, vec!["0-3"]);
-                assert_eq!(d.max_tensors, 10);
-            }
-            _ => panic!("expected DepthAware"),
-        }
-    }
-}
 /// Load a single tensor's f32 data from safetensors into a Vec<f32>.
 pub fn load_tensor_f32(source_dir: &Path, target_key: &str) -> Result<Vec<f32>, String> {
     let mut dir = fs::read_dir(source_dir).map_err(|e| format!("read source dir: {e}"))?;
     while let Some(entry) = dir.next().transpose().map_err(|e| format!("entry: {e}"))? {
         let path = entry.path();
-        if path.extension().map_or(true, |e| e != "safetensors") {
+        if path.extension().is_none_or(|e| e != "safetensors") {
             continue;
         }
         let file = fs::File::open(&path).map_err(|e| format!("open {:?}: {e}", path))?;
@@ -973,4 +795,180 @@ pub fn write_sweep_output(out_dir: &Path, result: &SweepRunResult) -> Result<(),
     .map_err(|e| format!("write policy: {e}"))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sweep::spec::DepthAwareSelector;
+
+    #[test]
+    fn test_parse_depth_ranges() {
+        let ranges = vec!["0-3".to_string(), "20-25".to_string(), "42-46".to_string()];
+        let parsed = parse_depth_ranges(&ranges).unwrap();
+        assert_eq!(parsed, vec![(0, 3), (20, 25), (42, 46)]);
+    }
+
+    #[test]
+    fn test_parse_depth_ranges_invalid() {
+        assert!(parse_depth_ranges(&["abc".to_string()]).is_err());
+        assert!(parse_depth_ranges(&["5-3-2".to_string()]).is_err());
+        assert!(parse_depth_ranges(&["-3".to_string()]).is_err());
+    }
+
+    #[test]
+    fn test_matches_depth_by_entry_layer_index() {
+        let e = TensorEntry {
+            key: "model.layers.5.self_attn.q_proj.weight".into(),
+            dtype: "F32".into(),
+            shape: vec![4096, 4096],
+            tensor_class: TensorClass::DecoderAttentionProjection,
+            layer_index: Some(5),
+        };
+        let ranges = [(0, 3), (20, 25), (42, 46)];
+        assert!(!matches_depth_by_entry(&e, &ranges));
+        let ranges2 = [(4, 6), (20, 25)];
+        assert!(matches_depth_by_entry(&e, &ranges2));
+    }
+
+    #[test]
+    fn test_matches_depth_by_entry_fallback() {
+        // Key has "layers.N." pattern but layer_index is None
+        let e = TensorEntry {
+            key: "model.layers.12.self_attn.v_proj.weight".into(),
+            dtype: "F32".into(),
+            shape: vec![4096, 4096],
+            tensor_class: TensorClass::DecoderAttentionProjection,
+            layer_index: None, // fallback path
+        };
+        let ranges = [(10, 15)];
+        assert!(matches_depth_by_entry(&e, &ranges));
+        let ranges2 = [(0, 3)];
+        assert!(!matches_depth_by_entry(&e, &ranges2));
+    }
+
+    #[test]
+    fn test_matches_depth_by_entry_no_layer() {
+        // Key doesn't look like a layer at all
+        let e = TensorEntry {
+            key: "model.lm_head.weight".into(),
+            dtype: "F32".into(),
+            shape: vec![32000, 4096],
+            tensor_class: TensorClass::OutputHead,
+            layer_index: None,
+        };
+        let ranges = [(0, 100)];
+        assert!(!matches_depth_by_entry(&e, &ranges));
+    }
+
+    #[test]
+    fn test_depth_aware_selector_empty_class() {
+        // Empty tensor_class means select all classes
+        let entries = vec![
+            TensorEntry {
+                key: "model.layers.0.self_attn.q_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(0),
+            },
+            TensorEntry {
+                key: "model.layers.25.self_attn.q_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(25),
+            },
+        ];
+        let selector = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: String::new(),
+            depth_ranges: vec!["0-5".to_string()],
+            max_tensors: 10,
+        });
+        let selected = select_tensors(&entries, &[selector]);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].key, "model.layers.0.self_attn.q_proj.weight");
+    }
+
+    #[test]
+    fn test_depth_aware_selector_class_filter() {
+        let entries = vec![
+            TensorEntry {
+                key: "model.layers.0.self_attn.q_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(0),
+            },
+            TensorEntry {
+                key: "model.layers.0.mlp.gate_proj.weight".into(),
+                dtype: "F32".into(),
+                shape: vec![4096, 11008],
+                tensor_class: TensorClass::DecoderMlpProjection,
+                layer_index: Some(0),
+            },
+        ];
+        // Filter only MLP projections
+        let selector = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: "DecoderMlpProjection".to_string(),
+            depth_ranges: vec!["0-5".to_string()],
+            max_tensors: 10,
+        });
+        let selected = select_tensors(&entries, &[selector]);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].tensor_class, TensorClass::DecoderMlpProjection);
+    }
+
+    #[test]
+    fn test_depth_aware_selector_max_tensors() {
+        let entries: Vec<TensorEntry> = (0..20)
+            .map(|i| TensorEntry {
+                key: format!("model.layers.{}.self_attn.q_proj.weight", i),
+                dtype: "F32".into(),
+                shape: vec![4096, 4096],
+                tensor_class: TensorClass::DecoderAttentionProjection,
+                layer_index: Some(i),
+            })
+            .collect();
+        let selector = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: String::new(),
+            depth_ranges: vec!["0-30".to_string()],
+            max_tensors: 5,
+        });
+        let selected = select_tensors(&entries, &[selector]);
+        assert_eq!(selected.len(), 5);
+    }
+
+    #[test]
+    fn test_depth_aware_serde_roundtrip() {
+        let sel = DepthAwareSelector {
+            tensor_class: "DecoderAttentionProjection".to_string(),
+            depth_ranges: vec!["0-3".to_string(), "20-25".to_string()],
+            max_tensors: 50,
+        };
+        let json = serde_json::to_string(&sel).unwrap();
+        let back: DepthAwareSelector = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tensor_class, "DecoderAttentionProjection");
+        assert_eq!(back.depth_ranges, vec!["0-3", "20-25"]);
+        assert_eq!(back.max_tensors, 50);
+    }
+
+    #[test]
+    fn test_depth_aware_enum_serde_roundtrip() {
+        let sel = TensorSelector::DepthAware(DepthAwareSelector {
+            tensor_class: String::new(),
+            depth_ranges: vec!["0-3".to_string()],
+            max_tensors: 10,
+        });
+        let json = serde_json::to_string(&sel).unwrap();
+        let back: TensorSelector = serde_json::from_str(&json).unwrap();
+        match &back {
+            TensorSelector::DepthAware(d) => {
+                assert!(d.tensor_class.is_empty());
+                assert_eq!(d.depth_ranges, vec!["0-3"]);
+                assert_eq!(d.max_tensors, 10);
+            }
+            _ => panic!("expected DepthAware"),
+        }
+    }
 }

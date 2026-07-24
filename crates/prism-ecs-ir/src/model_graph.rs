@@ -193,22 +193,22 @@ impl UnifiedConfig {
     /// Extract rope_theta from rope_parameters or flat field.
     fn resolve_rope_theta(raw: &RawHfConfig) -> f32 {
         // Check rope_parameters.rope_theta first, then flat rope_theta
-        for block in [
+        for c in [
             &raw.text_config,
             &raw.language_config,
             &Some(raw.root.clone()),
         ]
         .iter()
+        .copied()
+        .flatten()
         {
-            if let Some(c) = block {
-                if let Some(rp) = &c.rope_parameters {
-                    if let Some(theta) = rp.get("rope_theta").and_then(|v| v.as_f64()) {
-                        return theta as f32;
-                    }
+            if let Some(rp) = &c.rope_parameters {
+                if let Some(theta) = rp.get("rope_theta").and_then(|v| v.as_f64()) {
+                    return theta as f32;
                 }
-                if let Some(theta) = c.rope_theta {
-                    return theta;
-                }
+            }
+            if let Some(theta) = c.rope_theta {
+                return theta;
             }
         }
         10_000.0
@@ -273,7 +273,7 @@ impl UnifiedConfig {
             is_rms_norm: raw
                 .text_config
                 .as_ref()
-                .or_else(|| raw.language_config.as_ref())
+                .or(raw.language_config.as_ref())
                 .map(|c| c.rms_norm_eps.is_some())
                 .unwrap_or(true),
             rope_theta,

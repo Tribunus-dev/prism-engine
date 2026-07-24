@@ -84,6 +84,9 @@ pub struct OpVerifierContext {
 
 // ── OpInfo registry ─────────────────────────────────────────────────────────
 
+type VerifyFn = fn(&OpVerifierContext) -> Result<(), Vec<String>>;
+type InferFn = fn(&[Type], &[Attribute]) -> Option<Vec<Type>>;
+
 #[derive(Default)]
 pub struct OpRegistry {
     ops: std::collections::HashMap<&'static str, OpInfo>,
@@ -92,8 +95,8 @@ pub struct OpRegistry {
 pub struct OpInfo {
     pub name: &'static str,
     pub description: &'static str,
-    pub verify_fn: Option<fn(&OpVerifierContext) -> Result<(), Vec<String>>>,
-    pub infer_fn: Option<fn(&[Type], &[Attribute]) -> Option<Vec<Type>>>,
+    pub verify_fn: Option<VerifyFn>,
+    pub infer_fn: Option<InferFn>,
 }
 
 impl OpRegistry {

@@ -267,20 +267,15 @@ pub struct TileGeometry {
 }
 
 /// Fusion operation policy.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum FusionPolicy {
     /// No fusion — nodes remain unfused.
+    #[default]
     Unfused,
     /// Nodes are fused into a single kernel.
     Fused,
     /// Fusion with a maximum depth limit.
     MaxDepth(u32),
-}
-
-impl Default for FusionPolicy {
-    fn default() -> Self {
-        Self::Unfused
-    }
 }
 
 /// Per-node metadata set by mutation operations during evolutionary search.

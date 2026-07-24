@@ -9,6 +9,11 @@ pub struct CancelToken {
     deadline: Option<Instant>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CancelError {
+    DeadlineExceeded,
+}
+
 impl CancelToken {
     /// Create a new cancel token.
     ///
@@ -22,11 +27,12 @@ impl CancelToken {
     /// Check whether the deadline has expired.
     ///
     /// Returns `Ok(())` if no deadline is set or the deadline hasn't been
-    /// reached. Returns `Err(())` if the deadline has passed.
-    pub fn heartbeat(&self) -> Result<(), ()> {
+    /// reached. Returns `Err(CancelError::DeadlineExceeded)` if the deadline
+    /// has passed.
+    pub fn heartbeat(&self) -> Result<(), CancelError> {
         if let Some(deadline) = self.deadline {
             if Instant::now() >= deadline {
-                return Err(());
+                return Err(CancelError::DeadlineExceeded);
             }
         }
         Ok(())

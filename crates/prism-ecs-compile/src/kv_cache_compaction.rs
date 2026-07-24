@@ -152,26 +152,48 @@ pub fn evaluate_kv_compaction(
     }
     let mut reasons = Vec::new();
     if let Some(limit) = policy.max_compacted_bytes {
-        if measurement.compacted_bytes > limit { reasons.push("compacted bytes exceed budget".into()); }
+        if measurement.compacted_bytes > limit {
+            reasons.push("compacted bytes exceed budget".into());
+        }
     }
     if let Some(limit) = policy.max_rewrite_bytes {
-        if measurement.rewrite_bytes > limit { reasons.push("rewrite bytes exceed budget".into()); }
+        if measurement.rewrite_bytes > limit {
+            reasons.push("rewrite bytes exceed budget".into());
+        }
     }
     if let Some(limit) = policy.max_index_bytes {
-        if measurement.index_bytes > limit { reasons.push("index bytes exceed budget".into()); }
+        if measurement.index_bytes > limit {
+            reasons.push("index bytes exceed budget".into());
+        }
     }
     if let Some(limit) = policy.max_compaction_latency_ms {
-        if measurement.compaction_latency_ms > limit { reasons.push("compaction latency exceeds budget".into()); }
+        if measurement.compaction_latency_ms > limit {
+            reasons.push("compaction latency exceeds budget".into());
+        }
     }
     if let Some(limit) = policy.max_decode_latency_ms {
-        if measurement.decode_latency_ms > limit { reasons.push("decode latency exceeds budget".into()); }
+        if measurement.decode_latency_ms > limit {
+            reasons.push("decode latency exceeds budget".into());
+        }
     }
-    if measurement.long_context_recall < policy.min_long_context_recall { reasons.push("long-context recall regressed".into()); }
-    if measurement.instruction_retention < policy.min_instruction_retention { reasons.push("instruction retention regressed".into()); }
-    if measurement.tool_call_correctness < policy.min_tool_call_correctness { reasons.push("tool-call correctness regressed".into()); }
-    if measurement.agentic_success < policy.min_agentic_success { reasons.push("agentic success regressed".into()); }
-    if measurement.system_prompt_leakage > policy.max_system_prompt_leakage { reasons.push("system-prompt leakage exceeded limit".into()); }
-    if measurement.fallback_frequency > policy.max_fallback_frequency { reasons.push("fallback frequency exceeded limit".into()); }
+    if measurement.long_context_recall < policy.min_long_context_recall {
+        reasons.push("long-context recall regressed".into());
+    }
+    if measurement.instruction_retention < policy.min_instruction_retention {
+        reasons.push("instruction retention regressed".into());
+    }
+    if measurement.tool_call_correctness < policy.min_tool_call_correctness {
+        reasons.push("tool-call correctness regressed".into());
+    }
+    if measurement.agentic_success < policy.min_agentic_success {
+        reasons.push("agentic success regressed".into());
+    }
+    if measurement.system_prompt_leakage > policy.max_system_prompt_leakage {
+        reasons.push("system-prompt leakage exceeded limit".into());
+    }
+    if measurement.fallback_frequency > policy.max_fallback_frequency {
+        reasons.push("fallback frequency exceeded limit".into());
+    }
 
     let compression_ratio = if measurement.compacted_bytes == 0 {
         f64::INFINITY
@@ -198,10 +220,34 @@ pub fn propose_compaction_candidates(
 ) -> Vec<KvCompactionCandidate> {
     let specs = [
         (KvCompactionAlgorithm::PagePacking, 128, None, 0, None),
-        (KvCompactionAlgorithm::PrefixDeduplication, 128, None, 256, None),
-        (KvCompactionAlgorithm::SlidingWindowCompaction, 64, Some(4096), 256, None),
-        (KvCompactionAlgorithm::HeadGroupCompaction, 128, None, 256, Some(4)),
-        (KvCompactionAlgorithm::SparseIndexCompaction, 128, Some(8192), 256, Some(8)),
+        (
+            KvCompactionAlgorithm::PrefixDeduplication,
+            128,
+            None,
+            256,
+            None,
+        ),
+        (
+            KvCompactionAlgorithm::SlidingWindowCompaction,
+            64,
+            Some(4096),
+            256,
+            None,
+        ),
+        (
+            KvCompactionAlgorithm::HeadGroupCompaction,
+            128,
+            None,
+            256,
+            Some(4),
+        ),
+        (
+            KvCompactionAlgorithm::SparseIndexCompaction,
+            128,
+            Some(8192),
+            256,
+            Some(8),
+        ),
         (KvCompactionAlgorithm::Hybrid, 64, Some(4096), 512, Some(4)),
     ];
     specs
@@ -218,12 +264,15 @@ pub fn propose_compaction_candidates(
                 head_group_size: heads,
                 sparse_stride: (index >= 4).then_some(8),
                 residual_precision: (index == 5).then_some("int8".into()),
-                estimated_compacted_bytes: original_bytes.saturating_mul(55 + index as u64 * 4) / 100,
+                estimated_compacted_bytes: original_bytes.saturating_mul(55 + index as u64 * 4)
+                    / 100,
                 estimated_rewrite_bytes: original_bytes.saturating_mul(5 + index as u64) / 100,
                 estimated_index_bytes: original_bytes.saturating_mul(1 + index as u64) / 100,
                 policy: BTreeMap::new(),
                 candidate_digest: String::new(),
-            }.seal().ok()
+            }
+            .seal()
+            .ok()
         })
         .collect()
 }
@@ -243,22 +292,40 @@ mod tests {
     fn candidates_are_sealed_and_generation_bound() {
         let candidates = propose_compaction_candidates("generation-3", 1_000_000);
         assert!(!candidates.is_empty());
-        assert!(candidates.iter().all(|candidate| !candidate.candidate_digest.is_empty()));
-        assert!(candidates.iter().all(|candidate| candidate.source_generation_digest == "generation-3"));
+        assert!(candidates
+            .iter()
+            .all(|candidate| !candidate.candidate_digest.is_empty()));
+        assert!(candidates
+            .iter()
+            .all(|candidate| candidate.source_generation_digest == "generation-3"));
     }
 
     #[test]
     fn admission_rejects_instruction_regression() {
         let candidate = propose_compaction_candidates("generation-3", 1_000_000).remove(0);
-        let receipt = evaluate_kv_compaction(&candidate, &KvCompactionMeasurement {
-            candidate_digest: candidate.candidate_digest.clone(), measured: true,
-            execution_fingerprint: "real-run".into(), original_bytes: 1_000_000,
-            compacted_bytes: 500_000, rewrite_bytes: 10_000, index_bytes: 5_000,
-            compaction_latency_ms: 1.0, decode_latency_ms: 10.0, tokens_per_second: 50.0,
-            long_context_recall: 1.0, instruction_retention: 0.8,
-            tool_call_correctness: 1.0, agentic_success: 1.0,
-            system_prompt_leakage: 0.0, fallback_frequency: 0.0,
-        }, &KvCompactionAdmissionPolicy::default()).unwrap();
+        let receipt = evaluate_kv_compaction(
+            &candidate,
+            &KvCompactionMeasurement {
+                candidate_digest: candidate.candidate_digest.clone(),
+                measured: true,
+                execution_fingerprint: "real-run".into(),
+                original_bytes: 1_000_000,
+                compacted_bytes: 500_000,
+                rewrite_bytes: 10_000,
+                index_bytes: 5_000,
+                compaction_latency_ms: 1.0,
+                decode_latency_ms: 10.0,
+                tokens_per_second: 50.0,
+                long_context_recall: 1.0,
+                instruction_retention: 0.8,
+                tool_call_correctness: 1.0,
+                agentic_success: 1.0,
+                system_prompt_leakage: 0.0,
+                fallback_frequency: 0.0,
+            },
+            &KvCompactionAdmissionPolicy::default(),
+        )
+        .unwrap();
         assert!(!receipt.admitted);
     }
 }

@@ -69,7 +69,7 @@ impl AmdLaunchRequest {
             self.binary.block_dims.1,
             self.binary.block_dims.2,
         ];
-        if dimensions.iter().any(|dimension| *dimension == 0) {
+        if dimensions.contains(&0) {
             return Err("ROCm launch dimensions must be nonzero".into());
         }
         let mut names = std::collections::HashSet::new();

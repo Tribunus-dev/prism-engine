@@ -17,17 +17,9 @@ use crate::error::WorldError;
 /// This is the original HashMap-based store. The newer `ColumnStore` provides
 /// generation-aware SparseSet storage; this wrapper provides backward-compatible
 /// access on top of columnar storage.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ComponentStore {
     pub(crate) data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
-}
-
-impl Default for ComponentStore {
-    fn default() -> Self {
-        Self {
-            data: HashMap::new(),
-        }
-    }
 }
 
 impl ComponentStore {
@@ -103,17 +95,9 @@ impl ComponentStore {
 }
 
 /// Type-erased storage for global resources (not per-entity).
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ResourceStore {
     pub(crate) data: HashMap<TypeId, Box<dyn Any + Send + Sync>>,
-}
-
-impl Default for ResourceStore {
-    fn default() -> Self {
-        Self {
-            data: HashMap::new(),
-        }
-    }
 }
 
 impl ResourceStore {
@@ -292,7 +276,7 @@ impl MemoryStore {
     }
 
     /// Query entries with a key prefix. Returns matching keys and their values.
-    pub fn query_prefix(&self, prefix: &[u8]) -> Result<Vec<(Vec<u8>, Vec<u8>)>, MemoryStoreError> {
+    pub fn query_prefix(&self, prefix: &[u8]) -> Result<ByteRecordCollection, MemoryStoreError> {
         #[cfg(feature = "lmdb")]
         if let Some(backend) = &self.lmdb {
             let txn = backend
@@ -324,6 +308,8 @@ impl MemoryStore {
             .collect())
     }
 }
+
+type ByteRecordCollection = Vec<(Vec<u8>, Vec<u8>)>;
 
 impl Default for MemoryStore {
     fn default() -> Self {

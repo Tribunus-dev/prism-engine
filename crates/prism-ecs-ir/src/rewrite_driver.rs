@@ -377,7 +377,7 @@ mod tests {
             .add_component(block, crate::block::BlockArguments(vec![]))
             .unwrap();
 
-        let ops = vec!["test.op", "test.erase", "test.op", "test.other"];
+        let ops = ["test.op", "test.erase", "test.op", "test.other"];
 
         let op_entities: Vec<Entity> = ops
             .iter()

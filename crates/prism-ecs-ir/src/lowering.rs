@@ -72,7 +72,6 @@ pub fn lower_matmul(world: &mut World, matmul_op: Entity) -> Result<Entity, Stri
 
     // The full lowering would wire up operands, create scf.yield, etc.
     // For now, this is a structural scaffold.
-    drop(builder);
 
     Ok(loop_op)
 }

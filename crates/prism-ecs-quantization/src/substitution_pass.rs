@@ -194,13 +194,12 @@ fn pack_for_candidate(
                 .get("group_size")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(32) as usize;
-            let (codes, scales, biases, _extra) =
-                crate::sweep::families::nf4::pack_nf4_matrix(
-                    weights,
-                    in_f as usize,
-                    out_f as usize,
-                    group_size,
-                );
+            let (codes, scales, biases, _extra) = crate::sweep::families::nf4::pack_nf4_matrix(
+                weights,
+                in_f as usize,
+                out_f as usize,
+                group_size,
+            );
             let mut meta = Vec::with_capacity(scales.len() * 4 + biases.len() * 4);
             for &s in &scales {
                 meta.extend_from_slice(&s.to_le_bytes());
@@ -311,10 +310,10 @@ fn evaluate_weight_gate(
     metrics.insert("zero_collapse_ratio".into(), zero_collapse);
 
     let passed = true
-        && gates.weight_nrmse_max.map_or(true, |g| nrmse <= g)
+        && gates.weight_nrmse_max.is_none_or(|g| nrmse <= g)
         && gates
             .weight_zero_collapse_max
-            .map_or(true, |g| zero_collapse <= g);
+            .is_none_or(|g| zero_collapse <= g);
 
     Some(SubstitutionEvidence {
         tier: EvidenceTier::WeightSpace,
@@ -410,9 +409,9 @@ fn evaluate_operator_gate(
     metrics.insert("max_abs_error".into(), max_abs);
 
     let passed = true
-        && gates.operator_nrmse_max.map_or(true, |g| nrmse <= g)
-        && gates.operator_cosine_min.map_or(true, |g| cosine >= g)
-        && gates.operator_max_abs_max.map_or(true, |g| max_abs <= g);
+        && gates.operator_nrmse_max.is_none_or(|g| nrmse <= g)
+        && gates.operator_cosine_min.is_none_or(|g| cosine >= g)
+        && gates.operator_max_abs_max.is_none_or(|g| max_abs <= g);
 
     Some(SubstitutionEvidence {
         tier: EvidenceTier::Operator,

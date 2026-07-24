@@ -764,6 +764,7 @@ impl SearchCoordinator {
                 quality_diversity_archive: Vec::new(),
                 best_genome: None,
                 trace_digest: String::new(),
+                ..SearchTrace::default()
             },
             config,
             memory: EvolutionaryMemory::default(),
@@ -2265,12 +2266,9 @@ mod tests {
                 }
             }
 
-            let compiled = crate::uop::compile_spatial_graph_strategies(
-                graph,
-                lowering_target,
-                &strategies,
-            )
-            .map_err(|error| format!("tinygrad evaluation failed: {error}"))?;
+            let compiled =
+                crate::uop::compile_spatial_graph_strategies(graph, lowering_target, &strategies)
+                    .map_err(|error| format!("tinygrad evaluation failed: {error}"))?;
             if compiled.is_empty() {
                 return Err("tinygrad candidate set is empty".to_string());
             }
@@ -2303,6 +2301,7 @@ mod tests {
                 projected: false,
                 projection_basis: "tinygrad-lowering".into(),
                 mixed_precision_graph: "tinygrad-mixed-precision-graph".into(),
+                ..crate::workload_search::WorkloadThroughputEvidence::default()
             })
         }
 
@@ -2459,9 +2458,7 @@ mod tests {
         assert_eq!(evidence.len(), profile_count * 7);
     }
 
-    fn assert_typed_profile_coverage(
-        profile_refs: &[crate::workload_search::WorkloadProfile],
-    ) {
+    fn assert_typed_profile_coverage(profile_refs: &[crate::workload_search::WorkloadProfile]) {
         let mut seen_prefill = false;
         let mut seen_decode = false;
         let mut seen_realtime = false;
@@ -2746,39 +2743,32 @@ mod tests {
             .filter(|item| item.representation == "Ternary158")
             .collect::<Vec<_>>();
         assert!(!ternary.is_empty());
-        assert_typed_profile_coverage(
-            &ternary
-                .iter()
-                .map(|item| item.profile)
-                .collect::<Vec<_>>(),
-        );
+        assert_typed_profile_coverage(&ternary.iter().map(|item| item.profile).collect::<Vec<_>>());
 
         assert!(
-            ternary
-                .iter()
-                .any(|sample| sample.profile.phase == crate::workload_search::InferenceWorkloadPhase::Prefill),
+            ternary.iter().any(|sample| sample.profile.phase
+                == crate::workload_search::InferenceWorkloadPhase::Prefill),
             "ternary evidence should include prefill profiles"
         );
         assert!(
-            ternary
-                .iter()
-                .any(|sample| sample.profile.phase == crate::workload_search::InferenceWorkloadPhase::Decode),
+            ternary.iter().any(|sample| sample.profile.phase
+                == crate::workload_search::InferenceWorkloadPhase::Decode),
             "ternary evidence should include decode profiles"
         );
         assert!(
-            ternary
-                .iter()
-                .any(|sample| sample.profile.service_class == crate::workload_search::ServiceClass::Batch),
+            ternary.iter().any(|sample| sample.profile.service_class
+                == crate::workload_search::ServiceClass::Batch),
             "ternary evidence should include batch workloads"
         );
         assert!(
-            ternary
-                .iter()
-                .any(|sample| sample.profile.service_class == crate::workload_search::ServiceClass::Realtime),
+            ternary.iter().any(|sample| sample.profile.service_class
+                == crate::workload_search::ServiceClass::Realtime),
             "ternary evidence should include realtime workloads"
         );
         assert!(
-            throughput_evidence.iter().any(|sample| sample.tokens_per_second > 0.0),
+            throughput_evidence
+                .iter()
+                .any(|sample| sample.tokens_per_second > 0.0),
             "throughput should be measured"
         );
     }

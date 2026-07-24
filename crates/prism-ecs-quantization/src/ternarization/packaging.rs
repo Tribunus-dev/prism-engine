@@ -35,7 +35,9 @@ pub fn pack_ternary(weights: &[i8], scales: &[f32]) -> Result<TernaryPackage, St
     if let Some(last) = packed.last_mut() {
         let used = weights.len() % 4;
         if used != 0 {
-            for i in used..4 { *last |= 0b01 << (i * 2); }
+            for i in used..4 {
+                *last |= 0b01 << (i * 2);
+            }
         }
     }
 

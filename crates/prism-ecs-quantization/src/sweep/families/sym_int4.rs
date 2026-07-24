@@ -6,10 +6,10 @@
 use serde_json::json;
 
 use crate::contract::NF4_TILE640_CODE_BYTES;
-use crate::sweep::families::FamilyCandidate;
-use crate::sweep::spec::{SignedInt4Range, SymInt4SweepGrid};
 use crate::nf4tile640::validate_tile_group_size;
 use crate::nf4tile640::TILE_ELEMENTS;
+use crate::sweep::families::FamilyCandidate;
+use crate::sweep::spec::{SignedInt4Range, SymInt4SweepGrid};
 
 // ── Byte-count estimators ────────────────────────────────────────────────
 
@@ -183,8 +183,7 @@ fn unpack_sym_int4(
                 let code1 = (packed >> 4) & 0x0F;
 
                 let pos = out_base + 2 * i;
-                if pos < row * out_features + out_features && pos + 1 <= in_features * out_features
-                {
+                if pos < row * out_features + out_features && pos < in_features * out_features {
                     output[pos] = decode_sym_int4(code0, signed_range) * scale + bias;
                     if pos + 1 < in_features * out_features {
                         output[pos + 1] = decode_sym_int4(code1, signed_range) * scale + bias;
@@ -218,9 +217,7 @@ fn decode_sym_int4(nibble: u8, range: SignedInt4Range) -> f32 {
 
 /// Default SymInt4 sweep grid for initial exploration.
 pub fn create_sym_int4_grid() -> SymInt4SweepGrid {
-    use crate::sweep::spec::{
-        AffineMode, ClippingPolicy, ScalePolicy, SignedInt4Range,
-    };
+    use crate::sweep::spec::{AffineMode, ClippingPolicy, ScalePolicy, SignedInt4Range};
     SymInt4SweepGrid {
         group_sizes: vec![16, 32, 64, 128],
         signed_ranges: vec![SignedInt4Range::Neg7ToPos7, SignedInt4Range::Neg8ToPos7],

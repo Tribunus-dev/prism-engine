@@ -276,7 +276,7 @@ impl AdaptiveVariationController {
         if reward > 0.0 {
             stats.successes += 1;
         }
-        stats.reward_sum += reward.max(-1.0).min(1.0);
+        stats.reward_sum += reward.clamp(-1.0, 1.0);
     }
 }
 
@@ -325,7 +325,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(4);
         let (mutated, memory) = correlated_geometry_mutation(&geometry, 65536, &mut rng);
         assert_eq!(mutated.grid_tile_m, mutated.grid_tile_n);
-        assert!(memory >= 4096 && memory <= 262144);
+        assert!((4096..=262144).contains(&memory));
     }
 
     #[test]

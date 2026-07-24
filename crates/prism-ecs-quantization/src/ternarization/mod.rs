@@ -18,5 +18,5 @@ pub mod candidate;
 pub mod gates;
 pub mod optimizer;
 pub mod packaging;
-pub mod residual;
 pub mod promotion;
+pub mod residual;

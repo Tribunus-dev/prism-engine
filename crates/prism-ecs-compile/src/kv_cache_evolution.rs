@@ -201,11 +201,17 @@ pub fn select_kv_frontier(
     let mut rejection_reasons = BTreeMap::new();
     for measurement in measurements {
         if !candidate_ids.contains(&measurement.candidate_digest) {
-            rejection_reasons.entry(measurement.candidate_digest.clone()).or_insert_with(Vec::new).push("unknown candidate".into());
+            rejection_reasons
+                .entry(measurement.candidate_digest.clone())
+                .or_insert_with(Vec::new)
+                .push("unknown candidate".into());
             continue;
         }
         if let Err(error) = measurement.authoritative(budget) {
-            rejection_reasons.entry(measurement.candidate_digest.clone()).or_insert_with(Vec::new).push(error.to_string());
+            rejection_reasons
+                .entry(measurement.candidate_digest.clone())
+                .or_insert_with(Vec::new)
+                .push(error.to_string());
             continue;
         }
         accepted.push(measurement.clone());
@@ -216,7 +222,10 @@ pub fn select_kv_frontier(
             .then_with(|| a.peak_cache_bytes.cmp(&b.peak_cache_bytes))
             .then_with(|| b.long_context_recall.total_cmp(&a.long_context_recall))
     });
-    let frontier = accepted.iter().map(|measurement| measurement.candidate_digest.clone()).collect::<Vec<_>>();
+    let frontier = accepted
+        .iter()
+        .map(|measurement| measurement.candidate_digest.clone())
+        .collect::<Vec<_>>();
     KvEvolutionResult {
         workload_class: workload_class.into(),
         selected_candidate_digest: frontier.first().cloned(),
@@ -225,6 +234,9 @@ pub fn select_kv_frontier(
         rejection_reasons,
     }
 }
+
+pub type KvCacheCandidate = KvCacheCompressionCandidate;
+pub type KvCacheEvaluationReceipt = KvCacheMeasurement;
 
 fn digest(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
@@ -239,25 +251,61 @@ mod tests {
     #[test]
     fn instruction_leakage_blocks_promotion() {
         let measurement = KvCacheMeasurement {
-            candidate_digest: "candidate".into(), measured: true, execution_fingerprint: "run".into(), workload_digest: "work".into(),
-            peak_cache_bytes: 1024, compression_ratio: 4.0, decode_tokens_per_second: 20.0, latency_ms: 50.0,
-            long_context_recall: 0.99, agentic_success_rate: 0.99, tool_call_correctness: 1.0,
-            instruction_retention: vec![KvInstructionRetentionProbe { instruction_id: "system".into(), instruction_position: 0, retained: true, leakage_detected: true, compliance_score: 1.0 }],
-            multimodal_quality: None, receipt_digest: "receipt".into(),
+            candidate_digest: "candidate".into(),
+            measured: true,
+            execution_fingerprint: "run".into(),
+            workload_digest: "work".into(),
+            peak_cache_bytes: 1024,
+            compression_ratio: 4.0,
+            decode_tokens_per_second: 20.0,
+            latency_ms: 50.0,
+            long_context_recall: 0.99,
+            agentic_success_rate: 0.99,
+            tool_call_correctness: 1.0,
+            instruction_retention: vec![KvInstructionRetentionProbe {
+                instruction_id: "system".into(),
+                instruction_position: 0,
+                retained: true,
+                leakage_detected: true,
+                compliance_score: 1.0,
+            }],
+            multimodal_quality: None,
+            receipt_digest: "receipt".into(),
         };
-        let budget = KvEvolutionBudget { max_candidates: 10, max_peak_cache_bytes: 2048, min_long_context_recall: 0.95, min_agentic_success_rate: 0.95, min_tool_call_correctness: 0.99, min_instruction_compliance: 0.95, forbid_instruction_leakage: true };
-        assert_eq!(measurement.authoritative(&budget), Err(KvEvolutionError::InstructionSafetyFailed));
+        let budget = KvEvolutionBudget {
+            max_candidates: 10,
+            max_peak_cache_bytes: 2048,
+            min_long_context_recall: 0.95,
+            min_agentic_success_rate: 0.95,
+            min_tool_call_correctness: 0.99,
+            min_instruction_compliance: 0.95,
+            forbid_instruction_leakage: true,
+        };
+        assert_eq!(
+            measurement.authoritative(&budget),
+            Err(KvEvolutionError::InstructionSafetyFailed)
+        );
     }
 
     #[test]
     fn polar_quantized_candidate_is_sealed() {
         let candidate = KvCacheCompressionCandidate {
-            candidate_id: "polar".into(), living_cimage_generation_digest: "generation".into(),
-            family: KvCompressionFamily::PolarQuantized { bits: 3, qjl_error_bits: 1 },
-            granularity: KvBudgetGranularity::Head, semantic_region_plan_digest: "regions".into(),
-            speculative_candidate_digest: None, target_execution_graph_digest: "graph".into(),
-            agentic_workload_class: "research".into(), memory_budget_bytes: 4096, candidate_digest: String::new(),
-        }.seal().unwrap();
+            candidate_id: "polar".into(),
+            living_cimage_generation_digest: "generation".into(),
+            family: KvCompressionFamily::PolarQuantized {
+                bits: 3,
+                qjl_error_bits: 1,
+            },
+            granularity: KvBudgetGranularity::Head,
+            semantic_region_plan_digest: "regions".into(),
+            speculative_candidate_digest: None,
+            target_execution_graph_digest: "graph".into(),
+            agentic_workload_class: "research".into(),
+            memory_budget_bytes: 4096,
+            candidate_digest: String::new(),
+        }
+        .seal()
+        .unwrap();
         assert!(!candidate.candidate_digest.is_empty());
     }
 }

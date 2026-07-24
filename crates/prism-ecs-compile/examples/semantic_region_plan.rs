@@ -77,7 +77,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         region_count: plan.partition.regions.len(),
         assignments: plan.assignments.clone(),
         claim_classes: BTreeMap::from([
-            ("tensor_source".into(), "repository-backed mapped checkpoint".into()),
+            (
+                "tensor_source".into(),
+                "repository-backed mapped checkpoint".into(),
+            ),
             ("boundaries".into(), "explicit architecture contract".into()),
             ("legality".into(), "compile-verified".into()),
             ("numerical_quality".into(), "unproven".into()),
@@ -89,7 +92,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Tensor: {tensor}");
     println!("Shape: {mapped_shape:?}");
-    println!("Semantic partition: {} regions", plan.partition.regions.len());
+    println!(
+        "Semantic partition: {} regions",
+        plan.partition.regions.len()
+    );
     println!("Coverage: {}", discovery.coverage);
     println!("Overlap: {}", discovery.overlap);
     println!("Plan:");
@@ -132,7 +138,10 @@ fn repeated_values(args: &[String], flag: &str) -> Vec<String> {
         .collect()
 }
 
-fn mapped_tensor_shape(model_dir: &Path, tensor: &str) -> Result<Vec<u64>, Box<dyn std::error::Error>> {
+fn mapped_tensor_shape(
+    model_dir: &Path,
+    tensor: &str,
+) -> Result<Vec<u64>, Box<dyn std::error::Error>> {
     let index_path = model_dir.join("model.safetensors.index.json");
     let index: serde_json::Value = serde_json::from_slice(&fs::read(&index_path)?)?;
     let shard = index

@@ -154,7 +154,10 @@ impl ModelExportRequest {
     }
 
     pub fn verify(&self) -> Result<(), ModelExportError> {
-        if self.request_id.is_empty() || self.source_cimage_digest.is_empty() || self.source_generation_digest.is_empty() {
+        if self.request_id.is_empty()
+            || self.source_cimage_digest.is_empty()
+            || self.source_generation_digest.is_empty()
+        {
             return Err(ModelExportError::MissingIdentity);
         }
         if !self.request_digest.is_empty() && self.request_digest != self.canonical_digest() {
@@ -178,22 +181,48 @@ pub fn validate_export(
         return Err(ModelExportError::Unmeasured);
     }
     if matches!(request.engram_policy, EngramExportPolicy::RejectIfRequired)
-        && components.iter().any(|component| component.component == "engram" && !component.exact_preservation)
+        && components
+            .iter()
+            .any(|component| component.component == "engram" && !component.exact_preservation)
     {
         return Err(ModelExportError::UnsupportedComponent);
     }
     let mut reasons = Vec::new();
-    if policy.require_loader_roundtrip && !validation.loader_roundtrip { reasons.push("target loader roundtrip failed".into()); }
-    if !validation.tensor_identity_valid { reasons.push("tensor identity validation failed".into()); }
-    if policy.require_tokenizer_config && request.preserve_tokenizer_and_config && !validation.tokenizer_config_valid { reasons.push("tokenizer/config preservation failed".into()); }
-    if validation.forward_differential > policy.max_forward_differential { reasons.push("forward differential exceeds gate".into()); }
-    if validation.logit_divergence > policy.max_logit_divergence { reasons.push("logit divergence exceeds gate".into()); }
-    if validation.rollout_similarity < policy.min_rollout_similarity { reasons.push("rollout similarity below gate".into()); }
-    if validation.agentic_success < policy.min_agentic_success { reasons.push("agentic success below gate".into()); }
-    if validation.tool_call_correctness < policy.min_tool_call_correctness { reasons.push("tool-call correctness below gate".into()); }
-    if validation.engram_dependent_task_score < policy.min_engram_dependent_task_score { reasons.push("engram-dependent task score below gate".into()); }
+    if policy.require_loader_roundtrip && !validation.loader_roundtrip {
+        reasons.push("target loader roundtrip failed".into());
+    }
+    if !validation.tensor_identity_valid {
+        reasons.push("tensor identity validation failed".into());
+    }
+    if policy.require_tokenizer_config
+        && request.preserve_tokenizer_and_config
+        && !validation.tokenizer_config_valid
+    {
+        reasons.push("tokenizer/config preservation failed".into());
+    }
+    if validation.forward_differential > policy.max_forward_differential {
+        reasons.push("forward differential exceeds gate".into());
+    }
+    if validation.logit_divergence > policy.max_logit_divergence {
+        reasons.push("logit divergence exceeds gate".into());
+    }
+    if validation.rollout_similarity < policy.min_rollout_similarity {
+        reasons.push("rollout similarity below gate".into());
+    }
+    if validation.agentic_success < policy.min_agentic_success {
+        reasons.push("agentic success below gate".into());
+    }
+    if validation.tool_call_correctness < policy.min_tool_call_correctness {
+        reasons.push("tool-call correctness below gate".into());
+    }
+    if validation.engram_dependent_task_score < policy.min_engram_dependent_task_score {
+        reasons.push("engram-dependent task score below gate".into());
+    }
 
-    let exact = components.iter().all(|component| component.exact_preservation) && omitted_components.is_empty();
+    let exact = components
+        .iter()
+        .all(|component| component.exact_preservation)
+        && omitted_components.is_empty();
     let equivalence_class = if reasons.is_empty() && exact {
         ExportEquivalenceClass::Exact
     } else if reasons.is_empty() && request.require_behavioral_equivalence {
@@ -205,7 +234,11 @@ pub fn validate_export(
     } else {
         ExportEquivalenceClass::Unsupported
     };
-    let admitted = reasons.is_empty() || matches!(equivalence_class, ExportEquivalenceClass::DegradedButAdmitted);
+    let admitted = reasons.is_empty()
+        || matches!(
+            equivalence_class,
+            ExportEquivalenceClass::DegradedButAdmitted
+        );
     let mut receipt = ModelExportReceipt {
         request_digest: request.request_digest.clone(),
         source_cimage_digest: request.source_cimage_digest.clone(),

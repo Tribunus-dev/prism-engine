@@ -149,7 +149,6 @@ mod tests {
         let producer = builder
             .create_op("test.produce", &[], &[], &[Type::f32(), Type::f32()])
             .unwrap();
-        drop(builder);
 
         let vals = results(&world, producer);
         assert_eq!(vals.len(), 2);
@@ -161,7 +160,6 @@ mod tests {
         let consumer = builder
             .create_op("arith.addf", &[v1, v2], &[], &[Type::f32()])
             .unwrap();
-        drop(builder);
 
         assert_eq!(op_name(&world, consumer), Some("arith.addf".into()));
         assert_eq!(operands(&world, consumer), vec![v1, v2]);
@@ -174,7 +172,6 @@ mod tests {
         let mut world = World::new();
         let mut builder = OpBuilder::new(&mut world);
         let (block, args) = builder.create_block(&[Type::i32(), Type::f32()]).unwrap();
-        drop(builder);
 
         assert!(crate::block::is_block(&world, block));
         assert_eq!(args.len(), 2);
@@ -189,7 +186,6 @@ mod tests {
         let region = builder.create_region(RegionKind::SSACFG).unwrap();
         let (block, _) = builder.create_block(&[]).unwrap();
         builder.add_block_to_region(region, block).unwrap();
-        drop(builder);
 
         assert!(crate::region::is_region(&world, region));
         let blocks = crate::region::region_blocks(&world, region);

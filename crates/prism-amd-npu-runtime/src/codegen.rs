@@ -487,7 +487,7 @@ pub fn lower_unary_to_native_xdna_with_target(
         .shape
         .iter()
         .try_fold(element_type.bytes() as u64, |acc, dim| {
-            acc.checked_mul(*dim as u64)
+            acc.checked_mul(*dim)
         })
         .ok_or_else(|| AmdNpuLowerError::UnsupportedOp("unary tensor size overflow".into()))?;
     let shape_usize = input
@@ -607,7 +607,7 @@ pub fn lower_unary_to_native_xdna_with_target(
                 rows: 1,
                 source_stride_bytes: 0,
                 destination_stride_bytes: 0,
-                channel: (1 % target.topology.shim_dma_channels.max(1)) as u16,
+                channel: 1 % target.topology.shim_dma_channels.max(1),
                 asynchronous: true,
                 waits_on: vec!["fill_input".into()],
             },
@@ -832,7 +832,7 @@ pub fn lower_attention_to_native_xdna_with_target(
         .shape
         .iter()
         .try_fold(element_type.bytes() as u64, |acc, dim| {
-            acc.checked_mul(*dim as u64)
+            acc.checked_mul(*dim)
         })
         .ok_or_else(|| AmdNpuLowerError::UnsupportedOp("attention tensor size overflow".into()))?;
     let shape_usize = q.shape.iter().map(|dim| *dim as usize).collect::<Vec<_>>();
@@ -901,7 +901,7 @@ pub fn lower_attention_to_native_xdna_with_target(
             rows: 1,
             source_stride_bytes: 0,
             destination_stride_bytes: 0,
-            channel: channel % target.topology.shim_dma_channels.max(1) as u16,
+            channel: channel % target.topology.shim_dma_channels.max(1),
             asynchronous: true,
             waits_on: vec![],
         });
@@ -941,7 +941,7 @@ pub fn lower_attention_to_native_xdna_with_target(
         rows: 1,
         source_stride_bytes: 0,
         destination_stride_bytes: 0,
-        channel: 3 % target.topology.shim_dma_channels.max(1) as u16,
+        channel: 3 % target.topology.shim_dma_channels.max(1),
         asynchronous: true,
         waits_on: vec!["fill_q".into(), "fill_k".into(), "fill_v".into()],
     });

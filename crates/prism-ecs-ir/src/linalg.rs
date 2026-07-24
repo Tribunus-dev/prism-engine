@@ -145,7 +145,6 @@ mod tests {
             let op = b
                 .create_op("test.produce_a", &[], &[], &[Type::f32()])
                 .unwrap();
-            drop(b);
             crate::op::results(&world, op)[0]
         };
         let b_val = {
@@ -153,7 +152,6 @@ mod tests {
             let op = b
                 .create_op("test.produce_b", &[], &[], &[Type::f32()])
                 .unwrap();
-            drop(b);
             crate::op::results(&world, op)[0]
         };
         let c = {
@@ -161,16 +159,13 @@ mod tests {
             let op = b
                 .create_op("test.produce_c", &[], &[], &[Type::f32()])
                 .unwrap();
-            drop(b);
             crate::op::results(&world, op)[0]
         };
         let matmul = {
             let mut builder = OpBuilder::new(&mut world);
-            let op = builder
+            builder
                 .create_op("linalg.matmul", &[a, b_val, c], &[], &[Type::f32()])
-                .unwrap();
-            drop(builder);
-            op
+                .unwrap()
         };
 
         assert_eq!(op_name(&world, matmul), Some("linalg.matmul".into()));

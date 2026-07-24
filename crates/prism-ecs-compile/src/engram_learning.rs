@@ -132,7 +132,12 @@ impl EngramRouterPolicy {
     }
 
     pub fn seal(mut self) -> Result<Self, EngramLearningError> {
-        if self.policy_id.is_empty() || self.source_generation_digest.is_empty() || self.max_retrievals_per_step == 0 || !self.minimum_confidence.is_finite() || !(0.0..=1.0).contains(&self.minimum_confidence) {
+        if self.policy_id.is_empty()
+            || self.source_generation_digest.is_empty()
+            || self.max_retrievals_per_step == 0
+            || !self.minimum_confidence.is_finite()
+            || !(0.0..=1.0).contains(&self.minimum_confidence)
+        {
             return Err(EngramLearningError::InvalidRouter);
         }
         self.policy_digest = self.canonical_digest();
@@ -148,13 +153,18 @@ impl EngramGeneration {
     }
 
     pub fn seal(mut self) -> Result<Self, EngramLearningError> {
-        if self.generation_id.is_empty() || self.source_cimage_generation_digest.is_empty() || self.calibration_digest.is_empty() {
+        if self.generation_id.is_empty()
+            || self.source_cimage_generation_digest.is_empty()
+            || self.calibration_digest.is_empty()
+        {
             return Err(EngramLearningError::MissingIdentity);
         }
         self.router_policy = self.router_policy.clone().seal()?;
         for entry in &self.entries {
             for metric in [entry.utility_score, entry.interference_score] {
-                if !metric.is_finite() { return Err(EngramLearningError::InvalidMetric); }
+                if !metric.is_finite() {
+                    return Err(EngramLearningError::InvalidMetric);
+                }
             }
         }
         self.entries.sort_by(|a, b| a.id.cmp(&b.id));
@@ -176,18 +186,41 @@ pub fn admit_engram_generation(
     policy: &EngramAdmissionPolicy,
 ) -> Result<EngramAdmissionReceipt, EngramLearningError> {
     generation.verify()?;
-    if !evaluation.measured || evaluation.execution_fingerprint.is_empty() || evaluation.generation_digest != generation.generation_digest {
+    if !evaluation.measured
+        || evaluation.execution_fingerprint.is_empty()
+        || evaluation.generation_digest != generation.generation_digest
+    {
         return Err(EngramLearningError::Unmeasured);
     }
     let mut reasons = Vec::new();
-    if generation.entries.len() > policy.max_entries { reasons.push("engram entry budget exceeded".into()); }
-    if evaluation.task_success < policy.min_task_success { reasons.push("task success below gate".into()); }
-    if evaluation.tool_call_correctness < policy.min_tool_call_correctness { reasons.push("tool-call correctness below gate".into()); }
-    if evaluation.retrieval_precision < policy.min_retrieval_precision { reasons.push("retrieval precision below gate".into()); }
-    if evaluation.mean_utility_delta < policy.min_mean_utility_delta { reasons.push("engram utility below gate".into()); }
-    if evaluation.mean_interference_delta > policy.max_mean_interference_delta { reasons.push("engram interference above gate".into()); }
-    if evaluation.routing_stability < policy.min_routing_stability { reasons.push("engram routing stability below gate".into()); }
-    let mut receipt = EngramAdmissionReceipt { generation_digest: generation.generation_digest.clone(), admitted: reasons.is_empty(), measured: true, reasons, receipt_digest: String::new() };
+    if generation.entries.len() > policy.max_entries {
+        reasons.push("engram entry budget exceeded".into());
+    }
+    if evaluation.task_success < policy.min_task_success {
+        reasons.push("task success below gate".into());
+    }
+    if evaluation.tool_call_correctness < policy.min_tool_call_correctness {
+        reasons.push("tool-call correctness below gate".into());
+    }
+    if evaluation.retrieval_precision < policy.min_retrieval_precision {
+        reasons.push("retrieval precision below gate".into());
+    }
+    if evaluation.mean_utility_delta < policy.min_mean_utility_delta {
+        reasons.push("engram utility below gate".into());
+    }
+    if evaluation.mean_interference_delta > policy.max_mean_interference_delta {
+        reasons.push("engram interference above gate".into());
+    }
+    if evaluation.routing_stability < policy.min_routing_stability {
+        reasons.push("engram routing stability below gate".into());
+    }
+    let mut receipt = EngramAdmissionReceipt {
+        generation_digest: generation.generation_digest.clone(),
+        admitted: reasons.is_empty(),
+        measured: true,
+        reasons,
+        receipt_digest: String::new(),
+    };
     receipt.receipt_digest = digest_json(&receipt);
     Ok(receipt)
 }

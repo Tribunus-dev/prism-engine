@@ -105,7 +105,9 @@ impl LivingGenerationPromotionRequest {
     pub fn canonical_digest(&self) -> String {
         let mut canonical = self.clone();
         canonical.request_digest.clear();
-        canonical.domain_evidence.sort_by(|a, b| format!("{:?}", a.domain).cmp(&format!("{:?}", b.domain)));
+        canonical
+            .domain_evidence
+            .sort_by(|a, b| format!("{:?}", a.domain).cmp(&format!("{:?}", b.domain)));
         digest_json(&canonical)
     }
 
@@ -116,7 +118,12 @@ impl LivingGenerationPromotionRequest {
     }
 
     pub fn verify(&self) -> Result<(), LivingPromotionError> {
-        if self.request_id.is_empty() || self.living_cimage_id.is_empty() || self.baseline_generation_digest.is_empty() || self.candidate_generation_digest.is_empty() || self.requested_by.is_empty() {
+        if self.request_id.is_empty()
+            || self.living_cimage_id.is_empty()
+            || self.baseline_generation_digest.is_empty()
+            || self.candidate_generation_digest.is_empty()
+            || self.requested_by.is_empty()
+        {
             return Err(LivingPromotionError::MissingIdentity);
         }
         if !self.request_digest.is_empty() && self.request_digest != self.canonical_digest() {
@@ -137,19 +144,45 @@ pub fn evaluate_promotion(
     let mut reasons = Vec::new();
     let mut domain_receipts = BTreeMap::new();
     for required in &policy.required_domains {
-        if !request.domain_evidence.iter().any(|evidence| &evidence.domain == required) {
+        if !request
+            .domain_evidence
+            .iter()
+            .any(|evidence| &evidence.domain == required)
+        {
             reasons.push(format!("missing required domain {required:?}"));
         }
     }
-    let hard_failures = request.domain_evidence.iter().map(|evidence| evidence.hard_gate_failures.len()).sum::<usize>();
-    if hard_failures > policy.max_total_hard_gate_failures { reasons.push("hard-gate failure budget exceeded".into()); }
-    if policy.require_shadow_receipt && request.shadow_receipt_digest.is_empty() { reasons.push("shadow evaluation receipt is missing".into()); }
+    let hard_failures = request
+        .domain_evidence
+        .iter()
+        .map(|evidence| evidence.hard_gate_failures.len())
+        .sum::<usize>();
+    if hard_failures > policy.max_total_hard_gate_failures {
+        reasons.push("hard-gate failure budget exceeded".into());
+    }
+    if policy.require_shadow_receipt && request.shadow_receipt_digest.is_empty() {
+        reasons.push("shadow evaluation receipt is missing".into());
+    }
     for evidence in &request.domain_evidence {
-        domain_receipts.insert(format!("{:?}", evidence.domain), evidence.receipt_digest.clone());
-        if !evidence.admitted { reasons.push(format!("domain {:?} is not admitted", evidence.domain)); }
-        if policy.require_all_measured && !evidence.measured { reasons.push(format!("domain {:?} is not measured", evidence.domain)); }
-        if evidence.score < policy.min_domain_score { reasons.push(format!("domain {:?} score below gate", evidence.domain)); }
-        if evidence.artifact_digest.is_empty() || evidence.receipt_digest.is_empty() { reasons.push(format!("domain {:?} lacks artifact or receipt identity", evidence.domain)); }
+        domain_receipts.insert(
+            format!("{:?}", evidence.domain),
+            evidence.receipt_digest.clone(),
+        );
+        if !evidence.admitted {
+            reasons.push(format!("domain {:?} is not admitted", evidence.domain));
+        }
+        if policy.require_all_measured && !evidence.measured {
+            reasons.push(format!("domain {:?} is not measured", evidence.domain));
+        }
+        if evidence.score < policy.min_domain_score {
+            reasons.push(format!("domain {:?} score below gate", evidence.domain));
+        }
+        if evidence.artifact_digest.is_empty() || evidence.receipt_digest.is_empty() {
+            reasons.push(format!(
+                "domain {:?} lacks artifact or receipt identity",
+                evidence.domain
+            ));
+        }
     }
     let mut receipt = LivingGenerationPromotionReceipt {
         request_digest: request.request_digest.clone(),
@@ -180,7 +213,12 @@ pub fn build_rollback_receipt(
         operator: operator.into(),
         rollback_digest: String::new(),
     };
-    if receipt.living_cimage_id.is_empty() || receipt.from_generation_digest.is_empty() || receipt.to_generation_digest.is_empty() || receipt.cause.is_empty() || receipt.operator.is_empty() {
+    if receipt.living_cimage_id.is_empty()
+        || receipt.from_generation_digest.is_empty()
+        || receipt.to_generation_digest.is_empty()
+        || receipt.cause.is_empty()
+        || receipt.operator.is_empty()
+    {
         return Err(LivingPromotionError::MissingIdentity);
     }
     receipt.rollback_digest = digest_json(&receipt);

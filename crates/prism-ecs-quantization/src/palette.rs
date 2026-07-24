@@ -216,7 +216,7 @@ fn weighted_threshold(total: f32, seed: usize, _n: usize) -> f32 {
 /// Returns packed indices (2 indices per u8, LE) and the codebook MSE.
 pub fn encode_channel(channel: &[f32], codebook: &[f32]) -> (Vec<u8>, f32) {
     let n = channel.len();
-    let packed_len = (n + 1) / 2;
+    let packed_len = n.div_ceil(2);
     let mut packed = vec![0u8; packed_len];
     let mut mse = 0.0f32;
 
@@ -609,7 +609,7 @@ fn build_palettized_matrix(
             }
 
             let done = progress.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if done % 256 == 0 {
+            if done.is_multiple_of(256) {
                 eprintln!("[palette] row {}/{} fitted", done, out_dim);
             }
 
@@ -705,7 +705,7 @@ mod tests {
                 .chunks_exact(4)
                 .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect(),
-            safetensors::Dtype::BF16 => raw.chunks_exact(2).map(|c| bf16_chunk_to_f32(c)).collect(),
+            safetensors::Dtype::BF16 => raw.chunks_exact(2).map(bf16_chunk_to_f32).collect(),
             _ => return None,
         };
         Some((vals, shape))

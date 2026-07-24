@@ -255,11 +255,11 @@ impl MutationApplication {
                 let first_half_id = node_id;
                 let second_half_id =
                     SpatialNodeId(graph.nodes().iter().map(|n| n.id().0).max().unwrap_or(0) + 1);
-                if let Some(first_node) = new_graph.get_node_mut(first_half_id) {
-                    if let SpatialNode::Compute { ref mut shape, .. } = first_node {
-                        let mid = shape.out_shapes.len() / 2.max(1);
-                        shape.out_shapes = shape.out_shapes[..mid].to_vec();
-                    }
+                if let Some(SpatialNode::Compute { ref mut shape, .. }) =
+                    new_graph.get_node_mut(first_half_id)
+                {
+                    let mid = shape.out_shapes.len() / 2;
+                    shape.out_shapes = shape.out_shapes[..mid].to_vec();
                 }
                 // Add the second half as a new compute node
                 if let SpatialNode::Compute {
@@ -269,7 +269,7 @@ impl MutationApplication {
                     ..
                 } = node
                 {
-                    let mid = shape.out_shapes.len() / 2.max(1);
+                    let mid = shape.out_shapes.len() / 2;
                     let second_shape = crate::graph::ShapeContract::new(
                         shape.out_shapes[mid..].to_vec(),
                         vec![], // outputs from the original's tail

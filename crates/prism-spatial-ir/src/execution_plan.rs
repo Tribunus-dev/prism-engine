@@ -684,28 +684,26 @@ pub fn lower_to_manifest(
 
     for (i, &node_id) in topo.iter().enumerate() {
         let node = graph.get_node(node_id)?;
-        match node {
-            SpatialNode::Compute {
-                kind, intensity, ..
-            } => {
-                let tile_geo = selected_metal_tile
-                    .map(|(width, height)| TileGeometry { width, height })
-                    .or_else(|| tile_geometry_from_meta(graph, node_id, kind, *intensity));
-                let threadgroup_total = tile_geo
-                    .as_ref()
-                    .map_or(256, |t| (t.width * t.height) as u32);
+        if let SpatialNode::Compute {
+            kind, intensity, ..
+        } = node
+        {
+            let tile_geo = selected_metal_tile
+                .map(|(width, height)| TileGeometry { width, height })
+                .or_else(|| tile_geometry_from_meta(graph, node_id, kind, *intensity));
+            let threadgroup_total = tile_geo
+                .as_ref()
+                .map_or(256, |t| (t.width * t.height) as u32);
 
-                let idx = kernel_descriptors.len();
-                kernel_descriptors.push(KernelDescriptor {
-                    node_id,
-                    codec: codec_from_annotations(graph, node_id, format_plan),
-                    tile_geometry: tile_geo,
-                    threadgroup_size: threadgroup_total,
-                    schedule_index: i,
-                });
-                node_to_kernel.insert(node_id, idx);
-            }
-            _ => {}
+            let idx = kernel_descriptors.len();
+            kernel_descriptors.push(KernelDescriptor {
+                node_id,
+                codec: codec_from_annotations(graph, node_id, format_plan),
+                tile_geometry: tile_geo,
+                threadgroup_size: threadgroup_total,
+                schedule_index: i,
+            });
+            node_to_kernel.insert(node_id, idx);
         }
     }
 
@@ -926,6 +924,7 @@ fn graph_strategy_evidence(
     (fusion_evaluations, workload_evaluations)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn with_fused_steps(
     mut plan: ExecutionPlan,
     graph: &SpatialGraph,
@@ -1007,7 +1006,7 @@ fn with_fused_steps(
                                 )
                             ) =>
                         {
-                            match ane_unit.clone().unwrap_or_default() {
+                            match ane_unit.unwrap_or_default() {
                                 AneUnitAxis::Planar => PlanBackend::AnePlanar,
                                 AneUnitAxis::Auto | AneUnitAxis::Matrix => PlanBackend::AneMatrix,
                             }
@@ -1022,7 +1021,7 @@ fn with_fused_steps(
                         ComputeKind::Elementwise
                         | ComputeKind::Normalization
                         | ComputeKind::RoPE
-                        | ComputeKind::Softmax => match ane_unit.clone().unwrap_or_default() {
+                        | ComputeKind::Softmax => match ane_unit.unwrap_or_default() {
                             AneUnitAxis::Matrix => PlanBackend::AneMatrix,
                             AneUnitAxis::Auto | AneUnitAxis::Planar => PlanBackend::AnePlanar,
                         },
@@ -1112,8 +1111,8 @@ fn with_fused_steps(
             ResidencyWorkload::BatchedAudio,
         ],
         resident_devices: vec!["unified-memory".into()],
-        prefetch_step: Some(0).filter(|_| !plan.fused_steps.is_empty()),
-        eviction_step: Some(plan.fused_steps.len()).filter(|_| !plan.fused_steps.is_empty()),
+        prefetch_step: (!plan.fused_steps.is_empty()).then_some(0),
+        eviction_step: (!plan.fused_steps.is_empty()).then_some(plan.fused_steps.len()),
     }];
     plan
 }
@@ -1189,7 +1188,7 @@ fn tile_geometry_from_meta(
     if let Some(meta) = graph.get_annotations(node_id) {
         if let Some(size) = meta.batch_threadgroup_size {
             let dim = (size as f64).sqrt().ceil() as usize;
-            let dim = dim.max(1).min(256);
+            let dim = dim.clamp(1, 256);
             return Some(TileGeometry {
                 width: dim,
                 height: dim,

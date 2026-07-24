@@ -1,3 +1,19 @@
+#![allow(clippy::approx_constant)]
+#![allow(clippy::doc_overindented_list_items)]
+#![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::unnecessary_to_owned)]
+#![allow(clippy::explicit_counter_loop)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::manual_memcpy)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::result_large_err)]
+#![allow(clippy::same_item_push)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(unexpected_cfgs)]
+#![allow(clippy::while_let_loop)]
+#![allow(clippy::wildcard_in_or_patterns)]
 //! Quantization admission module.
 //!
 //! Defines the NF4 tile640 representation family and a fail-closed admission

@@ -20,9 +20,10 @@ pub enum PolicyMode {
 // ── SweepFailureReason ──────────────────────────────────────────────────────────
 
 /// Reason a sweep candidate was rejected.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum SweepFailureReason {
     /// Candidate passed all gates.
+    #[default]
     None,
     /// Weight-space NRMSE exceeded the gate threshold.
     WeightNrmse,
@@ -54,12 +55,6 @@ pub enum SweepFailureReason {
     HealthOrStability,
     /// Catch-all for unexpected failures.
     Other(String),
-}
-
-impl Default for SweepFailureReason {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 // ── Tensor selection ────────────────────────────────────────────────────────────

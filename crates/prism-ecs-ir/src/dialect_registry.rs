@@ -19,6 +19,9 @@
 
 use std::collections::HashMap;
 
+type VerifyFn = fn(&OpVerifierContext) -> Result<(), Vec<String>>;
+type InferFn = fn(&[Type], &[Attribute]) -> Option<Vec<Type>>;
+
 use crate::ir_attrs::Attribute;
 use crate::ir_types::Type;
 use crate::op::{OpInfo, OpRegistry, OpVerifierContext};
@@ -51,9 +54,9 @@ pub struct OpRegistration {
     /// Traits associated with this op (bitflags).
     pub traits: OpTraits,
     /// Verification function, if any.
-    pub verify_fn: Option<fn(&OpVerifierContext) -> Result<(), Vec<String>>>,
+    pub verify_fn: Option<VerifyFn>,
     /// Result type inference function, if any.
-    pub infer_fn: Option<fn(&[Type], &[Attribute]) -> Option<Vec<Type>>>,
+    pub infer_fn: Option<InferFn>,
 }
 
 /// Registration metadata for a dialect type.
@@ -132,7 +135,7 @@ impl DialectRegistry {
     pub fn register(&mut self, namespace: &'static str, component: ComponentRegistration) {
         self.by_dialect
             .entry(namespace)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(component.clone());
 
         // Also register ops into the flat op registry.

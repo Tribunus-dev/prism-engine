@@ -160,14 +160,23 @@ impl KnowledgeCorrectionProposal {
     }
 
     pub fn verify(&self) -> Result<(), KnowledgeCorrectionError> {
-        if self.proposal_id.is_empty() || self.source_error_id.is_empty() || self.source_generation_digest.is_empty() || self.subject.is_empty() || self.corrected_claim.is_empty() {
+        if self.proposal_id.is_empty()
+            || self.source_error_id.is_empty()
+            || self.source_generation_digest.is_empty()
+            || self.subject.is_empty()
+            || self.corrected_claim.is_empty()
+        {
             return Err(KnowledgeCorrectionError::MissingIdentity);
         }
-        if self.temporal_contract.source_refs.is_empty() || self.temporal_contract.source_digest.is_empty() {
+        if self.temporal_contract.source_refs.is_empty()
+            || self.temporal_contract.source_digest.is_empty()
+        {
             return Err(KnowledgeCorrectionError::MissingSource);
         }
-        if matches!(self.temporal_contract.refresh_policy, RefreshPolicy::ExternalAuthority)
-            && self.temporal_contract.expires_at.is_none()
+        if matches!(
+            self.temporal_contract.refresh_policy,
+            RefreshPolicy::ExternalAuthority
+        ) && self.temporal_contract.expires_at.is_none()
         {
             return Err(KnowledgeCorrectionError::InvalidTemporalContract);
         }
@@ -184,21 +193,56 @@ pub fn admit_knowledge_correction(
     policy: &KnowledgeCorrectionPolicy,
 ) -> Result<KnowledgeCorrectionReceipt, KnowledgeCorrectionError> {
     proposal.verify()?;
-    if !evaluation.measured || evaluation.evaluation_fingerprint.is_empty() || evaluation.proposal_digest != proposal.proposal_digest {
+    if !evaluation.measured
+        || evaluation.evaluation_fingerprint.is_empty()
+        || evaluation.proposal_digest != proposal.proposal_digest
+    {
         return Err(KnowledgeCorrectionError::Unmeasured);
     }
     let mut reasons = Vec::new();
-    if policy.require_sources && proposal.temporal_contract.source_refs.is_empty() { reasons.push("authoritative source evidence is missing".into()); }
-    if policy.require_expiry_for_external_authority && matches!(proposal.temporal_contract.refresh_policy, RefreshPolicy::ExternalAuthority) && proposal.temporal_contract.expires_at.is_none() { reasons.push("external-authority correction lacks expiry".into()); }
-    if evaluation.corrected_prompt_accuracy < policy.min_corrected_prompt_accuracy { reasons.push("corrected prompt accuracy below gate".into()); }
-    if evaluation.paraphrase_accuracy < policy.min_paraphrase_accuracy { reasons.push("paraphrase accuracy below gate".into()); }
-    if evaluation.multi_hop_accuracy < policy.min_multi_hop_accuracy { reasons.push("multi-hop accuracy below gate".into()); }
-    if evaluation.locality_score < policy.min_locality_score { reasons.push("correction locality below gate".into()); }
-    if evaluation.contradiction_rate > policy.max_contradiction_rate { reasons.push("contradiction rate exceeds gate".into()); }
-    if evaluation.unrelated_regression > policy.max_unrelated_regression { reasons.push("unrelated regression exceeds gate".into()); }
-    if evaluation.agentic_success < policy.min_agentic_success { reasons.push("agentic success below gate".into()); }
-    if evaluation.tool_call_correctness < policy.min_tool_call_correctness { reasons.push("tool-call correctness below gate".into()); }
-    let mut receipt = KnowledgeCorrectionReceipt { proposal_digest: proposal.proposal_digest.clone(), admitted: reasons.is_empty(), measured: true, reasons, receipt_digest: String::new() };
+    if policy.require_sources && proposal.temporal_contract.source_refs.is_empty() {
+        reasons.push("authoritative source evidence is missing".into());
+    }
+    if policy.require_expiry_for_external_authority
+        && matches!(
+            proposal.temporal_contract.refresh_policy,
+            RefreshPolicy::ExternalAuthority
+        )
+        && proposal.temporal_contract.expires_at.is_none()
+    {
+        reasons.push("external-authority correction lacks expiry".into());
+    }
+    if evaluation.corrected_prompt_accuracy < policy.min_corrected_prompt_accuracy {
+        reasons.push("corrected prompt accuracy below gate".into());
+    }
+    if evaluation.paraphrase_accuracy < policy.min_paraphrase_accuracy {
+        reasons.push("paraphrase accuracy below gate".into());
+    }
+    if evaluation.multi_hop_accuracy < policy.min_multi_hop_accuracy {
+        reasons.push("multi-hop accuracy below gate".into());
+    }
+    if evaluation.locality_score < policy.min_locality_score {
+        reasons.push("correction locality below gate".into());
+    }
+    if evaluation.contradiction_rate > policy.max_contradiction_rate {
+        reasons.push("contradiction rate exceeds gate".into());
+    }
+    if evaluation.unrelated_regression > policy.max_unrelated_regression {
+        reasons.push("unrelated regression exceeds gate".into());
+    }
+    if evaluation.agentic_success < policy.min_agentic_success {
+        reasons.push("agentic success below gate".into());
+    }
+    if evaluation.tool_call_correctness < policy.min_tool_call_correctness {
+        reasons.push("tool-call correctness below gate".into());
+    }
+    let mut receipt = KnowledgeCorrectionReceipt {
+        proposal_digest: proposal.proposal_digest.clone(),
+        admitted: reasons.is_empty(),
+        measured: true,
+        reasons,
+        receipt_digest: String::new(),
+    };
     receipt.receipt_digest = digest_json(&receipt);
     Ok(receipt)
 }

@@ -312,9 +312,9 @@ impl JointEvolutionSystem {
                 b.runtime.clone()
             },
             ane_unit: if rng.gen::<f64>() < 0.5 {
-                a.ane_unit.clone()
+                a.ane_unit
             } else {
-                b.ane_unit.clone()
+                b.ane_unit
             },
         }
     }

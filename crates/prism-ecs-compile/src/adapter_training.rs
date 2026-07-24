@@ -116,13 +116,20 @@ impl AdapterTrainingRequest {
     }
 
     pub fn verify(&self) -> Result<(), AdapterTrainingError> {
-        if self.request_id.is_empty() || self.source_generation_digest.is_empty() || self.calibration_corpus_digest.is_empty() {
+        if self.request_id.is_empty()
+            || self.source_generation_digest.is_empty()
+            || self.calibration_corpus_digest.is_empty()
+        {
             return Err(AdapterTrainingError::MissingIdentity);
         }
         if self.target_regions.is_empty() {
             return Err(AdapterTrainingError::MissingRegions);
         }
-        if !self.learning_rate.is_finite() || self.learning_rate <= 0.0 || self.max_steps == 0 || self.max_trainable_bytes == 0 {
+        if !self.learning_rate.is_finite()
+            || self.learning_rate <= 0.0
+            || self.max_steps == 0
+            || self.max_trainable_bytes == 0
+        {
             return Err(AdapterTrainingError::InvalidParameters);
         }
         if !self.request_digest.is_empty() && self.request_digest != self.canonical_digest() {
@@ -143,13 +150,29 @@ pub fn admit_adapter(
         return Err(AdapterTrainingError::Unmeasured);
     }
     let mut reasons = Vec::new();
-    if policy.require_frozen_base && !request.freeze_base_weights { reasons.push("base weights were not frozen".into()); }
-    if policy.require_reversible && !artifact.reversible { reasons.push("adapter artifact is not reversible".into()); }
-    if artifact.trainable_bytes > policy.max_trainable_bytes || artifact.trainable_bytes > request.max_trainable_bytes { reasons.push("adapter exceeds trainable-byte budget".into()); }
-    if receipt.task_success < policy.min_task_success { reasons.push("task success below gate".into()); }
-    if receipt.tool_call_correctness < policy.min_tool_call_correctness { reasons.push("tool-call correctness below gate".into()); }
-    if receipt.locality_score < policy.min_locality_score { reasons.push("adapter locality below gate".into()); }
-    if receipt.unrelated_regression > policy.max_unrelated_regression { reasons.push("unrelated regression exceeds gate".into()); }
+    if policy.require_frozen_base && !request.freeze_base_weights {
+        reasons.push("base weights were not frozen".into());
+    }
+    if policy.require_reversible && !artifact.reversible {
+        reasons.push("adapter artifact is not reversible".into());
+    }
+    if artifact.trainable_bytes > policy.max_trainable_bytes
+        || artifact.trainable_bytes > request.max_trainable_bytes
+    {
+        reasons.push("adapter exceeds trainable-byte budget".into());
+    }
+    if receipt.task_success < policy.min_task_success {
+        reasons.push("task success below gate".into());
+    }
+    if receipt.tool_call_correctness < policy.min_tool_call_correctness {
+        reasons.push("tool-call correctness below gate".into());
+    }
+    if receipt.locality_score < policy.min_locality_score {
+        reasons.push("adapter locality below gate".into());
+    }
+    if receipt.unrelated_regression > policy.max_unrelated_regression {
+        reasons.push("unrelated regression exceeds gate".into());
+    }
     receipt.request_digest = request.request_digest.clone();
     receipt.artifact_digest = artifact.artifact_digest.clone();
     receipt.admitted = reasons.is_empty();

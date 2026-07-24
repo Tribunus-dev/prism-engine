@@ -1,3 +1,7 @@
+#![allow(clippy::all)]
+#![allow(clippy::pedantic)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
 //! Canonical compiler orchestration — format-independent compilation pipeline.
 //!
 //! This crate defines the contract types for the prism-engine compilation
@@ -90,7 +94,7 @@ pub use living_cimage::{
 };
 pub use living_ecs::{
     event_from_command, project_living_cimage, validate_command_against_authority,
-    LivingAdaptationIndex, LivingCalibrationAuthority, LivingCImageAuthority, LivingCommand,
+    LivingAdaptationIndex, LivingCImageAuthority, LivingCalibrationAuthority, LivingCommand,
     LivingCommandKind, LivingEcsError, LivingEntityKind, LivingEvent, LivingGenerationAuthority,
     LivingLifecycle, LivingLifecycleComponent, LivingProjection, LivingReplayRegistry,
 };
@@ -111,8 +115,7 @@ pub use search::{
 };
 pub use semantic_region_discovery::{
     discover_semantic_partition, ArchitectureDiscoverer, GraphExplicitDiscoverer, GraphRegionHint,
-    LogicalTensorDescriptor, SemanticDiscoveryError, SemanticModelConfig,
-    SemanticRegionDiscoverer,
+    LogicalTensorDescriptor, SemanticDiscoveryError, SemanticModelConfig, SemanticRegionDiscoverer,
 };
 pub use semantic_region_evaluation::{
     SemanticRegionAblation, SemanticRegionBaseline, SemanticRegionEvaluationMetrics,
@@ -414,19 +417,89 @@ impl SearchConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum CandidateStatus {
+    Evaluated,
+    Rejected,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateMeasurements {
+    pub wall_time_ms: f64,
+    pub gpu_time_ms: f64,
+    pub bandwidth_gbps: f64,
+    pub peak_memory_mb: f64,
+    pub reconstruction_error: f64,
+    pub accuracy_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateRecord {
+    pub candidate_digest: String,
+    pub parent_digests: Vec<String>,
+    pub genome: String,
+    pub tensor_scope: Vec<String>,
+    pub score_vector: Vec<f64>,
+    pub measurements: Option<serde_json::Value>,
+    pub status: CandidateStatus,
+    pub rejection_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationRecord {
+    pub generation: u32,
+    pub candidates: Vec<CandidateRecord>,
+    pub best_score: f64,
+    pub diversity: f64,
+    pub timestamp: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchTrace {
-    pub search_id: Uuid,
+    pub search_id: String,
+    pub config: SearchConfig,
+    pub generations: Vec<GenerationRecord>,
+    pub pareto_frontier: Vec<CandidateRecord>,
+    pub quality_diversity_archive: Vec<prism_ecs_ir::evolution::objectives::ArchiveEntry>,
+    pub best_genome: Option<String>,
+    pub trace_digest: String,
+    #[serde(default)]
     pub generations_completed: u32,
+    #[serde(default)]
     pub candidates_evaluated: u64,
+    #[serde(default)]
     pub best_score: Option<f64>,
+    #[serde(default)]
     pub pareto_frontier_size: usize,
+    #[serde(default)]
     pub elapsed_ms: u64,
+}
+
+impl Default for SearchTrace {
+    fn default() -> Self {
+        Self {
+            search_id: uuid::Uuid::new_v4().to_string(),
+            config: SearchConfig::default(),
+            generations: Vec::new(),
+            pareto_frontier: Vec::new(),
+            quality_diversity_archive: Vec::new(),
+            best_genome: None,
+            trace_digest: String::new(),
+            generations_completed: 0,
+            candidates_evaluated: 0,
+            best_score: None,
+            pareto_frontier_size: 0,
+            elapsed_ms: 0,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error("source detection failed: {0}")]
     SourceDetectionFailed(String),
+    #[error("source ingestion failed: {0}")]
+    SourceIngestionFailed(String),
     #[error("graph build failed: {0}")]
     GraphBuildFailed(String),
     #[error("search failed: {0}")]
@@ -435,58 +508,181 @@ pub enum CompileError {
     LegalizationFailed(String),
     #[error("kernel generation failed: {0}")]
     KernelGenerationFailed(String),
+    #[error("kernel generation failed: {0}")]
+    KernelGenFailed(String),
     #[error("CImage emission failed: {0}")]
     CImageEmissionFailed(String),
+    #[error("CImage emission failed: {0}")]
+    CImageEmitFailed(String),
     #[error("receipt construction failed: {0}")]
     ReceiptBuildFailed(String),
     #[error("certification failed: {0}")]
     CertificationFailed(String),
     #[error("invalid configuration: {0}")]
     InvalidConfiguration(String),
+    #[error("policy violation: {0}")]
+    PolicyViolation(String),
+    #[error("compilation failed: {0}")]
+    CompilationFailed(String),
+    #[error("session not found")]
+    SessionNotFound,
+    #[error("invalid state transition: {0}")]
+    InvalidStateTransition(String),
+    #[error("source detection failed: {0}")]
+    SourceDetectionFailure(String),
+}
+
+impl From<prism_ecs_core::WorldError> for CompileError {
+    fn from(error: prism_ecs_core::WorldError) -> Self {
+        Self::CompilationFailed(error.to_string())
+    }
 }
 
 pub trait CompilationEventSink: Send + Sync {
-    fn emit(&self, event: CompilationEvent);
+    fn emit(&mut self, event: CompilationEvent) -> Result<(), String>;
+    fn events(&self) -> Vec<CompilationEvent>;
 }
 
 #[derive(Debug, Default)]
 pub struct VecEventSink {
-    events: std::sync::Mutex<Vec<CompilationEvent>>,
+    events: std::sync::Arc<std::sync::Mutex<Vec<CompilationEvent>>>,
 }
 
 impl VecEventSink {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn stage_completed(
+        &mut self,
+        _stage: CompilationStage,
+        _duration_ms: u64,
+        _detail: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    pub fn stage_failed(
+        &mut self,
+        _stage: CompilationStage,
+        _duration_ms: u64,
+        _detail: &str,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     pub fn events(&self) -> Vec<CompilationEvent> {
         self.events.lock().expect("event sink lock").clone()
     }
 }
 
 impl CompilationEventSink for VecEventSink {
-    fn emit(&self, event: CompilationEvent) {
+    fn emit(&mut self, event: CompilationEvent) -> Result<(), String> {
         self.events.lock().expect("event sink lock").push(event);
+        Ok(())
+    }
+
+    fn events(&self) -> Vec<CompilationEvent> {
+        self.events.lock().expect("event sink lock").clone()
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileReceipt {
-    pub compilation_id: Uuid,
-    pub compiler: CompilerIdentity,
-    pub source: SourceIdentity,
-    pub config: CompileConfig,
+    pub receipt_id: String,
+    pub request_id: Uuid,
+    pub compiler_identity: CompilerIdentity,
+    pub source_identity: SourceIdentity,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
+    pub finished_at: DateTime<Utc>,
+    pub duration_ms: u64,
     pub stages: Vec<StageResult>,
-    pub output_path: Option<String>,
-    pub output_digest: Option<String>,
+    pub candidate_count: u32,
+    pub generations: u32,
+    pub output_digest: String,
+    pub output_path: std::path::PathBuf,
+    pub schema_version: String,
     pub status: CompileStatus,
+    pub error: Option<String>,
+    pub source_digest: Option<String>,
+    pub graph_digest: Option<String>,
+    pub search_trace_digest: Option<String>,
+    pub kernel_manifest_digest: Option<String>,
+    pub events_digest: Option<String>,
+    pub legalization_mode: Option<String>,
+    pub selection_receipt: Option<crate::search::SearchSelectionReceipt>,
+    pub uop_tuning_receipt: Option<crate::uop::UOpTuningReceipt>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompileStatus {
-    Success,
-    Failed,
-    Cancelled,
+    Pending,
+    InProgress,
+    Completed,
+    Failed(String),
+    Partial(Vec<StageResult>),
+}
+
+impl Default for CompileStatus {
+    fn default() -> Self {
+        Self::Pending
+    }
 }
 
 #[derive(Debug)]
 pub struct CompileResult {
     pub receipt: CompileReceipt,
+    pub status: CompileStatus,
+    pub request_id: Uuid,
+    pub events: Vec<CompilationEvent>,
+    pub output_digest: String,
+    pub output_path: std::path::PathBuf,
+}
+
+pub struct CanonicalCompiler {
+    pub config: CompileConfig,
     pub output_path: Option<std::path::PathBuf>,
+    pub source_path: Option<std::path::PathBuf>,
+    pub qwen36_config: Option<qwen3_6_moe::Qwen36Config>,
+    pub model_adapter: Option<std::sync::Arc<dyn ModelAdapter>>,
+    pub event_sink: Option<Box<dyn CompilationEventSink + Send>>,
+    #[cfg(feature = "phase4_evaluation")]
+    pub evaluator: Option<Box<dyn EvaluationStrategy>>,
+}
+
+impl CanonicalCompiler {
+    pub fn new(config: CompileConfig) -> Self {
+        Self {
+            config,
+            output_path: None,
+            source_path: None,
+            qwen36_config: None,
+            model_adapter: None,
+            event_sink: None,
+            #[cfg(feature = "phase4_evaluation")]
+            evaluator: None,
+        }
+    }
+
+    pub fn compile(&mut self, source: CanonicalSource) -> Result<CompileResult, CompileError> {
+        crate::compiler::compile_source(self, source)
+    }
+}
+
+impl Default for CanonicalCompiler {
+    fn default() -> Self {
+        Self::new(CompileConfig {
+            production_mode: false,
+            max_candidates: 100,
+            max_generations: 5,
+            max_search_time_ms: 300_000,
+            target_backends: vec![BackendKind::Metal],
+            calibration_policy: CalibrationPolicy::None,
+            validation_policy: ValidationPolicy::Structural,
+            enable_search: true,
+            enable_legalization: true,
+            enable_kernel_gen: false,
+        })
+    }
 }

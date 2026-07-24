@@ -77,6 +77,15 @@ pub struct ProgressiveTernaryPlan {
     pub evidence_complete: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProgressiveTernaryReceipt {
+    pub candidate_count: usize,
+    pub native_ternary_regions: u64,
+    pub protected_regions: u64,
+    pub evidence_complete: bool,
+    pub receipt_digest: String,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ProgressiveTernaryError {
     #[error("evidence references unknown region {0}")]
@@ -106,7 +115,9 @@ pub fn build_progressive_ternary_plan(
             return Err(ProgressiveTernaryError::UnknownRegion(sample.region.0));
         }
         if by_region.insert(sample.region.clone(), sample).is_some() {
-            return Err(ProgressiveTernaryError::DuplicateEvidence("duplicate".into()));
+            return Err(ProgressiveTernaryError::DuplicateEvidence(
+                "duplicate".into(),
+            ));
         }
     }
 
@@ -122,13 +133,55 @@ pub fn build_progressive_ternary_plan(
             .ok_or_else(|| ProgressiveTernaryError::MissingEvidence(region.id.0.clone()))?;
         let mut admitted_by = Vec::new();
         let mut rejected_by = Vec::new();
-        check_max(sample.weight_nrmse, policy.max_weight_nrmse_initializer, "weight_initializer", &mut admitted_by, &mut rejected_by);
-        check_max(sample.operator_nrmse, policy.max_operator_nrmse, "operator", &mut admitted_by, &mut rejected_by);
-        check_min(sample.cosine_mean, policy.min_cosine_mean, "cosine", &mut admitted_by, &mut rejected_by);
-        check_max(sample.activation_divergence, policy.max_activation_divergence, "activation", &mut admitted_by, &mut rejected_by);
-        check_max(sample.router_flip_rate, policy.max_router_flip_rate, "router", &mut admitted_by, &mut rejected_by);
-        check_max(sample.logit_kl, policy.max_logit_kl, "logit", &mut admitted_by, &mut rejected_by);
-        check_min(sample.rollout_success_delta, policy.min_rollout_success_delta, "rollout", &mut admitted_by, &mut rejected_by);
+        check_max(
+            sample.weight_nrmse,
+            policy.max_weight_nrmse_initializer,
+            "weight_initializer",
+            &mut admitted_by,
+            &mut rejected_by,
+        );
+        check_max(
+            sample.operator_nrmse,
+            policy.max_operator_nrmse,
+            "operator",
+            &mut admitted_by,
+            &mut rejected_by,
+        );
+        check_min(
+            sample.cosine_mean,
+            policy.min_cosine_mean,
+            "cosine",
+            &mut admitted_by,
+            &mut rejected_by,
+        );
+        check_max(
+            sample.activation_divergence,
+            policy.max_activation_divergence,
+            "activation",
+            &mut admitted_by,
+            &mut rejected_by,
+        );
+        check_max(
+            sample.router_flip_rate,
+            policy.max_router_flip_rate,
+            "router",
+            &mut admitted_by,
+            &mut rejected_by,
+        );
+        check_max(
+            sample.logit_kl,
+            policy.max_logit_kl,
+            "logit",
+            &mut admitted_by,
+            &mut rejected_by,
+        );
+        check_min(
+            sample.rollout_success_delta,
+            policy.min_rollout_success_delta,
+            "rollout",
+            &mut admitted_by,
+            &mut rejected_by,
+        );
         if require_measured_behavior && !sample.measured {
             rejected_by.push("behavior_unmeasured".into());
         }
@@ -184,7 +237,13 @@ pub fn build_progressive_ternary_plan(
     })
 }
 
-fn check_max(value: Option<f64>, limit: f64, label: &str, admitted: &mut Vec<String>, rejected: &mut Vec<String>) {
+fn check_max(
+    value: Option<f64>,
+    limit: f64,
+    label: &str,
+    admitted: &mut Vec<String>,
+    rejected: &mut Vec<String>,
+) {
     match value {
         Some(value) if value.is_finite() && value <= limit => admitted.push(label.into()),
         Some(_) => rejected.push(label.into()),
@@ -192,7 +251,13 @@ fn check_max(value: Option<f64>, limit: f64, label: &str, admitted: &mut Vec<Str
     }
 }
 
-fn check_min(value: Option<f64>, limit: f64, label: &str, admitted: &mut Vec<String>, rejected: &mut Vec<String>) {
+fn check_min(
+    value: Option<f64>,
+    limit: f64,
+    label: &str,
+    admitted: &mut Vec<String>,
+    rejected: &mut Vec<String>,
+) {
     match value {
         Some(value) if value.is_finite() && value >= limit => admitted.push(label.into()),
         Some(_) => rejected.push(label.into()),
@@ -213,7 +278,10 @@ fn protection_name(protection: &ProtectedRepresentation) -> String {
     .into()
 }
 
-fn selector_elements(shape: &[u64], selector: &prism_ecs_ir::semantic_region::RegionSelector) -> u64 {
+fn selector_elements(
+    shape: &[u64],
+    selector: &prism_ecs_ir::semantic_region::RegionSelector,
+) -> u64 {
     use prism_ecs_ir::semantic_region::RegionSelector;
     match selector {
         RegionSelector::WholeTensor => shape.iter().product(),

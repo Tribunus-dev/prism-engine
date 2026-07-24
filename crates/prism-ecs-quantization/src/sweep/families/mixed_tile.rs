@@ -10,13 +10,11 @@
 use serde_json::json;
 
 use crate::contract::NF4_TILE640_CODE_BYTES;
-use crate::sweep::families::FamilyCandidate;
-use crate::sweep::spec::{
-    MixedTileSweepGrid, OverlayMode, RescueGranularity, RescueSchedule,
-};
 use crate::nf4tile640::nf4_dequantize;
 use crate::nf4tile640::NF4_CODEBOOK;
 use crate::nf4tile640::{pack_nf4_tile_with_group_size, TILE_ELEMENTS};
+use crate::sweep::families::FamilyCandidate;
+use crate::sweep::spec::{MixedTileSweepGrid, OverlayMode, RescueGranularity, RescueSchedule};
 
 #[cfg(test)]
 mod tests {

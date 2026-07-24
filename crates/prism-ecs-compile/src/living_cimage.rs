@@ -142,7 +142,10 @@ impl LivingCImage {
         Ok(())
     }
 
-    pub fn propose(&mut self, mut candidate: LivingCImageGeneration) -> Result<CImageGeneration, LivingCImageError> {
+    pub fn propose(
+        &mut self,
+        mut candidate: LivingCImageGeneration,
+    ) -> Result<CImageGeneration, LivingCImageError> {
         candidate.generation = CImageGeneration(self.generations.len() as u64);
         candidate.parent_generation = Some(self.active_generation);
         candidate.lifecycle = AdaptationLifecycle::Proposed;
@@ -152,7 +155,11 @@ impl LivingCImage {
         Ok(id)
     }
 
-    pub fn promote(&mut self, generation: CImageGeneration, receipt_digest: String) -> Result<(), LivingCImageError> {
+    pub fn promote(
+        &mut self,
+        generation: CImageGeneration,
+        receipt_digest: String,
+    ) -> Result<(), LivingCImageError> {
         let candidate = self
             .generations
             .get_mut(generation.0 as usize)

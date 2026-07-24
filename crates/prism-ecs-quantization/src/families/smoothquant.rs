@@ -97,11 +97,7 @@ impl SmoothQuantScale {
     ///
     /// Formula: `s_j = (max(|x_j|))^alpha / (max(|W_j|))^(1-alpha)`
     /// where j indexes the input channel.
-    pub fn compute_scales(
-        &self,
-        weight_max: &[f32],
-        alpha: SmoothQuantAlpha,
-    ) -> Vec<f32> {
+    pub fn compute_scales(&self, weight_max: &[f32], alpha: SmoothQuantAlpha) -> Vec<f32> {
         let act_abs_max = self.abs_max();
         act_abs_max
             .iter()

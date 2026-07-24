@@ -295,12 +295,13 @@ pub struct TensorShape {
 // =============================================================================
 
 /// Family of quantization codec.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[allow(non_camel_case_types)]
 pub enum CodecFamily {
     Nf4,
     Int8,
     Fp16,
+    #[default]
     RawF32,
     SymInt4,
     Ternary,
@@ -313,12 +314,6 @@ pub enum CodecFamily {
     Q2_K,
     #[allow(non_camel_case_types)]
     IQ2_XXS,
-}
-
-impl Default for CodecFamily {
-    fn default() -> Self {
-        Self::RawF32
-    }
 }
 
 // =============================================================================

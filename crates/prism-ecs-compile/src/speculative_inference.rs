@@ -47,7 +47,9 @@ pub enum SpeculativeDecodeStrategy {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum VerificationSchedule {
-    Fixed { tokens: u32 },
+    Fixed {
+        tokens: u32,
+    },
     ConfidenceScheduled {
         min_tokens: u32,
         max_tokens: u32,
@@ -113,6 +115,15 @@ pub struct SpeculativeSearchResult {
     pub rejection_reasons: BTreeMap<String, Vec<String>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeculativeInferenceReceipt {
+    pub workload_class: String,
+    pub selected_candidate_digest: Option<String>,
+    pub candidate_count: usize,
+    pub accepted_count: usize,
+    pub receipt_digest: String,
+}
+
 #[derive(Debug, Error, PartialEq)]
 pub enum SpeculativeInferenceError {
     #[error("candidate references an empty Living CImage generation")]
@@ -147,17 +158,27 @@ impl SpeculativeInferenceCandidate {
 
     pub fn block_size(&self) -> u32 {
         match self.decode {
-            SpeculativeDecodeStrategy::SemiAutoregressiveDspark { parallel_block, sequential_tail, .. } => parallel_block + sequential_tail,
+            SpeculativeDecodeStrategy::SemiAutoregressiveDspark {
+                parallel_block,
+                sequential_tail,
+                ..
+            } => parallel_block + sequential_tail,
             SpeculativeDecodeStrategy::BlockDiffusionDflash { block_size, .. } => block_size,
             SpeculativeDecodeStrategy::DecoupledLongShort { block_size, .. } => block_size,
-            SpeculativeDecodeStrategy::AutoregressiveDraft { max_draft_tokens, .. } => max_draft_tokens,
-            SpeculativeDecodeStrategy::VocabularySpeculation { .. } | SpeculativeDecodeStrategy::Disabled => 0,
+            SpeculativeDecodeStrategy::AutoregressiveDraft {
+                max_draft_tokens, ..
+            } => max_draft_tokens,
+            SpeculativeDecodeStrategy::VocabularySpeculation { .. }
+            | SpeculativeDecodeStrategy::Disabled => 0,
         }
     }
 }
 
 impl SpeculativeMeasurement {
-    pub fn authoritative(&self, budget: &SpeculativeSearchBudget) -> Result<(), SpeculativeInferenceError> {
+    pub fn authoritative(
+        &self,
+        budget: &SpeculativeSearchBudget,
+    ) -> Result<(), SpeculativeInferenceError> {
         if !self.measured
             || self.execution_fingerprint.is_empty()
             || self.receipt_digest.is_empty()
@@ -185,20 +206,32 @@ pub fn select_speculative_frontier(
     budget: &SpeculativeSearchBudget,
     workload_class: &str,
 ) -> Result<SpeculativeSearchResult, SpeculativeInferenceError> {
-    let by_digest: BTreeMap<_, _> = candidates.iter().map(|candidate| (&candidate.candidate_digest, candidate)).collect();
+    let by_digest: BTreeMap<_, _> = candidates
+        .iter()
+        .map(|candidate| (&candidate.candidate_digest, candidate))
+        .collect();
     let mut accepted = Vec::new();
     let mut rejection_reasons = BTreeMap::new();
     for measurement in measurements {
         let Some(candidate) = by_digest.get(&measurement.candidate_digest) else {
-            rejection_reasons.entry(measurement.candidate_digest.clone()).or_insert_with(Vec::new).push("unknown candidate".into());
+            rejection_reasons
+                .entry(measurement.candidate_digest.clone())
+                .or_insert_with(Vec::new)
+                .push("unknown candidate".into());
             continue;
         };
         if candidate.block_size() > budget.max_block_size {
-            rejection_reasons.entry(measurement.candidate_digest.clone()).or_insert_with(Vec::new).push("block budget exceeded".into());
+            rejection_reasons
+                .entry(measurement.candidate_digest.clone())
+                .or_insert_with(Vec::new)
+                .push("block budget exceeded".into());
             continue;
         }
         if let Err(error) = measurement.authoritative(budget) {
-            rejection_reasons.entry(measurement.candidate_digest.clone()).or_insert_with(Vec::new).push(error.to_string());
+            rejection_reasons
+                .entry(measurement.candidate_digest.clone())
+                .or_insert_with(Vec::new)
+                .push(error.to_string());
             continue;
         }
         accepted.push(measurement.clone());
@@ -209,7 +242,10 @@ pub fn select_speculative_frontier(
             .then_with(|| a.ttft_ms.total_cmp(&b.ttft_ms))
             .then_with(|| b.accepted_tokens_mean.total_cmp(&a.accepted_tokens_mean))
     });
-    let frontier = accepted.iter().map(|measurement| measurement.candidate_digest.clone()).collect::<Vec<_>>();
+    let frontier = accepted
+        .iter()
+        .map(|measurement| measurement.candidate_digest.clone())
+        .collect::<Vec<_>>();
     Ok(SpeculativeSearchResult {
         workload_class: workload_class.into(),
         evaluated: accepted,
@@ -254,7 +290,9 @@ mod tests {
             expected_ttft_ms: None,
             expected_tokens_per_second: None,
             candidate_digest: String::new(),
-        }.seal().unwrap();
+        }
+        .seal()
+        .unwrap();
         assert_eq!(candidate.block_size(), 8);
         assert!(!candidate.candidate_digest.is_empty());
     }
@@ -262,12 +300,29 @@ mod tests {
     #[test]
     fn non_authoritative_measurement_is_rejected() {
         let measurement = SpeculativeMeasurement {
-            candidate_digest: "x".into(), measured: false, execution_fingerprint: String::new(), workload_digest: "w".into(),
-            ttft_ms: 1.0, tokens_per_second: 1.0, accepted_tokens_mean: 1.0, verification_waste_ratio: 0.0,
-            draft_latency_ms: 0.1, verification_latency_ms: 0.9, quality_equivalent: true,
-            agentic_success_rate: 1.0, tool_call_correctness: 1.0, receipt_digest: String::new(),
+            candidate_digest: "x".into(),
+            measured: false,
+            execution_fingerprint: String::new(),
+            workload_digest: "w".into(),
+            ttft_ms: 1.0,
+            tokens_per_second: 1.0,
+            accepted_tokens_mean: 1.0,
+            verification_waste_ratio: 0.0,
+            draft_latency_ms: 0.1,
+            verification_latency_ms: 0.9,
+            quality_equivalent: true,
+            agentic_success_rate: 1.0,
+            tool_call_correctness: 1.0,
+            receipt_digest: String::new(),
         };
-        let budget = SpeculativeSearchBudget { max_candidates: 10, max_draft_models: 3, max_block_size: 16, max_verification_waste_ratio: 0.3, min_agentic_success_rate: 0.95, min_tool_call_correctness: 0.99 };
+        let budget = SpeculativeSearchBudget {
+            max_candidates: 10,
+            max_draft_models: 3,
+            max_block_size: 16,
+            max_verification_waste_ratio: 0.3,
+            min_agentic_success_rate: 0.95,
+            min_tool_call_correctness: 0.99,
+        };
         assert!(measurement.authoritative(&budget).is_err());
     }
 }

@@ -142,7 +142,7 @@ pub fn verify_binary_float(ctx: &OpVerifierContext) -> Result<(), Vec<String>> {
         if t0 != t1 {
             errors.push(format!("operand types differ: {:?} vs {:?}", t0, t1));
         }
-        if ctx.result_types.len() >= 1 && &ctx.result_types[0] != t0 {
+        if !ctx.result_types.is_empty() && &ctx.result_types[0] != t0 {
             errors.push(format!(
                 "result type {:?} does not match operand type {:?}",
                 ctx.result_types[0], t0
@@ -177,7 +177,7 @@ pub fn verify_binary_integer(ctx: &OpVerifierContext) -> Result<(), Vec<String>>
         if t0 != t1 {
             errors.push(format!("operand types differ: {:?} vs {:?}", t0, t1));
         }
-        if ctx.result_types.len() >= 1 && &ctx.result_types[0] != t0 {
+        if !ctx.result_types.is_empty() && &ctx.result_types[0] != t0 {
             errors.push(format!(
                 "result type {:?} does not match operand type {:?}",
                 ctx.result_types[0], t0
@@ -210,7 +210,7 @@ pub fn verify_compare(ctx: &OpVerifierContext) -> Result<(), Vec<String>> {
             errors.push(format!("operand types differ: {:?} vs {:?}", t0, t1));
         }
     }
-    if ctx.result_types.len() >= 1 && ctx.result_types[0] != Type::Index {
+    if !ctx.result_types.is_empty() && ctx.result_types[0] != Type::Index {
         errors.push(format!(
             "compare result must be index, got {:?}",
             ctx.result_types[0]
@@ -240,7 +240,7 @@ pub fn verify_unary_float(ctx: &OpVerifierContext) -> Result<(), Vec<String>> {
         if !matches!(t0, Type::Float(_)) {
             errors.push(format!("operand is not a float type: {:?}", t0));
         }
-        if ctx.result_types.len() >= 1 && &ctx.result_types[0] != t0 {
+        if !ctx.result_types.is_empty() && &ctx.result_types[0] != t0 {
             errors.push(format!(
                 "result type {:?} does not match operand type {:?}",
                 ctx.result_types[0], t0
@@ -271,7 +271,7 @@ pub fn verify_unary_integer(ctx: &OpVerifierContext) -> Result<(), Vec<String>> 
         if !matches!(t0, Type::Integer(_)) {
             errors.push(format!("operand is not an integer type: {:?}", t0));
         }
-        if ctx.result_types.len() >= 1 && &ctx.result_types[0] != t0 {
+        if !ctx.result_types.is_empty() && &ctx.result_types[0] != t0 {
             errors.push(format!(
                 "result type {:?} does not match operand type {:?}",
                 ctx.result_types[0], t0
@@ -306,7 +306,7 @@ pub fn verify_shift(ctx: &OpVerifierContext) -> Result<(), Vec<String>> {
         if !matches!(t1, Type::Integer(_)) {
             errors.push(format!("operand 1 is not an integer type: {:?}", t1));
         }
-        if ctx.result_types.len() >= 1 && &ctx.result_types[0] != t0 {
+        if !ctx.result_types.is_empty() && &ctx.result_types[0] != t0 {
             errors.push(format!(
                 "result type {:?} does not match operand 0 type {:?}",
                 ctx.result_types[0], t0
@@ -348,7 +348,7 @@ pub fn verify_select(ctx: &OpVerifierContext) -> Result<(), Vec<String>> {
         if t1 != t2 {
             errors.push(format!("select value types differ: {:?} vs {:?}", t1, t2));
         }
-        if ctx.result_types.len() >= 1 && &ctx.result_types[0] != t1 {
+        if !ctx.result_types.is_empty() && &ctx.result_types[0] != t1 {
             errors.push(format!(
                 "result type {:?} does not match value type {:?}",
                 ctx.result_types[0], t1
@@ -705,7 +705,6 @@ mod tests {
             let op = b
                 .create_op("test.produce", &[], &[], &[Type::f32()])
                 .unwrap();
-            drop(b);
             crate::op::results(&world, op)[0]
         };
         let v2 = {
@@ -713,16 +712,13 @@ mod tests {
             let op = b
                 .create_op("test.produce", &[], &[], &[Type::f32()])
                 .unwrap();
-            drop(b);
             crate::op::results(&world, op)[0]
         };
         let addf = {
             let mut builder = OpBuilder::new(&mut world);
-            let addf = builder
+            builder
                 .create_op("arith.addf", &[v1, v2], &[], &[Type::f32()])
-                .unwrap();
-            drop(builder);
-            addf
+                .unwrap()
         };
 
         assert_eq!(op_name(&world, addf), Some("arith.addf".into()));

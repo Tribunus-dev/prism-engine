@@ -108,17 +108,39 @@ pub fn evaluate_shadow_candidate(
         }
         task_sum += comparison.candidate_task_success;
         tool_sum += comparison.candidate_tool_call_correctness;
-        retry_regression_sum += comparison.candidate_retries.saturating_sub(comparison.baseline_retries) as f64;
-        let planning_delta = comparison.candidate_planning_steps as f64 - comparison.baseline_planning_steps as f64;
+        retry_regression_sum += comparison
+            .candidate_retries
+            .saturating_sub(comparison.baseline_retries) as f64;
+        let planning_delta =
+            comparison.candidate_planning_steps as f64 - comparison.baseline_planning_steps as f64;
         planning_regression_sum += planning_delta.max(0.0);
-        if policy.require_zero_user_visible_candidate_outputs && comparison.candidate_output_user_visible {
-            reasons.push(format!("candidate output was visible for {}", comparison.episode_digest));
+        if policy.require_zero_user_visible_candidate_outputs
+            && comparison.candidate_output_user_visible
+        {
+            reasons.push(format!(
+                "candidate output was visible for {}",
+                comparison.episode_digest
+            ));
         }
-        if let (Some(limit), Some(value)) = (policy.max_logit_divergence, comparison.logit_divergence) {
-            if value > limit { reasons.push(format!("logit divergence exceeded for {}", comparison.episode_digest)); }
+        if let (Some(limit), Some(value)) =
+            (policy.max_logit_divergence, comparison.logit_divergence)
+        {
+            if value > limit {
+                reasons.push(format!(
+                    "logit divergence exceeded for {}",
+                    comparison.episode_digest
+                ));
+            }
         }
-        if let (Some(limit), Some(value)) = (policy.max_rollout_divergence, comparison.rollout_divergence) {
-            if value > limit { reasons.push(format!("rollout divergence exceeded for {}", comparison.episode_digest)); }
+        if let (Some(limit), Some(value)) =
+            (policy.max_rollout_divergence, comparison.rollout_divergence)
+        {
+            if value > limit {
+                reasons.push(format!(
+                    "rollout divergence exceeded for {}",
+                    comparison.episode_digest
+                ));
+            }
         }
     }
     let count = comparisons.len() as f64;
@@ -126,10 +148,18 @@ pub fn evaluate_shadow_candidate(
     let tool_mean = tool_sum / count;
     let retry_regression = retry_regression_sum / count;
     let planning_regression = planning_regression_sum / count;
-    if task_mean < policy.min_task_success { reasons.push("candidate task success below gate".into()); }
-    if tool_mean < policy.min_tool_call_correctness { reasons.push("candidate tool-call correctness below gate".into()); }
-    if retry_regression > policy.max_retry_regression { reasons.push("candidate retry regression exceeds gate".into()); }
-    if planning_regression > policy.max_planning_step_regression { reasons.push("candidate planning-step regression exceeds gate".into()); }
+    if task_mean < policy.min_task_success {
+        reasons.push("candidate task success below gate".into());
+    }
+    if tool_mean < policy.min_tool_call_correctness {
+        reasons.push("candidate tool-call correctness below gate".into());
+    }
+    if retry_regression > policy.max_retry_regression {
+        reasons.push("candidate retry regression exceeds gate".into());
+    }
+    if planning_regression > policy.max_planning_step_regression {
+        reasons.push("candidate planning-step regression exceeds gate".into());
+    }
 
     let mut receipt = ShadowCalibrationReceipt {
         baseline_generation_digest,

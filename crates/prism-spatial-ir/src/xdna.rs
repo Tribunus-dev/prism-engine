@@ -411,7 +411,7 @@ impl XdnaProgram {
             ) {
                 let row_bytes = (transfer.bytes as u64).checked_div(transfer.rows as u64);
                 let valid_shape = row_bytes.is_some_and(|width| {
-                    width > 0 && transfer.bytes as u64 % transfer.rows as u64 == 0
+                    width > 0 && (transfer.bytes as u64).is_multiple_of(transfer.rows as u64)
                 });
                 let source_stride = if transfer.source_stride_bytes == 0 {
                     row_bytes.unwrap_or(0)

@@ -33,7 +33,7 @@ impl Bonsai27B {
     pub const CONTEXT_LENGTH: u32 = 262144;
     pub const NORM_EPS: f32 = 1e-6;
     pub fn layer_type(layer: u32) -> LayerType {
-        if layer < Self::LAYERS && layer % 4 == 0 {
+        if layer < Self::LAYERS && layer.is_multiple_of(4) {
             LayerType::FullAttention
         } else {
             LayerType::LinearAttention

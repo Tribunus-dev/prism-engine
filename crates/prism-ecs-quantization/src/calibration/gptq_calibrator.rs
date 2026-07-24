@@ -68,11 +68,7 @@ impl GptqCalibrator {
     /// ```
     /// Note: the reference uses `inp @ inp^T` when inp is
     /// `[batch, num_columns]`, producing `[num_columns, num_columns]`.
-    fn accumulate_hessian(
-        hessian: &mut [f32],
-        num_columns: usize,
-        activations: &[f32],
-    ) {
+    fn accumulate_hessian(hessian: &mut [f32], num_columns: usize, activations: &[f32]) {
         let batch_size = activations.len() / num_columns;
         let sqrt2 = std::f32::consts::SQRT_2;
 
@@ -241,7 +237,12 @@ impl GptqQuantizeWeights {
     /// decomposition.  Here we produce a numerically stabilised
     /// diagonal approximation for the in-host calibration path.
     pub fn compute_inverse_hessian(&self, hessian: &[f32], num_columns: usize) -> Vec<f32> {
-        let damp = self.damp_percent * hessian.chunks(num_columns).enumerate().map(|(i, row)| row[i]).sum::<f32>()
+        let damp = self.damp_percent
+            * hessian
+                .chunks(num_columns)
+                .enumerate()
+                .map(|(i, row)| row[i])
+                .sum::<f32>()
             / num_columns as f32;
 
         let mut h = hessian.to_vec();

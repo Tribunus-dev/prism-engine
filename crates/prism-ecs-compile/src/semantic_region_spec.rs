@@ -57,7 +57,10 @@ pub enum SemanticRegionSpecError {
     #[error("spec tensor {expected} does not match requested tensor {actual}")]
     TensorMismatch { expected: String, actual: String },
     #[error("spec shape {expected:?} does not match mapped tensor shape {actual:?}")]
-    ShapeMismatch { expected: Vec<u64>, actual: Vec<u64> },
+    ShapeMismatch {
+        expected: Vec<u64>,
+        actual: Vec<u64>,
+    },
     #[error("unsupported semantic region role: {0}")]
     UnsupportedRole(String),
     #[error(transparent)]
@@ -74,7 +77,8 @@ impl SemanticRegionSpec {
         requested_tensor: &str,
         mapped_shape: &[u64],
         source_label: &str,
-    ) -> Result<(SemanticRegionPartition, SemanticRegionDiscoveryReceipt), SemanticRegionSpecError> {
+    ) -> Result<(SemanticRegionPartition, SemanticRegionDiscoveryReceipt), SemanticRegionSpecError>
+    {
         if self.schema != SEMANTIC_REGION_SPEC_V1 {
             return Err(SemanticRegionSpecError::UnsupportedSchema(self.schema));
         }
@@ -186,9 +190,30 @@ mod tests {
             tensor: "qkv".into(),
             shape: vec![6, 2],
             regions: vec![
-                SemanticRegionSpecEntry { role: "query_projection".into(), axis: 0, start: 0, end: 4, allowed_formats: vec!["fp16".into()], source: None },
-                SemanticRegionSpecEntry { role: "key_projection".into(), axis: 0, start: 4, end: 5, allowed_formats: vec!["int8".into()], source: None },
-                SemanticRegionSpecEntry { role: "value_projection".into(), axis: 0, start: 5, end: 6, allowed_formats: vec!["int8".into()], source: None },
+                SemanticRegionSpecEntry {
+                    role: "query_projection".into(),
+                    axis: 0,
+                    start: 0,
+                    end: 4,
+                    allowed_formats: vec!["fp16".into()],
+                    source: None,
+                },
+                SemanticRegionSpecEntry {
+                    role: "key_projection".into(),
+                    axis: 0,
+                    start: 4,
+                    end: 5,
+                    allowed_formats: vec!["int8".into()],
+                    source: None,
+                },
+                SemanticRegionSpecEntry {
+                    role: "value_projection".into(),
+                    axis: 0,
+                    start: 5,
+                    end: 6,
+                    allowed_formats: vec!["int8".into()],
+                    source: None,
+                },
             ],
         };
         let (partition, receipt) = spec.into_partition("qkv", &[6, 2], "test").unwrap();

@@ -275,7 +275,7 @@ pub fn register_standard_passes(registry: &mut PassPipelineRegistry) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pass_manager::{EraseUnusedOpsPass, Pass, PassPipeline};
+    use crate::pass_manager::EraseUnusedOpsPass;
 
     #[test]
     fn register_and_instantiate() {

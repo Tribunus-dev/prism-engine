@@ -163,7 +163,7 @@ pub fn dequantize_q2_0(
     data: &[u8],
     num_elements: usize,
 ) -> Result<Vec<f32>, BonsaiConversionError> {
-    if num_elements % Q2_0_BLOCK_SIZE != 0 {
+    if !num_elements.is_multiple_of(Q2_0_BLOCK_SIZE) {
         return Err(BonsaiConversionError::NotBlockAligned {
             num_elements,
             block_size: Q2_0_BLOCK_SIZE,
@@ -314,7 +314,7 @@ pub fn pack_tile640(
 
     let lanes_per_page = page_size / TILE640_LANE_SIZE;
     let words_per_page = lanes_per_page;
-    let pages_per_row = (inp + page_size - 1) / page_size;
+    let pages_per_row = inp.div_ceil(page_size);
     let total_words = out * pages_per_row * words_per_page;
     let mut packed_words = vec![0u32; total_words];
 
@@ -334,7 +334,7 @@ pub fn pack_tile640(
                     };
 
                     // Validate before encoding
-                    if !matches!(ternary_val, -1 | 0 | 1) {
+                    if !matches!(ternary_val, -1..=1) {
                         return Err(BonsaiConversionError::InvalidTernaryValue {
                             value: ternary_val,
                             index: weight_idx,
@@ -381,7 +381,7 @@ pub fn compute_scales(packed: &Tile640Packed, original_weights: &[f32]) -> Scale
     let inp = packed.in_dim as usize;
     let page_size = packed.page_size;
     let lanes_per_page = page_size / TILE640_LANE_SIZE;
-    let pages_per_row = (inp + page_size - 1) / page_size;
+    let pages_per_row = inp.div_ceil(page_size);
     let num_pages = out * pages_per_row;
 
     let mut page_scales = vec![0u16; num_pages];
@@ -418,7 +418,7 @@ pub fn compute_scales(packed: &Tile640Packed, original_weights: &[f32]) -> Scale
             // Compute per-lane scales
             for lane in 0..lanes_per_page {
                 let lane_idx = page_idx * lanes_per_page + lane;
-                let lane_base = weight_base + (lane * TILE640_LANE_SIZE) as usize;
+                let lane_base = weight_base + (lane * TILE640_LANE_SIZE);
 
                 let mut lane_max = 0.0f32;
                 for vi in 0..TILE640_LANE_SIZE {
@@ -724,7 +724,7 @@ pub fn ternary_gemv_ref(
 ) -> Vec<f32> {
     let out = out_dim as usize;
     let inp = in_dim as usize;
-    let nt = (inp + TILE640_PAGE_SIZE - 1) / TILE640_PAGE_SIZE;
+    let nt = inp.div_ceil(TILE640_PAGE_SIZE);
     let words_per_row = nt * TILE640_WORDS_PER_PAGE; // nt * 32
 
     let mut output = vec![0.0f32; out];
@@ -885,7 +885,7 @@ pub fn validate_ternary_abi(
 ) -> AbiValidationReceipt {
     let out = out_dim as usize;
     let inp = in_dim as usize;
-    let nt = (inp + TILE640_PAGE_SIZE - 1) / TILE640_PAGE_SIZE;
+    let nt = inp.div_ceil(TILE640_PAGE_SIZE);
     let expected_packed_words = out * nt * TILE640_WORDS_PER_PAGE;
     let expected_page_scales = out * nt;
     let expected_lane_scales = out * nt * TILE640_LANES_PER_PAGE;
@@ -1291,7 +1291,7 @@ mod tests {
         // All +1 values → trit 1
         let ternary = vec![1i8; 640];
         let packed = pack_tile640(&ternary, 1, 640, TILE640_PAGE_SIZE).unwrap();
-        let expected_word: u32 = (0..20).map(|i| 1u32 * 3u32.pow(i)).sum();
+        let expected_word: u32 = (0..20).map(|i| 3u32.pow(i)).sum();
         for &w in &packed.packed_words {
             assert_eq!(w, expected_word, "all +1 should encode as all trit-1");
         }
@@ -1324,7 +1324,7 @@ mod tests {
 
         // First 32 words: all trit-2
         let expected_word_minus: u32 = (0..20).map(|i| 2u32 * 3u32.pow(i)).sum();
-        let expected_word_plus: u32 = (0..20).map(|i| 1u32 * 3u32.pow(i)).sum();
+        let expected_word_plus: u32 = (0..20).map(|i| 3u32.pow(i)).sum();
         for i in 0..32 {
             assert_eq!(packed.packed_words[i], expected_word_minus);
             assert_eq!(packed.packed_words[32 + i], expected_word_plus);
@@ -1341,7 +1341,7 @@ mod tests {
 
         // First 5 lanes (100/20=5) encode all +1
         // Lanes 5-31 encode all zeros
-        let expected_word_plus: u32 = (0..20).map(|i| 1u32 * 3u32.pow(i)).sum();
+        let expected_word_plus: u32 = (0..20).map(|i| 3u32.pow(i)).sum();
         for i in 0..5 {
             assert_eq!(packed.packed_words[i], expected_word_plus);
         }
@@ -1685,7 +1685,7 @@ mod tests {
             pack_tile640(&ternary_result.ternary, out_dim, in_dim, TILE640_PAGE_SIZE).unwrap();
 
         // Check packed layout matches expected dimensions
-        let nt = (in_dim as usize + TILE640_PAGE_SIZE - 1) / TILE640_PAGE_SIZE;
+        let nt = (in_dim as usize).div_ceil(TILE640_PAGE_SIZE);
         let expected_words = (out_dim as usize) * nt * TILE640_WORDS_PER_PAGE;
         assert_eq!(packed.packed_words.len(), expected_words);
         assert_eq!(packed.out_dim, out_dim);
@@ -1747,7 +1747,7 @@ mod tests {
 
         // Now "unpack" by reconstructing from packed words manually
         // This mirrors the Metal kernel's unpack logic
-        let nt = (in_dim as usize + TILE640_PAGE_SIZE - 1) / TILE640_PAGE_SIZE;
+        let nt = (in_dim as usize).div_ceil(TILE640_PAGE_SIZE);
         let words_per_row = nt * TILE640_WORDS_PER_PAGE;
 
         let mut recovered = vec![0i8; n];

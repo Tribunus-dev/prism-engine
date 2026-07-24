@@ -152,7 +152,13 @@ pub fn enforce_regularization(
 ) -> Result<(), RegionalSearchError> {
     let variants = assignments
         .iter()
-        .map(|a| (a.representation.as_str(), a.codec.as_deref(), a.preferred_lane.as_deref()))
+        .map(|a| {
+            (
+                a.representation.as_str(),
+                a.codec.as_deref(),
+                a.preferred_lane.as_deref(),
+            )
+        })
         .collect::<BTreeSet<_>>()
         .len();
     if variants > policy.max_kernel_variants {
@@ -199,37 +205,86 @@ mod tests {
             .map(|i| SemanticRegionDescriptor {
                 id: SemanticRegionId(format!("r{i}")),
                 parent: LogicalTensorId("qkv".into()),
-                selector: RegionSelector::AxisSpan { axis: 0, start: i, end: i + 1 },
-                role: RegionRole::Generic { label: format!("r{i}") },
-                origin: RegionOrigin::Explicit { source: "test".into() },
-                constraints: RegionConstraints { allowed_formats: vec!["int8".into(), "fp16".into()], ..Default::default() },
+                selector: RegionSelector::AxisSpan {
+                    axis: 0,
+                    start: i,
+                    end: i + 1,
+                },
+                role: RegionRole::Generic {
+                    label: format!("r{i}"),
+                },
+                origin: RegionOrigin::Explicit {
+                    source: "test".into(),
+                },
+                constraints: RegionConstraints {
+                    allowed_formats: vec!["int8".into(), "fp16".into()],
+                    ..Default::default()
+                },
                 provenance_refs: vec![],
             })
             .collect();
-        SemanticRegionPartition { parent: LogicalTensorId("qkv".into()), parent_shape: vec![3, 2], regions, exhaustive: true, disjoint: true, digest: String::new() }.seal().unwrap()
+        SemanticRegionPartition {
+            parent: LogicalTensorId("qkv".into()),
+            parent_shape: vec![3, 2],
+            regions,
+            exhaustive: true,
+            disjoint: true,
+            digest: String::new(),
+        }
+        .seal()
+        .unwrap()
     }
 
     #[test]
     fn template_sharing_reuses_assignment() {
         let p = partition();
         let template = RegionTemplateId("decoder-qkv".into());
-        let templates = p.regions.iter().map(|r| (r.id.clone(), template.clone())).collect();
+        let templates = p
+            .regions
+            .iter()
+            .map(|r| (r.id.clone(), template.clone()))
+            .collect();
         let palettes = build_palettes(&p, &templates).unwrap();
-        let candidate = select_bounded_plan(p, CandidateGenome::default(), &palettes, RegionRegularizationPolicy::default()).unwrap();
-        assert!(candidate.assignments.iter().all(|a| a.representation == "int8"));
+        let candidate = select_bounded_plan(
+            p,
+            CandidateGenome::default(),
+            &palettes,
+            RegionRegularizationPolicy::default(),
+        )
+        .unwrap();
+        assert!(candidate
+            .assignments
+            .iter()
+            .all(|a| a.representation == "int8"));
     }
 
     #[test]
     fn region_budget_is_enforced() {
         let p = partition();
         let palettes = build_palettes(&p, &BTreeMap::new()).unwrap();
-        let policy = RegionRegularizationPolicy { max_regions: 2, ..Default::default() };
-        assert!(matches!(select_bounded_plan(p, CandidateGenome::default(), &palettes, policy), Err(RegionalSearchError::RegionBudgetExceeded)));
+        let policy = RegionRegularizationPolicy {
+            max_regions: 2,
+            ..Default::default()
+        };
+        assert!(matches!(
+            select_bounded_plan(p, CandidateGenome::default(), &palettes, policy),
+            Err(RegionalSearchError::RegionBudgetExceeded)
+        ));
     }
 
     #[test]
     fn objective_rejects_incomplete_receipt() {
-        let score = objective_score(&RegionalSearchObjectives { quality_loss: 0.0, packed_bytes: 0, materialized_bytes: 0, conversion_bytes: 0, region_boundary_count: 0, kernel_variant_count: 1, layout_fragmentation: 0.0, cross_lane_transfer_bytes: 0, receipt_complete: false });
+        let score = objective_score(&RegionalSearchObjectives {
+            quality_loss: 0.0,
+            packed_bytes: 0,
+            materialized_bytes: 0,
+            conversion_bytes: 0,
+            region_boundary_count: 0,
+            kernel_variant_count: 1,
+            layout_fragmentation: 0.0,
+            cross_lane_transfer_bytes: 0,
+            receipt_complete: false,
+        });
         assert_eq!(score, f64::NEG_INFINITY);
     }
 }

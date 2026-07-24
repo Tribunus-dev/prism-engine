@@ -67,11 +67,7 @@ impl StressSuite {
     }
 
     /// Insert a stress bank for a tensor class.
-    pub fn insert(
-        &mut self,
-        class: crate::TensorClass,
-        bank: ActivationBank,
-    ) {
+    pub fn insert(&mut self, class: crate::TensorClass, bank: ActivationBank) {
         if let Some(pos) = self.banks.iter().position(|(c, _)| *c == class) {
             self.banks[pos].1 = bank;
         } else {
@@ -80,10 +76,7 @@ impl StressSuite {
     }
 
     /// Look up the stress bank for a tensor class.
-    pub fn get(
-        &self,
-        class: &crate::TensorClass,
-    ) -> Option<&ActivationBank> {
+    pub fn get(&self, class: &crate::TensorClass) -> Option<&ActivationBank> {
         self.banks.iter().find(|(c, _)| c == class).map(|(_, b)| b)
     }
 
@@ -137,11 +130,7 @@ impl CalibrationSuite {
     }
 
     /// Insert an activation bank for a tensor class.
-    pub fn insert(
-        &mut self,
-        class: crate::TensorClass,
-        bank: ActivationBank,
-    ) {
+    pub fn insert(&mut self, class: crate::TensorClass, bank: ActivationBank) {
         if let Some(pos) = self.banks.iter().position(|(c, _)| *c == class) {
             self.banks[pos].1 = bank;
         } else {
@@ -150,10 +139,7 @@ impl CalibrationSuite {
     }
 
     /// Look up the activation bank for a tensor class.
-    pub fn get(
-        &self,
-        class: &crate::TensorClass,
-    ) -> Option<&ActivationBank> {
+    pub fn get(&self, class: &crate::TensorClass) -> Option<&ActivationBank> {
         self.banks.iter().find(|(c, _)| c == class).map(|(_, b)| b)
     }
 
@@ -238,9 +224,7 @@ pub const DEFAULT_SAMPLE_SEED: u64 = 0xDEAD_BEEF_CAFE_F00D;
 /// Generate an activation bank for a specific tensor class.
 ///
 /// Returns `None` for classes that have no generator yet.
-pub fn generate_for_class(
-    class: crate::TensorClass,
-) -> Option<ActivationBank> {
+pub fn generate_for_class(class: crate::TensorClass) -> Option<ActivationBank> {
     let (input_dim, label, promo_count, hold_count) = match class {
         crate::TensorClass::VisionPatchProjection => {
             (6912, "vision-patch", PROMOTION_COUNT, HOLDOUT_COUNT)
@@ -414,7 +398,7 @@ fn flat_uniform(rng: &mut XorShift64, dim: usize, amp: f32) -> ActivationVector 
 fn checkerboard(_rng: &mut XorShift64, dim: usize, period: usize, amp: f32) -> ActivationVector {
     (0..dim)
         .map(|i| {
-            if (i / period) % 2 == 0 {
+            if (i / period).is_multiple_of(2) {
                 amp
             } else {
                 -amp * 0.3
@@ -597,7 +581,7 @@ pub fn stratified_sample(
     let num_strata = num_strata.max(1).min(indexed.len());
     let band_size = indexed.len() / num_strata;
     let remainder = indexed.len() % num_strata;
-    let per_band = (count + num_strata - 1) / num_strata;
+    let per_band = count.div_ceil(num_strata);
 
     let mut selected_indices = Vec::with_capacity(count);
     let mut strata_sizes = Vec::with_capacity(num_strata);
@@ -739,7 +723,7 @@ mod tests {
         assert_eq!(sample.seed, 42);
 
         // Verify each stratum contributes (25 plusmn wiggle room)
-        assert!(sample.strata_sizes.iter().all(|&s| s >= 20 && s <= 30));
+        assert!(sample.strata_sizes.iter().all(|&s| (20..=30).contains(&s)));
 
         // Deterministic: same seed => same sample
         let sample2 = stratified_sample(&vectors, 100, 4, 42, None);

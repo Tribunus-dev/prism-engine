@@ -72,26 +72,39 @@ impl SemanticRegionEvaluationRecord {
 }
 
 impl SemanticRegionEvaluationStudy {
-    pub fn by_baseline(&self) -> BTreeMap<SemanticRegionBaseline, Vec<&SemanticRegionEvaluationRecord>> {
+    pub fn by_baseline(
+        &self,
+    ) -> BTreeMap<SemanticRegionBaseline, Vec<&SemanticRegionEvaluationRecord>> {
         let mut grouped = BTreeMap::new();
         for record in &self.records {
-            grouped.entry(record.baseline).or_insert_with(Vec::new).push(record);
+            grouped
+                .entry(record.baseline)
+                .or_insert_with(Vec::new)
+                .push(record);
         }
         grouped
     }
 
     pub fn measured_frontier(&self) -> Vec<&SemanticRegionEvaluationRecord> {
-        let mut candidates = self.records.iter().filter(|record| record.authoritative()).collect::<Vec<_>>();
+        let mut candidates = self
+            .records
+            .iter()
+            .filter(|record| record.authoritative())
+            .collect::<Vec<_>>();
         candidates.retain(|candidate| {
-            !self.records.iter().filter(|other| other.authoritative()).any(|other| {
-                let cq = candidate.metrics.quality_score.unwrap_or(f64::NEG_INFINITY);
-                let oq = other.metrics.quality_score.unwrap_or(f64::NEG_INFINITY);
-                let ct = candidate.metrics.tokens_per_second.unwrap_or(0.0);
-                let ot = other.metrics.tokens_per_second.unwrap_or(0.0);
-                let cm = candidate.metrics.model_size_bytes.unwrap_or(u64::MAX);
-                let om = other.metrics.model_size_bytes.unwrap_or(u64::MAX);
-                (oq >= cq && ot >= ct && om <= cm) && (oq > cq || ot > ct || om < cm)
-            })
+            !self
+                .records
+                .iter()
+                .filter(|other| other.authoritative())
+                .any(|other| {
+                    let cq = candidate.metrics.quality_score.unwrap_or(f64::NEG_INFINITY);
+                    let oq = other.metrics.quality_score.unwrap_or(f64::NEG_INFINITY);
+                    let ct = candidate.metrics.tokens_per_second.unwrap_or(0.0);
+                    let ot = other.metrics.tokens_per_second.unwrap_or(0.0);
+                    let cm = candidate.metrics.model_size_bytes.unwrap_or(u64::MAX);
+                    let om = other.metrics.model_size_bytes.unwrap_or(u64::MAX);
+                    (oq >= cq && ot >= ct && om <= cm) && (oq > cq || ot > ct || om < cm)
+                })
         });
         candidates
     }
@@ -101,7 +114,12 @@ impl SemanticRegionEvaluationStudy {
 mod tests {
     use super::*;
 
-    fn record(baseline: SemanticRegionBaseline, quality: f64, throughput: f64, bytes: u64) -> SemanticRegionEvaluationRecord {
+    fn record(
+        baseline: SemanticRegionBaseline,
+        quality: f64,
+        throughput: f64,
+        bytes: u64,
+    ) -> SemanticRegionEvaluationRecord {
         SemanticRegionEvaluationRecord {
             baseline,
             model_digest: "model".into(),
@@ -139,11 +157,17 @@ mod tests {
     #[test]
     fn frontier_removes_dominated_record() {
         let study = SemanticRegionEvaluationStudy {
-            records: vec![record(SemanticRegionBaseline::UniformPerTensor, 0.9, 10.0, 100), record(SemanticRegionBaseline::PrismSemanticOnly, 0.95, 12.0, 90)],
+            records: vec![
+                record(SemanticRegionBaseline::UniformPerTensor, 0.9, 10.0, 100),
+                record(SemanticRegionBaseline::PrismSemanticOnly, 0.95, 12.0, 90),
+            ],
             ablations: vec![],
         };
         let frontier = study.measured_frontier();
         assert_eq!(frontier.len(), 1);
-        assert_eq!(frontier[0].baseline, SemanticRegionBaseline::PrismSemanticOnly);
+        assert_eq!(
+            frontier[0].baseline,
+            SemanticRegionBaseline::PrismSemanticOnly
+        );
     }
 }

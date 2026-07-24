@@ -41,7 +41,7 @@ pub const SCALES_F32_PER_TILE: usize = GROUPS_PER_TILE; // 5
 
 /// Validate that a group size is valid for Tile640 format.
 pub fn validate_tile_group_size(group_size: usize) -> Result<(), String> {
-    if group_size == 0 || TILE_ELEMENTS % group_size != 0 {
+    if group_size == 0 || !TILE_ELEMENTS.is_multiple_of(group_size) {
         return Err(format!(
             "group_size {group_size} must divide TILE_ELEMENTS {TILE_ELEMENTS} and be non-zero"
         ));
@@ -56,40 +56,40 @@ pub fn validate_tile_group_size(group_size: usize) -> Result<(), String> {
 /// Prism canonical NF4 codebook: 16 evenly-spaced quantiles of N(0,1).
 pub const PRISM_NF4_CODEBOOK: [f32; 16] = [
     -1.0,
-    -0.8482084274291992,
-    -0.6356878280639648,
-    -0.46220311522483826,
-    -0.32028985023587036,
-    -0.19982607662677765,
-    -0.0961047038435936,
+    -0.848_208_4,
+    -0.635_687_8,
+    -0.462_203_12,
+    -0.320_289_85,
+    -0.199_826_08,
+    -0.096_104_704,
     0.0,
-    0.08384315651655197,
-    0.1694672405719757,
-    0.25665056705474854,
-    0.3479790687561035,
-    0.4470846354961395,
-    0.5603545904159546,
-    0.7071067690849304,
+    0.083_843_16,
+    0.169_467_24,
+    0.256_650_57,
+    0.347_979_07,
+    0.447_084_64,
+    0.560_354_6,
+    0.707_106_77,
     1.0,
 ];
 
 /// BitsAndBytes NF4 codebook (from Dettmers et al., 2023).
 pub const BNB_NF4_CODEBOOK: [f32; 16] = [
     -1.0,
-    -0.6961928009986877,
-    -0.5250730514526367,
-    -0.39491748809814453,
-    -0.28444138169288635,
-    -0.18477343022823334,
-    -0.09105003625154495,
+    -0.696_192_8,
+    -0.525_073_05,
+    -0.394_917_5,
+    -0.284_441_38,
+    -0.184_773_43,
+    -0.091_050_036,
     0.0,
-    0.07958029955625534,
-    0.16093020141124725,
-    0.24611230194568634,
-    0.33791524171829224,
-    0.4407098591327667,
-    0.5626170039176941,
-    0.7229568362236023,
+    0.079_580_3,
+    0.160_930_2,
+    0.246_112_3,
+    0.337_915_24,
+    0.440_709_86,
+    0.562_617,
+    0.722_956_84,
     1.0,
 ];
 
@@ -116,20 +116,20 @@ pub const SYMMETRIC_NORMAL_FLOAT_CODEBOOK: [f32; 16] = [
 /// Canonical NF4 codebook used for pack/unpack operations.
 pub const NF4_CODEBOOK: [f32; 16] = [
     -1.0,
-    -0.6961928009986877,
-    -0.5250730514526367,
-    -0.39491748809814453,
-    -0.28444138169288635,
-    -0.18477343022823334,
-    -0.09105003625154495,
+    -0.696_192_8,
+    -0.525_073_05,
+    -0.394_917_5,
+    -0.284_441_38,
+    -0.184_773_43,
+    -0.091_050_036,
     0.0,
-    0.07958029955625534,
-    0.16093020141124725,
-    0.24611230194568634,
-    0.33791524171829224,
-    0.4407098591327667,
-    0.5626170039176941,
-    0.7229568362236023,
+    0.079_580_3,
+    0.160_930_2,
+    0.246_112_3,
+    0.337_915_24,
+    0.440_709_86,
+    0.562_617,
+    0.722_956_84,
     1.0,
 ];
 
@@ -210,10 +210,16 @@ pub fn pack_nf4_tile_with_group_size(
                 max_abs = v;
             }
         }
-        let codebook_aligned = values[base..base + group_size].iter().all(|&v| {
-            v.abs() <= 1e-12 || NF4_CODEBOOK.iter().any(|&q| (v - q).abs() <= 1e-6)
-        });
-        let scale = if codebook_aligned { 1.0 } else if max_abs > 1e-12 { max_abs } else { 1.0 };
+        let codebook_aligned = values[base..base + group_size]
+            .iter()
+            .all(|&v| v.abs() <= 1e-12 || NF4_CODEBOOK.iter().any(|&q| (v - q).abs() <= 1e-6));
+        let scale = if codebook_aligned {
+            1.0
+        } else if max_abs > 1e-12 {
+            max_abs
+        } else {
+            1.0
+        };
         let bias = 0.0f32;
         scales[g] = scale;
         biases[g] = bias;
@@ -343,9 +349,13 @@ pub fn unpack_nf4_weights(
 
     if tile_cols > cols {
         let mut compact = Vec::with_capacity(rows * cols);
-        for row in result.chunks_exact(tile_cols) { compact.extend_from_slice(&row[..cols]); }
+        for row in result.chunks_exact(tile_cols) {
+            compact.extend_from_slice(&row[..cols]);
+        }
         compact
-    } else { result }
+    } else {
+        result
+    }
 }
 
 /// Unpack NF4 weights with configurable group size.
@@ -358,7 +368,7 @@ pub fn unpack_nf4_weights_with_group_size(
     group_size: usize,
 ) -> Vec<f32> {
     assert!(
-        TILE_ELEMENTS % group_size == 0,
+        TILE_ELEMENTS.is_multiple_of(group_size),
         "group_size {group_size} must divide TILE_ELEMENTS {TILE_ELEMENTS}"
     );
     let groups_per_tile = TILE_ELEMENTS / group_size;
@@ -393,9 +403,13 @@ pub fn unpack_nf4_weights_with_group_size(
 
     if tile_cols > cols {
         let mut compact = Vec::with_capacity(rows * cols);
-        for row in result.chunks_exact(tile_cols) { compact.extend_from_slice(&row[..cols]); }
+        for row in result.chunks_exact(tile_cols) {
+            compact.extend_from_slice(&row[..cols]);
+        }
         compact
-    } else { result }
+    } else {
+        result
+    }
 }
 
 /// Unpack NF4 weights with configurable group size and codebook.
@@ -408,7 +422,7 @@ pub fn unpack_nf4_weights_with_group_size_and_codebook(
     group_size: usize,
     codebook: &[f32; 16],
 ) -> Vec<f32> {
-    assert!(TILE_ELEMENTS % group_size == 0);
+    assert!(TILE_ELEMENTS.is_multiple_of(group_size));
     let groups_per_tile = TILE_ELEMENTS / group_size;
     let bytes_per_group = group_size / 2;
     let packed_per_tile = groups_per_tile * bytes_per_group;
@@ -441,9 +455,13 @@ pub fn unpack_nf4_weights_with_group_size_and_codebook(
 
     if tile_cols > cols {
         let mut compact = Vec::with_capacity(rows * cols);
-        for row in result.chunks_exact(tile_cols) { compact.extend_from_slice(&row[..cols]); }
+        for row in result.chunks_exact(tile_cols) {
+            compact.extend_from_slice(&row[..cols]);
+        }
         compact
-    } else { result }
+    } else {
+        result
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -551,7 +569,7 @@ pub fn unpack_int8_weights_with_group_size(
     group_size: usize,
 ) -> Vec<f32> {
     assert!(
-        TILE_ELEMENTS % group_size == 0,
+        TILE_ELEMENTS.is_multiple_of(group_size),
         "group_size {group_size} must divide TILE_ELEMENTS {TILE_ELEMENTS}"
     );
     let groups_per_tile = TILE_ELEMENTS / group_size;
@@ -790,7 +808,7 @@ impl Nf4Tile640Manifest {
 
 /// Compute the expected packed byte sizes for a weight matrix.
 pub fn packed_size(rows: usize, cols: usize) -> usize {
-    let padded_cols = if cols % TILE_ELEMENTS == 0 {
+    let padded_cols = if cols.is_multiple_of(TILE_ELEMENTS) {
         cols
     } else {
         cols.div_ceil(TILE_ELEMENTS) * TILE_ELEMENTS

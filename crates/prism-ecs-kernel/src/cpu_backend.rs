@@ -99,13 +99,13 @@ impl KernelBackend for CpuBackend {
         }
         let weights = &request.inputs[0];
         let input = &request.inputs[1];
-        if weights.len() % 2 != 0 || input.len() % 4 != 0 {
+        if !weights.len().is_multiple_of(2) || !input.len().is_multiple_of(4) {
             return Err(KernelError::DispatchFailed(
                 "unaligned FP16 GEMV buffers".into(),
             ));
         }
         let n = input.len() / 4;
-        if n == 0 || weights.len() % (n * 2) != 0 {
+        if n == 0 || !weights.len().is_multiple_of(n * 2) {
             return Err(KernelError::DispatchFailed(
                 "FP16 GEMV weight matrix does not match input width".into(),
             ));
@@ -179,7 +179,7 @@ impl KernelBackend for CpuBackend {
 }
 
 fn decode_f32(bytes: &[u8]) -> Result<Vec<f32>, KernelError> {
-    if bytes.is_empty() || bytes.len() % 4 != 0 {
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
         return Err(KernelError::BindingMismatch(
             "UOp CPU buffers must be non-empty FP32".into(),
         ));
@@ -278,7 +278,7 @@ fn dispatch_broadcast_binary(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOut
                     "tanh" => value.tanh(),
                     "gelu" => {
                         0.5 * value
-                            * (1.0 + (0.79788456 * (value + 0.044715 * value.powi(3))).tanh())
+                            * (1.0 + (0.797_884_6 * (value + 0.044_715 * value.powi(3))).tanh())
                     }
                     _ => value,
                 };
@@ -347,13 +347,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
             let output = input
                 .into_iter()
                 .map(|value| match operation {
-                    "add" => {
-                        if scalar_left {
-                            scalar + value
-                        } else {
-                            value + scalar
-                        }
-                    }
+                    "add" => scalar + value,
                     "mul" => value * scalar,
                     "sub" => {
                         if scalar_left {
@@ -443,7 +437,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                             0.5 * value
                                 * (1.0
                                     + (std::f32::consts::FRAC_2_SQRT_PI
-                                        * (value + 0.044715 * value.powi(3)))
+                                        * (value + 0.044_715 * value.powi(3)))
                                     .tanh())
                         }
                         _ => value,
@@ -528,7 +522,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                             0.5 * value
                                 * (1.0
                                     + (std::f32::consts::FRAC_2_SQRT_PI
-                                        * (value + 0.044715 * value.powi(3)))
+                                        * (value + 0.044_715 * value.powi(3)))
                                     .tanh())
                         }
                         _ => value,
@@ -693,7 +687,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                 ));
             };
             let a =
-                decode_f32(inputs.get(0).ok_or_else(|| {
+                decode_f32(inputs.first().ok_or_else(|| {
                     KernelError::BindingMismatch("UOp matmul requires A".into())
                 })?)?;
             let b =
@@ -726,7 +720,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                     "UOp RMSNorm variant has invalid dimensions".into(),
                 ));
             };
-            let x = decode_f32(inputs.get(0).ok_or_else(|| {
+            let x = decode_f32(inputs.first().ok_or_else(|| {
                 KernelError::BindingMismatch("UOp RMSNorm requires input".into())
             })?)?;
             let weight = decode_f32(inputs.get(1).ok_or_else(|| {
@@ -760,7 +754,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                     "UOp LayerNorm variant has invalid dimensions".into(),
                 ));
             };
-            let x = decode_f32(inputs.get(0).ok_or_else(|| {
+            let x = decode_f32(inputs.first().ok_or_else(|| {
                 KernelError::BindingMismatch("UOp LayerNorm requires input".into())
             })?)?;
             let weight = decode_f32(inputs.get(1).ok_or_else(|| {
@@ -800,13 +794,13 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                     "UOp RoPE variant has invalid dimensions".into(),
                 ));
             };
-            if features == 0 || features % 2 != 0 {
+            if features == 0 || !features.is_multiple_of(2) {
                 return Err(KernelError::BindingMismatch(
                     "UOp RoPE feature dimension must be positive and even".into(),
                 ));
             }
             let x =
-                decode_f32(inputs.get(0).ok_or_else(|| {
+                decode_f32(inputs.first().ok_or_else(|| {
                     KernelError::BindingMismatch("UOp RoPE requires input".into())
                 })?)?;
             let cos = decode_f32(inputs.get(1).ok_or_else(|| {
@@ -843,7 +837,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                     "UOp Gather variant has invalid dimensions".into(),
                 ));
             };
-            let weight = decode_f32(inputs.get(0).ok_or_else(|| {
+            let weight = decode_f32(inputs.first().ok_or_else(|| {
                 KernelError::BindingMismatch("UOp Gather requires weight".into())
             })?)?;
             let indices = decode_f32(inputs.get(1).ok_or_else(|| {
@@ -881,7 +875,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                     "UOp Scatter variant has invalid dimensions".into(),
                 ));
             };
-            let base = decode_f32(inputs.get(0).ok_or_else(|| {
+            let base = decode_f32(inputs.first().ok_or_else(|| {
                 KernelError::BindingMismatch("UOp Scatter requires base".into())
             })?)?;
             let indices = decode_f32(inputs.get(1).ok_or_else(|| {
@@ -899,8 +893,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                 ));
             }
             let mut output = base;
-            for update in 0..updates {
-                let index = indices[update];
+            for (update, &index) in indices.iter().enumerate().take(updates) {
                 if !index.is_finite() || index < 0.0 || index.fract() != 0.0 || index >= rows as f32
                 {
                     return Err(KernelError::BindingMismatch(
@@ -922,7 +915,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                 ));
             };
             let input =
-                decode_f32(inputs.get(0).ok_or_else(|| {
+                decode_f32(inputs.first().ok_or_else(|| {
                     KernelError::BindingMismatch("UOp SSM requires input".into())
                 })?)?;
             let decay =
@@ -999,7 +992,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                 .map(|axis| input_shape[axis + 1..].iter().product())
                 .collect();
             let mut output = vec![0.0; output_shape.iter().product()];
-            for out_linear in 0..output.len() {
+            for (out_linear, value) in output.iter_mut().enumerate() {
                 let mut remainder = out_linear;
                 let mut source_linear = 0;
                 for out_axis in (0..output_shape.len()).rev() {
@@ -1007,7 +1000,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                     remainder /= output_shape[out_axis];
                     source_linear += coordinate * input_strides[permutation[out_axis]];
                 }
-                output[out_linear] = x[source_linear];
+                *value = x[source_linear];
             }
             Ok(encode_f32(&output))
         }
@@ -1039,7 +1032,7 @@ fn dispatch_uop_cpu(name: &str, inputs: &[Vec<u8>]) -> Result<KernelOutput, Kern
                     "UOp Conv2D variant has invalid dimensions".into(),
                 ));
             };
-            let x = decode_f32(inputs.get(0).ok_or_else(|| {
+            let x = decode_f32(inputs.first().ok_or_else(|| {
                 KernelError::BindingMismatch("UOp Conv2D requires input".into())
             })?)?;
             let weight = decode_f32(inputs.get(1).ok_or_else(|| {
@@ -1133,7 +1126,7 @@ fn dispatch_uop_attention_cpu(
     };
     let q = decode_f32(
         inputs
-            .get(0)
+            .first()
             .ok_or_else(|| KernelError::BindingMismatch("UOp attention requires Q".into()))?,
     )?;
     let k = decode_f32(
@@ -1178,7 +1171,7 @@ fn dispatch_uop_attention_cpu(
 /// CPU reference for the canonical packed ternary Tile640 ABI.
 fn dispatch_ternary_gemv(inputs: &[Vec<u8>]) -> Result<KernelOutput, KernelError> {
     let start = Instant::now();
-    if inputs.len() < 5 || inputs[1].len() % 2 != 0 || inputs[4].len() != 8 {
+    if inputs.len() < 5 || !inputs[1].len().is_multiple_of(2) || inputs[4].len() != 8 {
         return Err(KernelError::BindingMismatch(
             "ternary GEMV requires packed weights, FP16 input, page scales, lane scales, and dimensions".into(),
         ));
@@ -1368,7 +1361,7 @@ fn dispatch_nf4_gemv(inputs: &[Vec<u8>]) -> Result<KernelOutput, KernelError> {
     let scales = &inputs[2];
     let biases = &inputs[3];
     let dims = &inputs[4];
-    if dims.len() != 8 || input.len() % 4 != 0 {
+    if dims.len() != 8 || !input.len().is_multiple_of(4) {
         return Err(KernelError::DispatchFailed(
             "invalid NF4 GEMV metadata".into(),
         ));
@@ -1394,14 +1387,14 @@ fn dispatch_nf4_gemv(inputs: &[Vec<u8>]) -> Result<KernelOutput, KernelError> {
         .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
         .collect::<Vec<_>>();
     let mut output = vec![0.0f32; output_dim];
-    for row in 0..output_dim {
+    for (row, result) in output.iter_mut().enumerate().take(output_dim) {
         let mut sum = 0.0f32;
-        for col in 0..input_dim {
+        for (col, activation) in activations.iter().enumerate().take(input_dim) {
             let tile = col / TILE;
             let within_tile = col % TILE;
             let byte_index = (row * tiles + tile) * CODES_PER_TILE + within_tile / 2;
             let packed = codes[byte_index];
-            let code = if within_tile % 2 == 0 {
+            let code = if within_tile.is_multiple_of(2) {
                 packed & 0x0f
             } else {
                 packed >> 4
@@ -1418,9 +1411,9 @@ fn dispatch_nf4_gemv(inputs: &[Vec<u8>]) -> Result<KernelOutput, KernelError> {
                     .try_into()
                     .unwrap(),
             );
-            sum += (NF4[code as usize] * scale + bias) * activations[col];
+            sum += (NF4[code as usize] * scale + bias) * activation;
         }
-        output[row] = sum;
+        *result = sum;
     }
     Ok(KernelOutput {
         outputs: vec![output
@@ -1794,8 +1787,8 @@ mod tests {
         let input_dim = 640usize;
         let output_dim = 1usize;
         let codes = vec![0x88u8; input_dim / 2];
-        let scales = vec![1.0f32; 5];
-        let biases = vec![0.0f32; 5];
+        let scales = [1.0f32; 5];
+        let biases = [0.0f32; 5];
         let input = vec![1.0f32; input_dim];
         let dims = [input_dim as u32, output_dim as u32];
         let descriptor = KernelDescriptor {
@@ -1842,7 +1835,7 @@ mod tests {
 
     #[test]
     fn dispatches_ternary_tile640_gemv_with_packed_abi() {
-        let trits = 1u32 + 2 * 3 + 0 * 9 + 1 * 27;
+        let trits = 34u32;
         let descriptor = KernelDescriptor {
             name: "ternary-test".into(),
             variant: KernelVariant::TernaryTile640(crate::TernaryKernelAbi {

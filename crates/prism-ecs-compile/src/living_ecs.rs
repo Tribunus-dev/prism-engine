@@ -7,7 +7,9 @@ use crate::execution_graph_evolution::{ExecutionGraphAdmissionReceipt, TargetExe
 use crate::knowledge_correction::{KnowledgeCorrectionProposal, KnowledgeCorrectionReceipt};
 use crate::kv_cache_compaction::{KvCompactionCandidate, KvCompactionReceipt};
 use crate::kv_cache_evolution::{KvCacheCandidate, KvCacheEvaluationReceipt};
-use crate::living_cimage::{CImageGeneration, LivingCImage, LivingCImageGeneration, LivingCImageId};
+use crate::living_cimage::{
+    CImageGeneration, LivingCImage, LivingCImageGeneration, LivingCImageId,
+};
 use crate::living_promotion::{LivingGenerationPromotionReceipt, LivingGenerationRollbackReceipt};
 use crate::model_export::{ModelExportReceipt, ModelExportRequest};
 use crate::progressive_ternary::{ProgressiveTernaryPlan, ProgressiveTernaryReceipt};
@@ -69,7 +71,11 @@ pub struct LivingAdaptationIndex {
     pub speculative_inference: Option<(SpeculativeInferenceCandidate, SpeculativeInferenceReceipt)>,
     pub kv_cache_evolution: Option<(KvCacheCandidate, KvCacheEvaluationReceipt)>,
     pub kv_cache_compaction: Option<(KvCompactionCandidate, KvCompactionReceipt)>,
-    pub adapter_training: Option<(AdapterTrainingRequest, AdapterArtifact, AdapterTrainingReceipt)>,
+    pub adapter_training: Option<(
+        AdapterTrainingRequest,
+        AdapterArtifact,
+        AdapterTrainingReceipt,
+    )>,
     pub engram_generation: Option<(EngramGeneration, EngramAdmissionReceipt)>,
     pub knowledge_correction: Option<(KnowledgeCorrectionProposal, KnowledgeCorrectionReceipt)>,
     pub model_exports: Vec<(ModelExportRequest, ModelExportReceipt)>,
@@ -212,7 +218,11 @@ impl LivingCommand {
     }
 
     pub fn seal(mut self) -> Result<Self, LivingEcsError> {
-        if self.command_id.is_empty() || self.living_cimage_id.is_empty() || self.actor.is_empty() || self.idempotency_key.is_empty() {
+        if self.command_id.is_empty()
+            || self.living_cimage_id.is_empty()
+            || self.actor.is_empty()
+            || self.idempotency_key.is_empty()
+        {
             return Err(LivingEcsError::MissingCommandIdentity);
         }
         self.command_digest = self.canonical_digest();
@@ -232,7 +242,8 @@ pub fn validate_command_against_authority(
     authority: &LivingCImage,
 ) -> Result<(), LivingEcsError> {
     command.verify()?;
-    let active = authority.generations
+    let active = authority
+        .generations
         .get(authority.active_generation.0 as usize)
         .map(|generation| generation.generation_digest.as_str())
         .unwrap_or_default();
@@ -242,7 +253,11 @@ pub fn validate_command_against_authority(
         }
     }
     if matches!(command.kind, LivingCommandKind::PromoteGeneration)
-        && command.receipt_digest.as_deref().unwrap_or_default().is_empty()
+        && command
+            .receipt_digest
+            .as_deref()
+            .unwrap_or_default()
+            .is_empty()
     {
         return Err(LivingEcsError::PromotionReceiptMissing);
     }
@@ -301,7 +316,8 @@ pub fn project_living_cimage(
     index: &LivingAdaptationIndex,
     checkpoint: u64,
 ) -> LivingProjection {
-    let active_generation_digest = authority.generations
+    let active_generation_digest = authority
+        .generations
         .get(authority.active_generation.0 as usize)
         .map(|generation| generation.generation_digest.clone())
         .unwrap_or_default();
@@ -315,20 +331,65 @@ pub fn project_living_cimage(
             }
         };
     }
-    domain!(index.progressive_ternary.as_ref(), "progressive_ternary", |value: &(ProgressiveTernaryPlan, ProgressiveTernaryReceipt)| value.1.receipt_digest.clone());
-    domain!(index.speculative_inference.as_ref(), "speculative_inference", |value: &(SpeculativeInferenceCandidate, SpeculativeInferenceReceipt)| value.1.receipt_digest.clone());
-    domain!(index.kv_cache_evolution.as_ref(), "kv_cache_evolution", |value: &(KvCacheCandidate, KvCacheEvaluationReceipt)| value.1.receipt_digest.clone());
-    domain!(index.kv_cache_compaction.as_ref(), "kv_cache_compaction", |value: &(KvCompactionCandidate, KvCompactionReceipt)| value.1.receipt_digest.clone());
-    domain!(index.adapter_training.as_ref(), "adapter_training", |value: &(AdapterTrainingRequest, AdapterArtifact, AdapterTrainingReceipt)| value.2.receipt_digest.clone());
-    domain!(index.engram_generation.as_ref(), "engram_generation", |value: &(EngramGeneration, EngramAdmissionReceipt)| value.1.receipt_digest.clone());
-    domain!(index.knowledge_correction.as_ref(), "knowledge_correction", |value: &(KnowledgeCorrectionProposal, KnowledgeCorrectionReceipt)| value.1.receipt_digest.clone());
+    domain!(
+        index.progressive_ternary.as_ref(),
+        "progressive_ternary",
+        |value: &(ProgressiveTernaryPlan, ProgressiveTernaryReceipt)| value
+            .1
+            .receipt_digest
+            .clone()
+    );
+    domain!(
+        index.speculative_inference.as_ref(),
+        "speculative_inference",
+        |value: &(SpeculativeInferenceCandidate, SpeculativeInferenceReceipt)| value
+            .1
+            .receipt_digest
+            .clone()
+    );
+    domain!(
+        index.kv_cache_evolution.as_ref(),
+        "kv_cache_evolution",
+        |value: &(KvCacheCandidate, KvCacheEvaluationReceipt)| value.1.receipt_digest.clone()
+    );
+    domain!(
+        index.kv_cache_compaction.as_ref(),
+        "kv_cache_compaction",
+        |value: &(KvCompactionCandidate, KvCompactionReceipt)| value.1.receipt_digest.clone()
+    );
+    domain!(
+        index.adapter_training.as_ref(),
+        "adapter_training",
+        |value: &(
+            AdapterTrainingRequest,
+            AdapterArtifact,
+            AdapterTrainingReceipt
+        )| value.2.receipt_digest.clone()
+    );
+    domain!(
+        index.engram_generation.as_ref(),
+        "engram_generation",
+        |value: &(EngramGeneration, EngramAdmissionReceipt)| value.1.receipt_digest.clone()
+    );
+    domain!(
+        index.knowledge_correction.as_ref(),
+        "knowledge_correction",
+        |value: &(KnowledgeCorrectionProposal, KnowledgeCorrectionReceipt)| value
+            .1
+            .receipt_digest
+            .clone()
+    );
     LivingProjection {
         living_cimage_id: authority.id.0.clone(),
         active_generation_digest,
         generation_count: authority.generations.len(),
         admitted_domains,
         latest_receipts,
-        rollback_targets: index.rollback_receipts.iter().map(|receipt| receipt.to_generation_digest.clone()).collect(),
+        rollback_targets: index
+            .rollback_receipts
+            .iter()
+            .map(|receipt| receipt.to_generation_digest.clone())
+            .collect(),
         projection_checkpoint: checkpoint,
     }
 }

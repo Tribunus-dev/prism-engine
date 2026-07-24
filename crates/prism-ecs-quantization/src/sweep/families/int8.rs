@@ -6,9 +6,9 @@
 
 use serde_json::json;
 
+use crate::nf4tile640::{unpack_int8_weights_with_group_size, TILE_ELEMENTS};
 use crate::sweep::families::FamilyCandidate;
 use crate::sweep::spec::Int8SweepGrid;
-use crate::nf4tile640::{unpack_int8_weights_with_group_size, TILE_ELEMENTS};
 
 // ── Byte-count estimators ────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ pub(crate) fn pack_int8_matrix_with_group_size(
     group_size: usize,
 ) -> (Vec<u8>, Vec<f32>, Vec<f32>, Vec<u8>) {
     assert!(
-        TILE_ELEMENTS % group_size == 0,
+        TILE_ELEMENTS.is_multiple_of(group_size),
         "group_size must divide 640, got {}",
         group_size
     );
@@ -112,7 +112,7 @@ pub fn generate_int8_candidates(grid: &Int8SweepGrid) -> Vec<FamilyCandidate> {
 
     for &group_size in &grid.group_sizes {
         // Reject group sizes that don't divide 640.
-        if TILE_ELEMENTS % group_size != 0 {
+        if !TILE_ELEMENTS.is_multiple_of(group_size) {
             continue;
         }
         for clip in &grid.clipping_policies {

@@ -139,7 +139,10 @@ impl AgenticWorkloadEpisode {
         if !self.retention.privacy_safe() {
             return Err(AgenticWorkloadError::UnsafeRetention);
         }
-        for metric in [self.outcome.task_success, self.outcome.tool_call_correctness] {
+        for metric in [
+            self.outcome.task_success,
+            self.outcome.tool_call_correctness,
+        ] {
             if !metric.is_finite() || !(0.0..=1.0).contains(&metric) {
                 return Err(AgenticWorkloadError::InvalidMetric);
             }
@@ -164,7 +167,9 @@ impl AgenticCalibrationCorpus {
         let mut workload_counts = BTreeMap::new();
         for episode in &episodes {
             episode.verify()?;
-            *workload_counts.entry(episode.workload_class.clone()).or_insert(0) += 1;
+            *workload_counts
+                .entry(episode.workload_class.clone())
+                .or_insert(0) += 1;
         }
         let mut corpus = Self {
             corpus_id: corpus_id.into(),
@@ -202,8 +207,22 @@ mod tests {
             activation_probe_refs: vec![],
             router_probe_refs: vec![],
             engram_access_trace: vec![],
-            outcome: AgenticOutcome { task_success: 1.0, tool_call_correctness: 1.0, retry_count: 0, planning_steps: 1, final_answer_accepted: true, failure_class: None },
-            retention: RetentionPolicy { privacy_class: PrivacyClass::FeatureOnly, retain_raw_prompt: true, retain_raw_output: false, retain_tool_arguments: false, expires_after_days: None, explicit_opt_in: false },
+            outcome: AgenticOutcome {
+                task_success: 1.0,
+                tool_call_correctness: 1.0,
+                retry_count: 0,
+                planning_steps: 1,
+                final_answer_accepted: true,
+                failure_class: None,
+            },
+            retention: RetentionPolicy {
+                privacy_class: PrivacyClass::FeatureOnly,
+                retain_raw_prompt: true,
+                retain_raw_output: false,
+                retain_tool_arguments: false,
+                expires_after_days: None,
+                explicit_opt_in: false,
+            },
             feature_summary: BTreeMap::new(),
             episode_digest: String::new(),
         };

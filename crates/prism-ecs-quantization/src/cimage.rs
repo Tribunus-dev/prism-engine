@@ -66,9 +66,16 @@ pub struct TensorRecord {
 
 impl TensorRecord {
     pub fn ternary_tile640_layout(&self) -> Result<(usize, usize, usize, usize), String> {
-        let elements = (self.dim_m as usize).checked_mul(self.dim_n as usize).ok_or("tensor dimensions overflow")?;
+        let elements = (self.dim_m as usize)
+            .checked_mul(self.dim_n as usize)
+            .ok_or("tensor dimensions overflow")?;
         let pages = elements.div_ceil(640);
-        Ok((elements.div_ceil(4), pages * 2, elements.div_ceil(16) * 2, pages))
+        Ok((
+            elements.div_ceil(4),
+            pages * 2,
+            elements.div_ceil(16) * 2,
+            pages,
+        ))
     }
 }
 
@@ -257,7 +264,9 @@ pub struct CImageReader {
 }
 
 impl CImageReader {
-    pub fn load_kernel(&self, _name: &str) -> Result<Vec<u8>, String> { Err("embedded kernels are not present in this cimage format".into()) }
+    pub fn load_kernel(&self, _name: &str) -> Result<Vec<u8>, String> {
+        Err("embedded kernels are not present in this cimage format".into())
+    }
     /// Open a .cimage file and parse the header.
     pub fn open(path: &Path) -> Result<Self, String> {
         use std::io::Read;
@@ -269,10 +278,7 @@ impl CImageReader {
         file.read_exact(&mut magic)
             .map_err(|e| format!("read magic: {e}"))?;
         if &magic != MAGIC {
-            return Err(format!(
-                "Invalid magic: expected TRB_CIMG, got {:?}",
-                &magic
-            ));
+            return Err(format!("Invalid magic: expected TRB_CIMG, got {:?}", magic));
         }
 
         // Read header size
@@ -315,7 +321,7 @@ pub fn cimage_append_blob(
         .map(|r| r.offset + r.size)
         .max()
         .unwrap_or(HEADER_PAGES * PAGE_SIZE);
-    let aligned = (end_offset + PAGE_SIZE - 1) / PAGE_SIZE * PAGE_SIZE;
+    let aligned = end_offset.div_ceil(PAGE_SIZE) * PAGE_SIZE;
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
@@ -378,7 +384,7 @@ mod tests {
         assert_eq!(rec.dim_n, 8);
         assert!(matches!(rec.tensor_type, TensorType::Palettized4Bit));
         assert!(
-            rec.offset % PAGE_SIZE == 0,
+            rec.offset.is_multiple_of(PAGE_SIZE),
             "offset {} not page-aligned",
             rec.offset
         );

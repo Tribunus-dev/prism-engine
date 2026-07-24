@@ -79,8 +79,12 @@ impl SemanticRegionManifest {
         let mut canonical = self.clone();
         canonical.manifest_digest.clear();
         canonical.partitions.sort_by(|a, b| a.digest.cmp(&b.digest));
-        canonical.plans.sort_by(|a, b| a.plan_digest.cmp(&b.plan_digest));
-        canonical.realizations.sort_by(|a, b| a.semantic_region.cmp(&b.semantic_region));
+        canonical
+            .plans
+            .sort_by(|a, b| a.plan_digest.cmp(&b.plan_digest));
+        canonical
+            .realizations
+            .sort_by(|a, b| a.semantic_region.cmp(&b.semantic_region));
         canonical.receipt_refs.sort();
         let bytes = serde_json::to_vec(&canonical).expect("semantic region manifest serialization");
         let mut hasher = Sha256::new();
@@ -115,10 +119,21 @@ mod tests {
             regions: vec![SemanticRegionDescriptor {
                 id: SemanticRegionId("r".into()),
                 parent: LogicalTensorId("tensor".into()),
-                selector: RegionSelector::AxisSpan { axis: 0, start: 0, end: 1 },
-                role: RegionRole::Generic { label: "whole".into() },
-                origin: RegionOrigin::Explicit { source: "test".into() },
-                constraints: RegionConstraints { allowed_formats: vec!["fp16".into()], ..Default::default() },
+                selector: RegionSelector::AxisSpan {
+                    axis: 0,
+                    start: 0,
+                    end: 1,
+                },
+                role: RegionRole::Generic {
+                    label: "whole".into(),
+                },
+                origin: RegionOrigin::Explicit {
+                    source: "test".into(),
+                },
+                constraints: RegionConstraints {
+                    allowed_formats: vec!["fp16".into()],
+                    ..Default::default()
+                },
                 provenance_refs: vec![],
             }],
             exhaustive: true,
@@ -167,6 +182,9 @@ mod tests {
         let mut m = manifest();
         m.receipt_refs.push("receipt:discovery".into());
         m.manifest_digest = m.canonical_digest();
-        assert_eq!(m.verify(), Err(SemanticRegionManifestError::DuplicateReceipt));
+        assert_eq!(
+            m.verify(),
+            Err(SemanticRegionManifestError::DuplicateReceipt)
+        );
     }
 }

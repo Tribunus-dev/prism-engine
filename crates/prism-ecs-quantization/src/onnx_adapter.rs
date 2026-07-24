@@ -781,13 +781,11 @@ fn parse_tensor_proto(
     let dt = onnx_data_type_to_enum(data_type);
 
     // If raw_data wasn't present, compute size from typed data fields.
-    if raw_data_offset.is_none() {
-        if !float_data.is_empty() {
-            let _bytes: Vec<u8> = float_data.iter().flat_map(|f| f.to_le_bytes()).collect();
-            // Store synthetic raw_data by writing through — we can't store
-            // a synthetic offset in the file. Instead we'll handle this in
-            // read_tensor_raw by re-parsing.
-        }
+    if raw_data_offset.is_none() && !float_data.is_empty() {
+        let _bytes: Vec<u8> = float_data.iter().flat_map(|f| f.to_le_bytes()).collect();
+        // Store synthetic raw_data by writing through — we can't store
+        // a synthetic offset in the file. Instead we'll handle this in
+        // read_tensor_raw by re-parsing.
     }
 
     Ok((
@@ -1024,28 +1022,32 @@ fn infer_model_dims(
             }
         }
         // Also detect NumBlocks.* (Microsoft's format).
-        if name_lower.contains("numblocks") || name_lower.contains("num_layers") {
-            if dims.len() == 1 && dims[0] > 0 {
-                num_layers = dims[0];
-            }
+        if (name_lower.contains("numblocks") || name_lower.contains("num_layers"))
+            && dims.len() == 1
+            && dims[0] > 0
+        {
+            num_layers = dims[0];
         }
 
         // Detect num_heads from weight shapes.
-        if name_lower.contains("num_heads") || name_lower.contains("n_head") {
-            if !dims.is_empty() && dims[0] > 0 {
-                num_heads = dims[0];
-            }
+        if (name_lower.contains("num_heads") || name_lower.contains("n_head"))
+            && !dims.is_empty()
+            && dims[0] > 0
+        {
+            num_heads = dims[0];
         }
-        if name_lower.contains("q_proj") || name_lower.contains("query.weight") {
-            if dims.len() == 2 && hidden_size > 0 && dims[0] > 0 {
-                // q_proj shape = (hidden_size, hidden_size) or (num_heads*head_dim, hidden_size)
-                // Try to infer num_heads from the ratio.
-                if dims[0] >= hidden_size && dims[0] % hidden_size == 0 {
-                    // Multi-query: dims[0] / hidden_size = num_heads for GQA
-                } else if hidden_size > 0 && dims[0] % 64 == 0 {
-                    let inferred = dims[0] / 64;
-                    num_heads = num_heads.max(inferred);
-                }
+        if (name_lower.contains("q_proj") || name_lower.contains("query.weight"))
+            && dims.len() == 2
+            && hidden_size > 0
+            && dims[0] > 0
+        {
+            // q_proj shape = (hidden_size, hidden_size) or (num_heads*head_dim, hidden_size)
+            // Try to infer num_heads from the ratio.
+            if dims[0] >= hidden_size && dims[0] % hidden_size == 0 {
+                // Multi-query: dims[0] / hidden_size = num_heads for GQA
+            } else if hidden_size > 0 && dims[0] % 64 == 0 {
+                let inferred = dims[0] / 64;
+                num_heads = num_heads.max(inferred);
             }
         }
     }
@@ -1054,7 +1056,7 @@ fn infer_model_dims(
     if hidden_size > 0 && num_heads == 0 {
         // Common head counts: 8, 12, 16, 32
         for h in &[32usize, 16, 12, 8] {
-            if hidden_size % h == 0 {
+            if hidden_size.is_multiple_of(*h) {
                 num_heads = *h;
                 break;
             }

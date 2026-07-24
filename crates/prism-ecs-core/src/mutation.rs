@@ -4,10 +4,11 @@
 /// - `ControlledDirect`: Direct mutations allowed but controlled.
 /// - `Bootstrap`: Full direct mutation access for initial construction.
 /// - `TestHarness`: Explicit opt-in for test fixtures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum MutationPolicy {
     TransactionalOnly,
     ControlledDirect,
+    #[default]
     Bootstrap,
     TestHarness,
 }
@@ -26,11 +27,5 @@ impl MutationPolicy {
     /// Returns true if this policy requires all mutations through WorldTxn.
     pub fn requires_transactional(&self) -> bool {
         matches!(self, MutationPolicy::TransactionalOnly)
-    }
-}
-
-impl Default for MutationPolicy {
-    fn default() -> Self {
-        MutationPolicy::Bootstrap
     }
 }

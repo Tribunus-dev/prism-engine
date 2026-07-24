@@ -33,8 +33,9 @@ ane = ["prism-ane/ane"]
 mlx-backend = []
 prism-backend = []
 prism-backend-ios = []
+research = []
 ffi = []
 metal-dispatch = []
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("ane", "mlx-backend", "prism-backend", "prism-backend-ios", "ffi", "metal-dispatch"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("ane", "mlx-backend", "prism-backend", "prism-backend-ios", "research", "ffi", "metal-dispatch"))'] }

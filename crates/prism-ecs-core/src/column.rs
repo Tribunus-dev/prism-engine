@@ -28,6 +28,12 @@ pub struct Column<T> {
     entities: Vec<Entity>,
 }
 
+impl<T> Default for Column<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> Column<T> {
     /// Debug-only invariant check: sparse ↔ dense ↔ entities consistency.
     fn debug_check_invariants(&self) {
@@ -287,7 +293,7 @@ impl ColumnStore {
     /// Remove an entity from every registered column (generation-checked).
     pub fn remove_entity_from_all(&mut self, entity: Entity) -> bool {
         let mut found = false;
-        for (_, col) in self.data.iter_mut() {
+        for col in self.data.values_mut() {
             if col.remove_entity(entity) {
                 found = true;
             }
@@ -298,8 +304,8 @@ impl ColumnStore {
     /// Return (count, type_name) for every non-empty column.
     pub fn diagnose(&self) -> Vec<(usize, &'static str)> {
         self.data
-            .iter()
-            .map(|(_, col)| (col.len(), col.type_name()))
+            .values()
+            .map(|col| (col.len(), col.type_name()))
             .filter(|(len, _)| *len > 0)
             .collect()
     }
@@ -366,6 +372,6 @@ impl ColumnStore {
 
     /// Check if a column exists and is non-empty.
     pub fn contains_column<T: 'static + Send + Sync + std::fmt::Debug>(&self) -> bool {
-        self.column::<T>().map(|c| c.len() > 0).unwrap_or(false)
+        self.column::<T>().map(|c| !c.is_empty()).unwrap_or(false)
     }
 }

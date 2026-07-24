@@ -21,12 +21,12 @@ pub use suite::{
     STRATIFY_NUM_STRATA_PROBE, STRATIFY_NUM_STRATA_PROMO,
 };
 
-pub mod calibrator;
 pub mod awq_calibrator;
+pub mod calibrator;
 pub mod gptq_calibrator;
 pub mod ternary;
 
-pub use calibrator::*;
 pub use awq_calibrator::*;
+pub use calibrator::*;
 pub use gptq_calibrator::*;
 pub use ternary::*;

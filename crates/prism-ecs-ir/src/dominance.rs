@@ -120,7 +120,7 @@ impl DominanceAnalyzer {
                 }
 
                 // Check if this block already has an idom equal to the new one.
-                if idom.get(&b).map_or(true, |&cur| cur != new_idom) {
+                if idom.get(&b).is_none_or(|&cur| cur != new_idom) {
                     idom.insert(b, new_idom);
                     changed = true;
                 }

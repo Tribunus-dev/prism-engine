@@ -397,17 +397,17 @@ pub fn quantize_tensor(
     // Check bank vector widths against in_features.
     let mut production_quality = CandidateResult::ProductionQualified;
     if let Some(v) = &stress_vectors {
-        if v.iter().any(|vec| vec.len() != in_features as usize) {
+        if v.iter().any(|vec| vec.len() != in_features) {
             production_quality = CandidateResult::DiagnosticOnly;
         }
     }
     if let Some(v) = &calibration_promotion {
-        if v.iter().any(|v| v.len() != in_features as usize) {
+        if v.iter().any(|v| v.len() != in_features) {
             production_quality = CandidateResult::DiagnosticOnly;
         }
     }
     if let Some(v) = &calibration_holdout {
-        if v.iter().any(|v| v.len() != in_features as usize) {
+        if v.iter().any(|v| v.len() != in_features) {
             production_quality = CandidateResult::DiagnosticOnly;
         }
     }
@@ -415,7 +415,7 @@ pub fn quantize_tensor(
     let tensor_deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
 
     // Reject source tensors whose length doesn't match the declared dimensions.
-    if source.len() != (in_features as usize) * (out_features as usize) {
+    if source.len() != in_features * out_features {
         return Err(QuantizationAdmissionFailure::PackerFailure(format!(
             "source shape mismatch: len={} expected in*out={}*{}={}",
             source.len(),
@@ -537,7 +537,7 @@ pub fn quantize_tensor(
         }
         if best_evidence
             .as_ref()
-            .map_or(true, |b| evidence_is_better(&evidence, b))
+            .is_none_or(|b| evidence_is_better(&evidence, b))
         {
             best_evidence = Some(evidence);
         }
@@ -600,7 +600,7 @@ pub fn quantize_tensor(
             completed_vectors.total += promo_vecs.len() as u32;
             if best_evidence
                 .as_ref()
-                .map_or(true, |b| evidence_is_better(&evidence, b))
+                .is_none_or(|b| evidence_is_better(&evidence, b))
             {
                 best_evidence = Some(evidence);
             }
@@ -664,7 +664,7 @@ pub fn quantize_tensor(
             completed_vectors.total += hold_vecs.len() as u32;
             if best_evidence
                 .as_ref()
-                .map_or(true, |b| evidence_is_better(&evidence, b))
+                .is_none_or(|b| evidence_is_better(&evidence, b))
             {
                 best_evidence = Some(evidence);
             }
@@ -1060,7 +1060,7 @@ pub fn evaluate_tensor(
             }
         });
 
-        let tile_count = ((in_features + 639) / 640) * out_features;
+        let tile_count = in_features.div_ceil(640) * out_features;
         let tile_code_bytes = match format {
             RuntimeRepresentationClass::TernaryTile640Base => 160u64,
             RuntimeRepresentationClass::Nf4Tile640Base => 320,

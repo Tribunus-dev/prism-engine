@@ -38,7 +38,7 @@ pub struct SubstitutionCandidate {
 }
 
 /// Gate thresholds for a substitution candidate.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SubstitutionGates {
     /// Weight-space: maximum NRMSE (None = no weight gate).
     pub weight_nrmse_max: Option<f64>,
@@ -54,20 +54,6 @@ pub struct SubstitutionGates {
     pub requires_hardware_validation: bool,
     /// Whether rollout validation is required for this candidate.
     pub requires_rollout_validation: bool,
-}
-
-impl Default for SubstitutionGates {
-    fn default() -> Self {
-        Self {
-            weight_nrmse_max: None,
-            weight_zero_collapse_max: None,
-            operator_nrmse_max: None,
-            operator_cosine_min: None,
-            operator_max_abs_max: None,
-            requires_hardware_validation: false,
-            requires_rollout_validation: false,
-        }
-    }
 }
 
 // ── Substitution attempt result ───────────────────────────────────────────

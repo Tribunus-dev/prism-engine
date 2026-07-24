@@ -136,7 +136,7 @@ kernel void {kernel_name}(
 }
 
 // ── Batch matmul kernel (3-D grid dispatch) ────────────────────────────────
-
+#[allow(clippy::too_many_arguments)]
 #[rustfmt::skip]
 fn emit_batch_matmul_kernel(
     m: u64, n: u64, k: u64, batch: u64,
@@ -359,30 +359,30 @@ pub fn lower_matmul_to_metal(world: &World, matmul_op: Entity) -> Result<String,
         resolve_matmul_tile(world, matmul_op, m as u32, n as u32, k_a as u32);
     match fmt {
         Some(TensorFormat::Ternary158) => Ok(emit_ternary_matmul_kernel(
-            m as u64,
-            n as u64,
-            k_a as u64,
-            tile_m as u64,
-            tile_n as u64,
-            tile_k as u64,
+            m,
+            n,
+            k_a,
+            tile_m.into(),
+            tile_n.into(),
+            tile_k.into(),
         )),
         Some(TensorFormat::Binary1) => Ok(emit_binary_matmul_kernel(
-            m as u64,
-            n as u64,
-            k_a as u64,
-            tile_m as u64,
-            tile_n as u64,
-            tile_k as u64,
+            m,
+            n,
+            k_a,
+            tile_m.into(),
+            tile_n.into(),
+            tile_k.into(),
         )),
         _ => {
             let metal_type = element_type_to_metal(&a_tensor.element_type);
             Ok(emit_matmul_kernel(
-                m as u64,
-                n as u64,
-                k_a as u64,
-                tile_m as u64,
-                tile_n as u64,
-                tile_k as u64,
+                m,
+                n,
+                k_a,
+                tile_m.into(),
+                tile_n.into(),
+                tile_k.into(),
                 metal_type,
             ))
         }
@@ -471,13 +471,13 @@ pub fn lower_batch_matmul_to_metal(
         resolve_matmul_tile(world, batch_op, m as u32, n as u32, k_a as u32);
     let metal_type = element_type_to_metal(&a_tensor.element_type);
     Ok(emit_batch_matmul_kernel(
-        m as u64,
-        n as u64,
-        k_a as u64,
-        batch as u64,
-        tile_m as u64,
-        tile_n as u64,
-        tile_k as u64,
+        m,
+        n,
+        k_a,
+        batch,
+        tile_m.into(),
+        tile_n.into(),
+        tile_k.into(),
         metal_type,
     ))
 }
@@ -561,20 +561,20 @@ pub fn lower_ternary_matmul_to_metal(
     let encoding = detect_tensor_encoding(&a_tensor.element_type);
     match encoding {
         TensorEncoding::Ternary158 => Ok(emit_ternary_matmul_kernel(
-            m as u64,
-            n as u64,
-            k_a as u64,
-            tile_m as u64,
-            tile_n as u64,
-            tile_k as u64,
+            m,
+            n,
+            k_a,
+            tile_m.into(),
+            tile_n.into(),
+            tile_k.into(),
         )),
         TensorEncoding::Binary1 => Ok(emit_binary_matmul_kernel(
-            m as u64,
-            n as u64,
-            k_a as u64,
-            tile_m as u64,
-            tile_n as u64,
-            tile_k as u64,
+            m,
+            n,
+            k_a,
+            tile_m.into(),
+            tile_n.into(),
+            tile_k.into(),
         )),
         TensorEncoding::Float => Err(MetalLowerError::UnsupportedEncoding(
             "ternary_matmul requires Ternary158 or Binary1 element type, got float".into(),
@@ -608,9 +608,7 @@ mod tests {
     use prism_ecs_core::{EntityKind, World};
 
     use super::*;
-    use crate::evolution::{
-        CompilePlan, CompilePlanRef, FormatAssignment, TensorFormat, TensorOperation,
-    };
+    use crate::evolution::{CompilePlan, CompilePlanRef, FormatAssignment, TensorFormat};
     use crate::ir_types::{FloatKind, TensorType, Type};
     use crate::op::{OpAttributes, OpMarker, OpName, Operands, Results};
     use crate::value::{Uses, ValueDef, ValueType};
@@ -868,8 +866,8 @@ mod tests {
 
         let op = create_matmul_op(&mut world, a_ty, b_ty, c_ty);
         let op_operands = world.get_component::<Operands>(op).unwrap();
-        let a = op_operands.0[0];
-        let b = op_operands.0[1];
+        let _a = op_operands.0[0];
+        let _b = op_operands.0[1];
 
         // Assign Ternary158 + TernaryGemm to operand B (weights)
         let plan = world
@@ -923,7 +921,7 @@ mod tests {
 
         let op = create_matmul_op(&mut world, a_ty, b_ty, c_ty);
         let op_operands = world.get_component::<Operands>(op).unwrap();
-        let b = op_operands.0[1];
+        let _b = op_operands.0[1];
 
         // Assign Binary1 + BinaryPopcountGemm to operand B (weights)
         let plan = world

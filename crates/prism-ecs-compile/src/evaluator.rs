@@ -490,6 +490,7 @@ impl crate::search::EvaluationStrategy for MappedTensorEvaluationStrategy {
             projection_basis: "bounded mixed-precision graph and representative lane timings"
                 .into(),
             mixed_precision_graph: selected_graph,
+            ..crate::workload_search::WorkloadThroughputEvidence::default()
         })
     }
 

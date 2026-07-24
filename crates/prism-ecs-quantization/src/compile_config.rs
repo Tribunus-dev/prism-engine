@@ -3,10 +3,10 @@
 //! Shared by CLI, standalone API, and DaemonCompilerDispatcher. Defines the
 //! configuration surface for Prism's unified compilation pipeline.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::collections::BTreeMap;
 
 use prism_ecs_ir::ArchitectureFamily;
 

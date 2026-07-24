@@ -60,12 +60,25 @@ impl DeploymentGatePolicy {
                 });
             };
         if self.require_measurements {
+            let required_present = self.min_quality.is_none_or(|min_quality| {
+                measurements
+                    .quality
+                    .is_some_and(|value| value >= min_quality)
+            }) && self.max_p99_latency_ms.is_none_or(|max_latency| {
+                measurements
+                    .p99_latency_ms
+                    .is_some_and(|value| value <= max_latency)
+            }) && self.max_peak_memory_bytes.is_none_or(|max_memory| {
+                measurements
+                    .peak_memory_bytes
+                    .is_some_and(|value| value <= max_memory)
+            });
             gate(
                 "measurement_presence",
                 measurements.quality,
                 Some(1.0),
-                measurements.quality.is_some() && measurements.p99_latency_ms.is_some(),
-                "quality and latency measurements are required",
+                required_present,
+                "required measurements must be present and satisfy configured policy limits",
             );
         }
         if let Some(limit) = self.min_quality {
@@ -276,10 +289,11 @@ impl ParetoArchive {
             .candidates
             .iter()
             .filter_map(|(id, c)| {
-                candidate
-                    .objectives()
-                    .dominates(&c.objectives())
-                    .then(|| id.clone())
+                if candidate.objectives().dominates(&c.objectives()) {
+                    Some(id.clone())
+                } else {
+                    None
+                }
             })
             .collect();
         for id in dominated {
@@ -324,16 +338,16 @@ impl DeploymentPolicy {
 
     pub fn accepts(&self, m: &DeploymentMeasurements) -> bool {
         self.max_p99_latency_ms
-            .map_or(true, |v| m.p99_latency_ms.is_some_and(|x| x <= v))
+            .is_none_or(|v| m.p99_latency_ms.is_some_and(|x| x <= v))
             && self
                 .max_peak_memory_bytes
-                .map_or(true, |v| m.peak_memory_bytes.is_some_and(|x| x <= v))
+                .is_none_or(|v| m.peak_memory_bytes.is_some_and(|x| x <= v))
             && self
                 .min_quality
-                .map_or(true, |v| m.quality.is_some_and(|x| x >= v))
-            && self.min_throughput.map_or(true, |v| {
-                m.throughput_tokens_per_second.is_some_and(|x| x >= v)
-            })
+                .is_none_or(|v| m.quality.is_some_and(|x| x >= v))
+            && self
+                .min_throughput
+                .is_none_or(|v| m.throughput_tokens_per_second.is_some_and(|x| x >= v))
     }
 
     fn score(&self, m: &DeploymentMeasurements) -> f64 {

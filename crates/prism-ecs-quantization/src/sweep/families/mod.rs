@@ -24,6 +24,12 @@ pub struct SweepScratch {
     pub metrics_tmp: Vec<f32>,
 }
 
+impl Default for SweepScratch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SweepScratch {
     pub fn new() -> Self {
         Self {

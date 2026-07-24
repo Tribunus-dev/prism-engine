@@ -172,7 +172,7 @@ fn compute_qjl_correction(original: &[f32], dequantized: &[f32]) -> QjlCorrectio
     assert_eq!(original.len(), dequantized.len());
     let n = original.len();
     let mut residual_magnitude = 0.0f32;
-    let mut bits = Vec::with_capacity((n + 7) / 8);
+    let mut bits = Vec::with_capacity(n.div_ceil(8));
 
     for chunk in original.chunks(8).zip(dequantized.chunks(8)) {
         let (orig_chunk, deq_chunk) = chunk;
@@ -288,7 +288,7 @@ fn quantize_polar_stored_scale(data: &[f32], bits: u32) -> Vec<u8> {
     };
 
     let packed_bits = data.len() * bits as usize;
-    let buf_cap = (packed_bits + 7) / 8 + 4; // +4 for f32 scale
+    let buf_cap = packed_bits.div_ceil(8) + 4; // +4 for f32 scale
     let mut result = Vec::with_capacity(buf_cap);
 
     // Pack all values into bits
@@ -347,7 +347,7 @@ fn dequantize_polar_stored_scale(buf: &[u8], len: usize, bits: u32) -> Vec<f32> 
 // ---------------------------------------------------------------------------
 
 fn quantize_product(data: &[f32], bits: u32) -> Vec<u8> {
-    let sub_bits_a = (bits + 1) / 2;
+    let sub_bits_a = bits.div_ceil(2);
     let sub_bits_b = bits - sub_bits_a;
     let levels_a = 1usize << sub_bits_a;
     let levels_b = 1usize << sub_bits_b;
@@ -369,7 +369,7 @@ fn quantize_product(data: &[f32], bits: u32) -> Vec<u8> {
     // Pack per-value: 1 sign bit + idx_a (sub_bits_a) + idx_b (sub_bits_b)
     let bits_per_val = 1 + sub_bits_a + sub_bits_b;
     let packed_bits = data.len() * bits_per_val as usize;
-    let mut packed = Vec::with_capacity((packed_bits + 7) / 8 + 32);
+    let mut packed = Vec::with_capacity(packed_bits.div_ceil(8) + 32);
     let mut bit_pos = 0;
 
     for &x in data {
@@ -494,7 +494,7 @@ fn dequantize_split(buf: &[u8], len: usize) -> Vec<f32> {
     let data_end = buf.len() - 12;
 
     // First half: first_packed = (first_bits * half + 7) / 8 bytes + 4 bytes scale
-    let first_packed_size = ((first_bits as usize * half + 7) / 8) + 4;
+    let first_packed_size = (first_bits as usize * half).div_ceil(8) + 4;
     let _second_packed_size = data_end - first_packed_size;
 
     let first_part = &buf[..first_packed_size.min(data_end)];
@@ -555,7 +555,7 @@ fn dequantize_polarprod(buf: &[u8], len: usize) -> Vec<f32> {
         u32::from_le_bytes([buf[off + 8], buf[off + 9], buf[off + 10], buf[off + 11]]);
 
     // Polar part: (polar_bits * len + 7) / 8 + 4 (scale)
-    let polar_size = ((polar_bits as usize * len + 7) / 8) + 4;
+    let polar_size = (polar_bits as usize * len).div_ceil(8) + 4;
     let data_end = buf.len() - 12;
 
     let polar_part = &buf[..polar_size.min(data_end)];
@@ -592,7 +592,7 @@ fn quantize_mse(data: &[f32], bits: u32, state_bits: u32) -> Vec<u8> {
     // For each group_size-sized block, find the best codebook entry
     // Pack: state_id (state_bits per element) + quantized value (bits per element)
     let bits_per_elem = (state_bits + bits) as usize;
-    let mut packed = Vec::with_capacity((data.len() * bits_per_elem + 7) / 8 + 8);
+    let mut packed = Vec::with_capacity((data.len() * bits_per_elem).div_ceil(8) + 8);
     let mut bit_pos = 0;
 
     for &x in data {

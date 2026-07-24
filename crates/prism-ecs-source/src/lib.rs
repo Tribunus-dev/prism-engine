@@ -55,6 +55,10 @@ impl TensorCatalog {
     pub fn len(&self) -> usize {
         self.tensors.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.tensors.is_empty()
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct SourceCapabilities {

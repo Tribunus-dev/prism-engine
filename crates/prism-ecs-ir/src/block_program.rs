@@ -94,8 +94,8 @@ pub fn program_spec_from_op(world: &World, program_op: Entity) -> Result<Program
         .get_component::<OpAttributes>(program_op)
         .ok_or_else(|| "program operation has no attributes".to_string())?;
 
-    let grid = extract_3d_u32(&attrs, "grid")?;
-    let block = extract_3d_u32(&attrs, "block")?;
+    let grid = extract_3d_u32(attrs, "grid")?;
+    let block = extract_3d_u32(attrs, "block")?;
     let program_name = attrs
         .0
         .iter()

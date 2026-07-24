@@ -1658,7 +1658,7 @@ impl UnifiedRuntime {
             ExecutionMode::RealtimePrefill | ExecutionMode::RealtimeDecode => 1,
         };
         let selected_graph = self.model.selected_execution_graph();
-            let matches_selected_graph =
+        let matches_selected_graph =
             |sample: &&crate::workload_search::WorkloadThroughputEvidence| -> bool {
                 let Some(graph) = selected_graph else {
                     return true;
@@ -1669,7 +1669,10 @@ impl UnifiedRuntime {
                 if !graph.route_sequence.contains(&sample.profile.primary_lane) {
                     return false;
                 }
-                if !graph.route_sequence.contains(&sample.profile.attention_lane) {
+                if !graph
+                    .route_sequence
+                    .contains(&sample.profile.attention_lane)
+                {
                     return false;
                 }
                 if graph.fused_interleaved_metal && !sample.profile.interleaved_metal {
@@ -3817,6 +3820,7 @@ mod tests {
                     projected: false,
                     projection_basis: "test".into(),
                     mixed_precision_graph: "batch-only".into(),
+                    ..WorkloadThroughputEvidence::default()
                 },
                 WorkloadThroughputEvidence {
                     profile: WorkloadProfile {
@@ -3842,6 +3846,7 @@ mod tests {
                     projected: false,
                     projection_basis: "test".into(),
                     mixed_precision_graph: "realtime-only".into(),
+                    ..WorkloadThroughputEvidence::default()
                 },
             ],
         };
@@ -3932,6 +3937,7 @@ mod tests {
                 projected: false,
                 projection_basis: "test".into(),
                 mixed_precision_graph: "ternary-expert-int8-attention".into(),
+                ..WorkloadThroughputEvidence::default()
             }],
             route_sequence: vec![
                 ExecutionLane::Ane,
@@ -4091,6 +4097,7 @@ mod tests {
                 projected: false,
                 projection_basis: "test".into(),
                 mixed_precision_graph: "fp16-only".into(),
+                ..WorkloadThroughputEvidence::default()
             },
             WorkloadThroughputEvidence {
                 profile: WorkloadProfile {
@@ -4116,6 +4123,7 @@ mod tests {
                 projected: false,
                 projection_basis: "test".into(),
                 mixed_precision_graph: "ternary-attention".into(),
+                ..WorkloadThroughputEvidence::default()
             },
         ];
 
@@ -4174,8 +4182,8 @@ mod tests {
     #[test]
     fn workload_selection_requires_fused_interleaved_metal_when_graph_requires_it() {
         use crate::workload_search::{
-            ExecutionLane, InferenceWorkloadPhase, ServiceClass, WorkloadProfile, WorkloadThroughputEvidence,
-            SelectedExecutionGraph,
+            ExecutionLane, InferenceWorkloadPhase, SelectedExecutionGraph, ServiceClass,
+            WorkloadProfile, WorkloadThroughputEvidence,
         };
 
         let selected_graph = SelectedExecutionGraph {
@@ -4210,6 +4218,7 @@ mod tests {
             projected: false,
             projection_basis: "test".into(),
             mixed_precision_graph: "fp16-only".into(),
+            ..WorkloadThroughputEvidence::default()
         };
         let profile_interleaved = WorkloadThroughputEvidence {
             profile: WorkloadProfile {
@@ -4226,6 +4235,7 @@ mod tests {
             projected: false,
             projection_basis: "test".into(),
             mixed_precision_graph: "fp16-only".into(),
+            ..WorkloadThroughputEvidence::default()
         };
 
         let model = RuntimeModel {
@@ -4282,8 +4292,8 @@ mod tests {
     #[test]
     fn workload_selection_filters_to_shared_arena_and_ane_planar_boundaries() {
         use crate::workload_search::{
-            ExecutionLane, InferenceWorkloadPhase, ServiceClass, WorkloadProfile, WorkloadThroughputEvidence,
-            SelectedExecutionGraph,
+            ExecutionLane, InferenceWorkloadPhase, SelectedExecutionGraph, ServiceClass,
+            WorkloadProfile, WorkloadThroughputEvidence,
         };
 
         let selected_graph = SelectedExecutionGraph {
@@ -4319,6 +4329,7 @@ mod tests {
             projected: false,
             projection_basis: "test".into(),
             mixed_precision_graph: "int8-only".into(),
+            ..WorkloadThroughputEvidence::default()
         };
         let missing_planar = WorkloadThroughputEvidence {
             profile: WorkloadProfile {
@@ -4339,6 +4350,7 @@ mod tests {
             projected: false,
             projection_basis: "test".into(),
             mixed_precision_graph: "int8-only".into(),
+            ..WorkloadThroughputEvidence::default()
         };
         let invalid_profile = WorkloadThroughputEvidence {
             profile: WorkloadProfile {
@@ -4356,6 +4368,7 @@ mod tests {
             projected: false,
             projection_basis: "test".into(),
             mixed_precision_graph: "int8-only".into(),
+            ..WorkloadThroughputEvidence::default()
         };
 
         let model = RuntimeModel {

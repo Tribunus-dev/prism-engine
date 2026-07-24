@@ -116,6 +116,7 @@ pub struct M1CalibrationReport {
 
 impl M1CalibrationReport {
     /// Create a new calibration report with the given latency measurements.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         hardware_id: impl Into<String>,
         os_build: impl Into<String>,

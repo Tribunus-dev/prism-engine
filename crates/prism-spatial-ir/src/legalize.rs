@@ -429,16 +429,10 @@ pub fn metal_specific_checks(
 }
 
 pub fn ane_specific_checks(
-    node: &SpatialNode,
+    _node: &SpatialNode,
     graph: &SpatialGraph,
 ) -> Result<(), Vec<LegalizationError>> {
-    BackendLegalizer::legalize(graph, |candidate| {
-        if candidate.id() == node.id() {
-            Ok(())
-        } else {
-            Ok(())
-        }
-    })
+    BackendLegalizer::legalize(graph, |_| Ok(()))
 }
 
 pub fn joint_tiling_checks(
@@ -585,12 +579,10 @@ where
     let mut all_warnings = Vec::new();
 
     // 1. Semantic legalization
-    if let Err(errors) = SemanticLegalizer::legalize(&graph) {
-        return Err(errors);
-    }
+    SemanticLegalizer::legalize(&graph)?;
 
     // 2. Backend legalization
-    if let Err(errors) = BackendLegalizer::legalize(&graph, &backend_check) {
+    if let Err(errors) = BackendLegalizer::legalize(&graph, backend_check) {
         // Backend warnings may be non-fatal — collect them
         all_warnings.extend(errors);
     }
@@ -747,7 +739,7 @@ mod tests {
             intensity: crate::graph::ComputeIntensity::ComputeBound,
         });
         let backend_check = |_: &SpatialNode| Ok::<(), Vec<LegalizationError>>(());
-        let result = crate::legalize::legalize(g, &backend_check);
+        let result = crate::legalize::legalize(g, backend_check);
         assert!(result.is_ok(), "operational legalizer must pass at Level 1");
         let lg = result.unwrap();
         assert!(

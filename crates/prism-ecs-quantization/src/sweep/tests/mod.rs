@@ -179,8 +179,7 @@ fn test_layout_sweep_grid_serialization() {
         execution_lanes: vec!["MetalFusedGpu".into()],
     };
     let json = serde_json::to_string(&grid).unwrap();
-    let back: crate::sweep::spec::LayoutSweepGrid =
-        serde_json::from_str(&json).unwrap();
+    let back: crate::sweep::spec::LayoutSweepGrid = serde_json::from_str(&json).unwrap();
     assert_eq!(back.tile_shapes, vec!["640"]);
     assert_eq!(back.group_axes.len(), 2);
 }

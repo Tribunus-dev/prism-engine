@@ -6,7 +6,7 @@ pub struct WorldEpoch(pub u64);
 
 impl PartialOrd for WorldEpoch {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.0.cmp(&other.0))
+        Some(self.cmp(other))
     }
 }
 

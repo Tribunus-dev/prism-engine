@@ -30,17 +30,9 @@ impl std::error::Error for SymbolConflict {}
 ///
 /// Maps symbol names (e.g. "@main", "@helper") to the entity of the
 /// operation that defines them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SymbolTable {
     symbols: HashMap<String, Entity>,
-}
-
-impl Default for SymbolTable {
-    fn default() -> Self {
-        Self {
-            symbols: HashMap::new(),
-        }
-    }
 }
 
 impl SymbolTable {

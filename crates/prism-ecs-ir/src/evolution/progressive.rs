@@ -296,9 +296,10 @@ impl Default for ProgressiveSearchConfig {
 
 impl ProgressiveSearchConfig {
     pub fn from_environment() -> Self {
-        let mut config = Self::default();
-        config.limits = TernaryAdmissionLimits::from_environment();
-        config
+        Self {
+            limits: TernaryAdmissionLimits::from_environment(),
+            ..Self::default()
+        }
     }
 }
 

@@ -338,7 +338,7 @@ impl SpatialEvolutionOptimizer {
         // Step 5: Survival — combine population and offspring, select survivors.
         let mut combined: Vec<ScoredCandidate> =
             Vec::with_capacity(self.state.population.len() + offspring.len());
-        combined.extend(self.state.population.drain(..));
+        combined.append(&mut self.state.population);
         combined.extend(offspring);
         let survived = self.survive(combined);
         self.state.population = survived;
@@ -381,18 +381,12 @@ impl SpatialEvolutionOptimizer {
         for (node_id, parent_b_meta) in parent_b_annotations {
             if let Some(parent_a_meta) = child_graph.get_annotations(*node_id) {
                 let merged = NodeMeta {
-                    codec: parent_a_meta
-                        .codec
-                        .clone()
-                        .or_else(|| parent_b_meta.codec.clone()),
+                    codec: parent_a_meta.codec.or(parent_b_meta.codec),
                     placement: parent_a_meta
                         .placement
                         .clone()
                         .or_else(|| parent_b_meta.placement.clone()),
-                    tile_geometry: parent_a_meta
-                        .tile_geometry
-                        .clone()
-                        .or_else(|| parent_b_meta.tile_geometry.clone()),
+                    tile_geometry: parent_a_meta.tile_geometry.or(parent_b_meta.tile_geometry),
                     memory_region: parent_a_meta
                         .memory_region
                         .clone()
@@ -401,10 +395,7 @@ impl SpatialEvolutionOptimizer {
                         .kv_cache_policy
                         .clone()
                         .or_else(|| parent_b_meta.kv_cache_policy.clone()),
-                    fusion: parent_a_meta
-                        .fusion
-                        .clone()
-                        .or_else(|| parent_b_meta.fusion.clone()),
+                    fusion: parent_a_meta.fusion.or(parent_b_meta.fusion),
                     batch_threadgroup_size: parent_a_meta
                         .batch_threadgroup_size
                         .or(parent_b_meta.batch_threadgroup_size),
@@ -809,11 +800,10 @@ pub fn check_rejection_rules(
             RejectionRule::InvalidPlacement => {
                 // Check for placements onto incompatible units.
                 let graph = candidate.plan.spatial_graph();
-                graph.annotations().values().any(|meta| {
-                    meta.placement
-                        .as_deref()
-                        .map_or(false, |p| p == "AccelerateUnit")
-                })
+                graph
+                    .annotations()
+                    .values()
+                    .any(|meta| meta.placement.as_deref() == Some("AccelerateUnit"))
             }
             RejectionRule::EnergyBudget => candidate.cost.energy > max_energy,
         };
@@ -857,11 +847,10 @@ pub fn has_unsupported_codec(candidate: &ScoredCandidate) -> bool {
 /// Returns `true` if the candidate has an invalid placement.
 pub fn has_invalid_placement(candidate: &ScoredCandidate) -> bool {
     let graph = candidate.plan.spatial_graph();
-    graph.annotations().values().any(|meta| {
-        meta.placement
-            .as_deref()
-            .map_or(false, |p| p == "AccelerateUnit")
-    })
+    graph
+        .annotations()
+        .values()
+        .any(|meta| meta.placement.as_deref() == Some("AccelerateUnit"))
 }
 
 // ---------------------------------------------------------------------------

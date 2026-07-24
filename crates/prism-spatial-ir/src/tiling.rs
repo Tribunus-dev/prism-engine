@@ -64,10 +64,7 @@ pub fn validate_tiling_geometry(
             max_height,
         });
     }
-    let area = geometry
-        .width
-        .checked_mul(geometry.height)
-        .unwrap_or(usize::MAX);
+    let area = geometry.width.saturating_mul(geometry.height);
     if area > max_area {
         return Err(TilingValidationError::AreaTooLarge {
             backend,

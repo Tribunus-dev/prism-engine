@@ -11,10 +11,12 @@ use serde::{Deserialize, Serialize};
 /// Keep in sync until the type is migrated to `prism-ecs-core`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[allow(non_camel_case_types)]
+#[derive(Default)]
 pub enum CodecFamily {
     Nf4,
     Int8,
     Fp16,
+    #[default]
     RawF32,
     SymInt4,
     Ternary,
@@ -27,10 +29,4 @@ pub enum CodecFamily {
     Q2_K,
     #[allow(non_camel_case_types)]
     IQ2_XXS,
-}
-
-impl Default for CodecFamily {
-    fn default() -> Self {
-        Self::RawF32
-    }
 }

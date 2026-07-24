@@ -429,7 +429,7 @@ pub fn bonsai_prefill(state: &mut BonsaiRuntimeState, tokens: &[u32]) -> Result<
             }
         } else {
             // Out of vocab range: pad with zeros.
-            hidden.extend(std::iter::repeat(0.0f32).take(cfg.hidden_dim as usize));
+            hidden.extend(std::iter::repeat_n(0.0f32, cfg.hidden_dim as usize));
         }
     }
 
@@ -446,7 +446,7 @@ pub fn bonsai_prefill(state: &mut BonsaiRuntimeState, tokens: &[u32]) -> Result<
             .norm_buffers
             .get(&attn_norm_key)
             .map(|b| bytes_to_f32_slice(b))
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
 
         for t in 0..num_tokens {
             let offset = t * cfg.hidden_dim as usize;
@@ -606,7 +606,7 @@ pub fn bonsai_prefill(state: &mut BonsaiRuntimeState, tokens: &[u32]) -> Result<
         for t in 0..num_tokens {
             let off = t * cfg.hidden_dim as usize;
             for j in 0..cfg.hidden_dim as usize {
-                hidden[off + j] = hidden[off + j] + attn_output[off + j];
+                hidden[off + j] += attn_output[off + j];
             }
         }
 
@@ -615,7 +615,7 @@ pub fn bonsai_prefill(state: &mut BonsaiRuntimeState, tokens: &[u32]) -> Result<
             .norm_buffers
             .get(&post_norm_key)
             .map(|b| bytes_to_f32_slice(b))
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
 
         for t in 0..num_tokens {
             let offset = t * cfg.hidden_dim as usize;
@@ -723,7 +723,7 @@ pub fn bonsai_prefill(state: &mut BonsaiRuntimeState, tokens: &[u32]) -> Result<
         .norm_buffers
         .get("output_norm.weight")
         .map(|b| bytes_to_f32_slice(b))
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
 
     // Use only the last token's hidden state for logits.
     let last_token_offset = (num_tokens - 1) * cfg.hidden_dim as usize;
@@ -805,7 +805,7 @@ pub fn bonsai_decode(state: &mut BonsaiRuntimeState, token: u32) -> Result<u32, 
             .norm_buffers
             .get(&attn_norm_key)
             .map(|b| bytes_to_f32_slice(b))
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
         apply_rms_norm(
             &mut hidden,
             &attn_norm,
@@ -915,7 +915,7 @@ pub fn bonsai_decode(state: &mut BonsaiRuntimeState, token: u32) -> Result<u32, 
 
         // ── Residual ──────────────────────────────────────────────────
         for j in 0..cfg.hidden_dim as usize {
-            hidden[j] = hidden[j] + attn_out[j];
+            hidden[j] += attn_out[j];
         }
 
         // ── Post-attention norm ───────────────────────────────────────
@@ -924,7 +924,7 @@ pub fn bonsai_decode(state: &mut BonsaiRuntimeState, token: u32) -> Result<u32, 
             .norm_buffers
             .get(&post_norm_key)
             .map(|b| bytes_to_f32_slice(b))
-            .unwrap_or_else(Vec::new);
+            .unwrap_or_default();
         apply_rms_norm(
             &mut hidden,
             &post_norm,
@@ -1004,7 +1004,7 @@ pub fn bonsai_decode(state: &mut BonsaiRuntimeState, token: u32) -> Result<u32, 
         .norm_buffers
         .get("output_norm.weight")
         .map(|b| bytes_to_f32_slice(b))
-        .unwrap_or_else(Vec::new);
+        .unwrap_or_default();
     apply_rms_norm(
         &mut hidden,
         &final_norm,
@@ -1200,7 +1200,7 @@ fn run_ternary_gemv(
     dim_m: u32,
 ) -> Result<Vec<f32>, String> {
     // ── Parse bytes into typed arrays ──────────────────────────────
-    if packed_bytes.len() % 4 != 0 {
+    if !packed_bytes.len().is_multiple_of(4) {
         return Err(format!(
             "packed_bytes length {} is not a multiple of 4",
             packed_bytes.len()
@@ -1211,7 +1211,7 @@ fn run_ternary_gemv(
         .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect();
 
-    if page_scale_bytes.len() % 2 != 0 {
+    if !page_scale_bytes.len().is_multiple_of(2) {
         return Err(format!(
             "page_scale_bytes length {} is not a multiple of 2",
             page_scale_bytes.len()
@@ -1539,7 +1539,7 @@ fn unpack_f32_from_4bit(src: &[u8], count: usize) -> Vec<f32> {
                 ((byte >> 4) & 0x0f) as i8
             };
             // Sign-extend 4-bit to 32-bit, then to f32.
-            let extended = ((nibble as i8) << 4) as i32 >> 4;
+            let extended = (nibble << 4) as i32 >> 4;
             result[i] = extended as f32 * 0.5; // arbitrary scale for demo
         }
     }
@@ -1893,7 +1893,7 @@ mod tests {
 
         let mut cache = BonsaiKVCache::new(config);
 
-        let entries = 1 * 64;
+        let entries = 64;
         let _expected_slot_bytes = entries; // 4-bit: 1 byte per 2 elements → entries / 2, rounded up
         let expected_slot = (entries + 1) / 2; // ceil(64/2) = 32
 

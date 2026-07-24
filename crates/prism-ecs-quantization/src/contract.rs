@@ -425,15 +425,13 @@ impl WeightValidationReport {
         // Ternary intentionally produces ~70% zero values — that is the expected
         // sparsity of the format, not a packer pathology.  Skip the zero-collapse
         // gate for ternary candidates; operator-space validation is the real check.
-        if !is_ternary {
-            if self.zero_collapse_ratio > profile.max_zero_collapse_ratio {
-                return WeightAdmission::Rejected {
-                    reason: format!(
-                        "zeroCollapse={:.4} > max={:.4}",
-                        self.zero_collapse_ratio, profile.max_zero_collapse_ratio
-                    ),
-                };
-            }
+        if !is_ternary && self.zero_collapse_ratio > profile.max_zero_collapse_ratio {
+            return WeightAdmission::Rejected {
+                reason: format!(
+                    "zeroCollapse={:.4} > max={:.4}",
+                    self.zero_collapse_ratio, profile.max_zero_collapse_ratio
+                ),
+            };
         }
         if self.nrmse > profile.investigation_nrmse_ceiling {
             return WeightAdmission::Rejected {

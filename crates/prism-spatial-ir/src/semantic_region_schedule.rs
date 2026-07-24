@@ -40,7 +40,11 @@ pub fn project_region_schedule(
 ) -> Result<RegionScheduleProjection, RegionScheduleError> {
     let mut ordered = plan.realizations.clone();
     ordered.sort_by_key(|realization| {
-        realization.byte_ranges.first().map(|range| range.start).unwrap_or(u64::MAX)
+        realization
+            .byte_ranges
+            .first()
+            .map(|range| range.start)
+            .unwrap_or(u64::MAX)
     });
     let mut views: Vec<CoalescedRegionView> = Vec::new();
     for realization in &ordered {
@@ -82,7 +86,9 @@ pub fn project_region_schedule(
     })
 }
 
-fn single_range(realization: &PhysicalRegionRealization) -> Result<Range<u64>, RegionScheduleError> {
+fn single_range(
+    realization: &PhysicalRegionRealization,
+) -> Result<Range<u64>, RegionScheduleError> {
     match realization.byte_ranges.as_slice() {
         [] => Err(RegionScheduleError::MissingRange),
         [range] => Ok(range.clone()),
@@ -101,7 +107,7 @@ mod tests {
             semantic_region: SemanticRegionId(id.into()),
             logical_selector_digest: id.into(),
             packed_buffer: "weights".into(),
-            byte_ranges: vec![start..end],
+            byte_ranges: std::iter::once(start..end).collect(),
             tile_ids: vec![],
             execution_lane: lane.into(),
             residency_class: "resident".into(),
@@ -117,7 +123,10 @@ mod tests {
     fn compatible_adjacent_regions_coalesce() {
         let plan = PhysicalRegionPlan {
             semantic_plan_digest: "plan".into(),
-            realizations: vec![realization("q", 0, 8, "metal"), realization("k", 8, 12, "metal")],
+            realizations: vec![
+                realization("q", 0, 8, "metal"),
+                realization("k", 8, 12, "metal"),
+            ],
             total_materialized_bytes: 0,
             total_conversion_bytes: 0,
             digest: String::new(),
@@ -131,7 +140,10 @@ mod tests {
     fn lane_change_remains_explicit() {
         let plan = PhysicalRegionPlan {
             semantic_plan_digest: "plan".into(),
-            realizations: vec![realization("q", 0, 8, "metal"), realization("k", 8, 12, "cpu")],
+            realizations: vec![
+                realization("q", 0, 8, "metal"),
+                realization("k", 8, 12, "cpu"),
+            ],
             total_materialized_bytes: 0,
             total_conversion_bytes: 0,
             digest: String::new(),

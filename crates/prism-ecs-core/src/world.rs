@@ -12,6 +12,8 @@ use crate::resource::{ResourceMut, ResourceRef};
 use crate::store::{ComponentStore, ResourceStore};
 use crate::WorldCapacity;
 
+type StagingAction = Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>;
+
 // ---------------------------------------------------------------------------
 // Per-entity slot — generation persists across despawn/reuse cycles.
 // ---------------------------------------------------------------------------
@@ -71,7 +73,7 @@ pub struct World {
     pub(crate) entity_meta: Vec<Option<EntitySlot>>,
     pub(crate) next_id: u64,
     pub(crate) free_list: Vec<u64>,
-    pub(crate) staging: Vec<Box<dyn FnOnce(&mut ComponentStore) + Send + 'static>>,
+    pub(crate) staging: Vec<StagingAction>,
     pub(crate) component_versions: HashMap<u64, u64>,
     /// Mutation access policy. Controls whether direct mutations are allowed
     /// or must go through WorldTxn. Defaults to Bootstrap for backward

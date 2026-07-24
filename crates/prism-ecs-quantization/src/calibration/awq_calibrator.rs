@@ -119,10 +119,7 @@ impl AwqCalibrator {
     }
 
     /// Compute per-channel min/max from a batch of activations.
-    fn compute_range(
-        activations: &[f32],
-        in_features: usize,
-    ) -> (Vec<f32>, Vec<f32>) {
+    fn compute_range(activations: &[f32], in_features: usize) -> (Vec<f32>, Vec<f32>) {
         let batch_size = activations.len() / in_features;
         let mut min_vals = vec![f32::MAX; in_features];
         let mut max_vals = vec![f32::MIN; in_features];
@@ -188,7 +185,9 @@ impl Calibrator for AwqCalibrator {
 
         let (prior_act, prior_count) = match prior.and_then(|p| p.act_scales.as_ref()) {
             Some(s) => (&s.act_scales, s.act_scales.len()),
-            None => return self.calibrate_module(module_name, in_features, out_features, activations),
+            None => {
+                return self.calibrate_module(module_name, in_features, out_features, activations)
+            }
         };
 
         let new_scale = Self::compute_act_scale(activations, in_features);
