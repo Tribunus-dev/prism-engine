@@ -30,6 +30,7 @@ pub mod mutation;
 pub mod plan;
 pub mod scheduler;
 pub mod semantic_region;
+pub mod semantic_region_schedule;
 pub mod target;
 pub mod three_thread;
 pub mod tiling;
@@ -66,6 +67,9 @@ pub use scheduler::{
 };
 pub use semantic_region::{
     lower_contiguous_axis0, PhysicalRegionError, PhysicalRegionPlan, PhysicalRegionRealization,
+};
+pub use semantic_region_schedule::{
+    project_region_schedule, CoalescedRegionView, RegionScheduleError, RegionScheduleProjection,
 };
 pub use target::{
     probe_apple_silicon, AppleSiliconTarget, KernelDescriptor, KernelManifest, SpatialTarget,
