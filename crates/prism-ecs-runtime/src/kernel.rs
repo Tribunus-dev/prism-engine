@@ -1724,4 +1724,39 @@ mod tests {
             crate::modality::ModalityKind::Image
         );
     }
+
+    #[test]
+    fn modality_completion_attaches_provider_output_provenance() {
+        let kernel = RuntimeKernel::new();
+        let handle = kernel.handle();
+        let submitted = handle
+            .submit(CommandEnvelope::new(Command::CreateModalityWork {
+                kind: crate::modality::ModalityKind::Audio,
+                model_path: "model.cimage".into(),
+                prompt: "hello".into(),
+                output_path: "out.wav".into(),
+            }))
+            .expect("modality submission");
+        let entity_id = match submitted.result {
+            CommandResult::ModalitySubmitted { entity_id } => entity_id,
+            other => panic!("expected modality submission, got {other:?}"),
+        };
+        let completed = handle
+            .submit(CommandEnvelope::new(Command::CompleteModalityWork {
+                entity: entity_id,
+                output_digest: "blake3:audio".into(),
+                output_bytes: 4096,
+            }))
+            .expect("modality completion");
+        assert!(matches!(
+            completed.result,
+            CommandResult::ModalityCompleted { entity_id: id, .. } if id == entity_id
+        ));
+        let world = handle.lock_world();
+        let execution = world
+            .get_component::<crate::modality::ModalityExecution>(Entity::new(entity_id, 0))
+            .expect("execution provenance");
+        assert_eq!(execution.output_digest, "blake3:audio");
+        assert_eq!(execution.output_bytes, 4096);
+    }
 }
