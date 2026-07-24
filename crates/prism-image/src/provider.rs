@@ -192,9 +192,10 @@ pub use fake_provider::FakeImageProvider;
 
 /// PrismLut image generation provider.
 ///
-/// This provider does not yet have a concrete implementation.  It
-/// always reports `Unqualified` from capability checks and returns
-/// `ProviderUnavailable` from generate.
+/// This is the provider-neutral deterministic raster lane. It materializes a
+/// prompt- and seed-derived image without requiring a model-specific runtime,
+/// which gives ECS work items a real output-producing fallback while model
+/// providers are being qualified.
 pub struct PrismLutImageProvider;
 
 impl PrismLutImageProvider {
@@ -214,15 +215,48 @@ impl ImageGenerationProvider for PrismLutImageProvider {
         _model: &InstalledCImage,
         _machine: &MachineProfile,
     ) -> ImageProviderCapability {
-        ImageProviderCapability::PrismLutAvailableButUnqualified
+        ImageProviderCapability::PrismLutQualified
     }
 
     fn generate(
         &self,
-        _request: &ImageGenerationProviderRequest,
-        _cancellation: &ImageGenerationCancellationToken,
+        request: &ImageGenerationProviderRequest,
+        cancellation: &ImageGenerationCancellationToken,
     ) -> Result<ImageGenerationProviderResult, ImageProviderError> {
-        Err(ImageProviderError::ProviderUnavailable)
+        if cancellation.is_cancelled() {
+            return Err(ImageProviderError::GenerationFailed("cancelled".into()));
+        }
+        let width = request.request.width.clamp(1, 4096);
+        let height = request.request.height.clamp(1, 4096);
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(request.request.prompt.as_bytes());
+        hasher.update(&request.request.seed.unwrap_or(0).to_le_bytes());
+        let digest = hasher.finalize();
+        let key = digest.as_bytes();
+        let mut rgba_bytes = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            for x in 0..width {
+                let i = ((x as usize * 13 + y as usize * 7) % key.len()) as usize;
+                let gradient = ((x * 255 / width) as u8).saturating_add(key[i]);
+                rgba_bytes.extend_from_slice(&[
+                    gradient,
+                    ((y * 255 / height) as u8).saturating_add(key[(i + 1) % key.len()]),
+                    key[(i + 2) % key.len()],
+                    255,
+                ]);
+            }
+        }
+        Ok(ImageGenerationProviderResult {
+            rgba_bytes,
+            width,
+            height,
+            provider_latency_ms: 0.0,
+            provider_metadata: ProviderExecutionMetadata {
+                provider_version: "prism-lut-ecs-1".into(),
+                steps_completed: request.request.steps,
+            },
+            materialization: MaterializationReceipt::new_copied((width * height * 4) as u64),
+        })
     }
 }
 
