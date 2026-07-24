@@ -297,31 +297,15 @@ impl PrismInferenceServer {
             self.cancellation_manager.register_handle(handle.session_id);
         }
 
-        // Spawn generation work on the tokio runtime.
-        // In a full implementation this would drive the scheduler, lanes,
-        // and KV manager; for now we emit a placeholder token.
-        let cancel_mgr = Arc::clone(&self.cancellation_manager);
-        let session_id = _request.session_id;
-        let max_tokens = _request.max_new_tokens;
+        // This compatibility server has no loaded model runtime of its own.
+        // Never fabricate tokens here: callers must use the ECS-backed wire
+        // runtime, which owns token execution, KV binding, and receipts.
         tokio::spawn(async move {
-            for i in 0..max_tokens {
-                if cancel_mgr.is_cancelled(&session_id) {
-                    let _ = tx
-                        .send(GenerationStreamEvent::Error("cancelled".into()))
-                        .await;
-                    return;
-                }
-                // Simulate token production.
-                if tx
-                    .send(GenerationStreamEvent::Token(format!("token_{}", i)))
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-            }
-            let _ = tx.send(GenerationStreamEvent::Done(max_tokens)).await;
+            let _ = tx
+                .send(GenerationStreamEvent::Error(
+                    "no ECS-backed model runtime is attached".into(),
+                ))
+                .await;
         });
 
         Ok(rx)
