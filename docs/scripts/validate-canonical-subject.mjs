@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
 
 const docsRoot = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 const read = async relative => readFile(new URL(relative, `file://${docsRoot}/`), 'utf8');
@@ -31,8 +32,8 @@ if (!canonicalObjectSource.includes('context?.runtime?.getCanonicalSubject?.()')
   checks.push('canonical-object.js is not consuming runtime.getCanonicalSubject');
 }
 
-if (!/modes\s*=\s*\{[^}]*representation:\s*[\'\"]representation[\'\"]/.test(canonicalObjectSource)) {
-  checks.push('canonical-object.js does not map representation to representation mode');
+if (!/modes\s*=\s*\{[^}]*representation:\s*['\"]representation['\"]/ .test(canonicalObjectSource)) {
+  checks.push('canonical-object.js is not mapping representation to representation mode');
 }
 
 if (!computeImageSource.includes('context?.runtime?.getCanonicalSubject')) {
@@ -53,7 +54,7 @@ if (!stateProjectionSource.includes('runtime?.getCanonicalSubject') && !statePro
   checks.push('state-projection.js is not reading canonical subject through runtime state');
 }
 if (stateProjectionSource.includes('kernel?.subject?.computeImage') || stateProjectionSource.includes('kernel?.subject?.')) {
-  checks.push('state-projection.js must not fall back to kernel-local subject construction');
+  checks.push('state-projection.js must not use kernel-local subject construction');
 }
 
 if (canonicalObjectSource.includes('kernel?.ensureComputeImageSubject') || canonicalObjectSource.includes('kernel?.subject?.computeImage')) {
@@ -70,6 +71,19 @@ if (navigationSystemSource.includes('|| context?.route')) {
 if (observationGraphSource.includes('|| context?.route')) {
   checks.push('observation-graph.js still has route fallback and should rely on runtime projection only');
 }
+if (navigationSystemSource.includes('context?.runtime?.currentRoute')) {
+  checks.push('navigation.js should use runtime.getCurrentRoute and not context?.runtime?.currentRoute');
+}
+if (observationGraphSource.includes('context?.runtime?.currentRoute')) {
+  checks.push('observation-graph.js should use runtime.getCurrentRoute and not context?.runtime?.currentRoute');
+}
+if (observationGraphSource.includes('context?.runtime?.getCurrentRoute?.()') === false) {
+  checks.push('observation-graph.js should use runtime.getCurrentRoute for route resolution');
+}
+if (navigationSystemSource.includes('context?.runtime?.getCurrentRoute?.()') === false) {
+  checks.push('navigation.js should use runtime.getCurrentRoute for route resolution');
+}
+
 if (siteShellSource.includes('currentChapter()')) {
   checks.push('site-shell.js should pass canonical route context into currentChapter calls');
 }
@@ -80,17 +94,43 @@ if (/^##\s+Kernel observations|^##\s+Observation entity|^##\s+Observer modes|^##
   checks.push('prism-interaction-runtime.md appears to re-define canonical interaction sections that should live in prism-runtime.md');
 }
 
-if (!/##\s+Canonical source/i.test(meaningRuntimeSource)) {
+if (!/##\s+Canonical source|Canonical source/i.test(meaningRuntimeSource)) {
   checks.push('prism-meaning-runtime.md should include a canonical source section');
 }
-if (!/##\s+Compatibility guidance/i.test(meaningRuntimeSource)) {
+if (!/##\s+Compatibility guidance|Compatibility guidance/i.test(meaningRuntimeSource)) {
   checks.push('prism-meaning-runtime.md should include compatibility guidance');
 }
-if (!/##\s+Canonical source/i.test(interactionRuntimeSource)) {
+if (!/##\s+Canonical source|Canonical source/i.test(interactionRuntimeSource)) {
   checks.push('prism-interaction-runtime.md should include a canonical source section');
 }
-if (!/##\s+Compatibility guidance/i.test(interactionRuntimeSource)) {
+if (!/##\s+Compatibility guidance|Compatibility guidance/i.test(interactionRuntimeSource)) {
   checks.push('prism-interaction-runtime.md should include compatibility guidance');
+}
+
+const root = new URL('../../', `file://${docsRoot}/`).pathname;
+const filePaths = [
+  'js/systems/navigation.js',
+  'js/core/observation-graph.js',
+  'js/systems/canonical-object.js',
+  'js/renderers/computeimage.js',
+  'js/systems/state-projection.js',
+  'js/renderers/canonical-journey.js',
+  'js/systems/canonical-stage.js',
+  'js/systems/accessibility.js',
+  'js/site-shell.js',
+];
+
+for (const file of filePaths) {
+  const source = await read(`../${file}`);
+  const lower = source;
+  const hasSubjectFallback = /context\?\.runtime\?\.subject|runtime\?\.state\?\.subject|kernel\?\.subject\?\.computeImage|kernel\?\.subject\?\./g.test(lower);
+  const hasLegacyRoute = /context\?\.runtime\?\.currentRoute/g.test(lower);
+  if (hasSubjectFallback && file !== 'js/observatory-kernel.js') {
+    checks.push(`${file} contains legacy kernel subject fallback; use runtime.getCanonicalSubject/stateSubject instead`);
+  }
+  if (hasLegacyRoute && file !== 'js/runtime/create-runtime.js') {
+    checks.push(`${file} contains legacy runtime.currentRoute access`);
+  }
 }
 
 if (checks.length) {
