@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "generatedFromCommit": "43b83e252bc365165063f11c0c2e5facbe264116",
+  "verifiedAt": "2026-07-24",
+  "levels": {
+    "released": "Versioned, reproducible distribution with explicit support boundaries.",
+    "validated": "Measured on a defined build and hardware configuration with evidence.",
+    "qualifying": "Implemented and tested or compile-verified, with target evidence still being gathered.",
+    "implemented": "Code path, data model, command, or provider boundary exists.",
+    "planned": "Architecture or accepted design exists; end-to-end implementation is incomplete."
+  },
+  "capabilities": [
+    {
+      "id": "apple-metal",
+      "domain": "runtime",
+      "label": "Apple Silicon / Metal",
+      "level": "validated",
+      "summary": "Primary public local execution and validation path.",
+      "sourcePaths": ["kernels/", "src/", "compute-core/"],
+      "buildFeatures": ["full-apple", "prism-backend", "metal-dispatch"],
+      "limitations": ["Support is bounded by selected build, model, hardware, and receipt gates."]
+    },
+    {
+      "id": "cpu-reference",
+      "domain": "runtime",
+      "label": "Portable CPU",
+      "level": "qualifying",
+      "summary": "Reference, fallback, differential validation, and Linux hardening path.",
+      "sourcePaths": ["crates/prism-ecs-runtime/", "src/"],
+      "buildFeatures": ["backend-cpu"],
+      "limitations": ["Performance and model coverage remain build-specific."]
+    },
+    {
+      "id": "mi300x-rocm",
+      "domain": "runtime",
+      "label": "MI300X / ROCm-HIP",
+      "level": "validated",
+      "summary": "Active AMD CDNA GPU compilation and execution validation surface.",
+      "sourcePaths": ["crates/prism-rocm-runtime/", "crates/prism-ecs-compile/"],
+      "buildFeatures": [],
+      "limitations": ["Validation does not imply universal ROCm GPU support."]
+    },
+    {
+      "id": "xdna",
+      "domain": "runtime",
+      "label": "XDNA / XDNA2",
+      "level": "qualifying",
+      "summary": "Compile-verified spatial planning, resource legality, artifacts, and runtime boundaries.",
+      "sourcePaths": ["crates/prism-spatial-ir/", "crates/prism-amd-npu-runtime/"],
+      "buildFeatures": [],
+      "limitations": ["General Ryzen AI hardware execution awaits matching device and userspace validation."]
+    },
+    {
+      "id": "ane-coreml",
+      "domain": "runtime",
+      "label": "Apple Neural Engine / Core ML",
+      "level": "qualifying",
+      "summary": "MIL construction, packaging, compilation, arena, stateful request, and dispatch boundaries.",
+      "sourcePaths": ["crates/prism-ane/", "crates/prism-ane-runtime/"],
+      "buildFeatures": ["coreml", "ane"],
+      "limitations": ["Target-specific end-to-end qualification remains explicit."]
+    },
+    {
+      "id": "cuda",
+      "domain": "runtime",
+      "label": "CUDA",
+      "level": "implemented",
+      "summary": "PTX compilation, launch validation, buffer binding, dispatch, and timing-evidence surfaces.",
+      "sourcePaths": ["crates/prism-cuda-runtime/"],
+      "buildFeatures": [],
+      "limitations": ["Implemented integration boundary is not a released universal NVIDIA backend."]
+    },
+    {
+      "id": "computeimage",
+      "domain": "artifact",
+      "label": "ComputeImage",
+      "level": "implemented",
+      "summary": "Versioned deployment artifact carrying logical tensors, physical layouts, execution views, plans, payloads, and evidence.",
+      "sourcePaths": ["docs/cimage-layout-abi-v1.md", "crates/prism-ecs-compile/"],
+      "buildFeatures": [],
+      "limitations": ["Artifact and backend ABI contracts remain pre-1.0."]
+    },
+    {
+      "id": "constitutional-ecs",
+      "domain": "authority",
+      "label": "Constitutional ECS",
+      "level": "qualifying",
+      "summary": "Transactional canonical state, durable events, replay, stale-outcome rejection, and rebuildable projections.",
+      "sourcePaths": ["compute-core/", "CAMPAIGN.md"],
+      "buildFeatures": [],
+      "limitations": ["Several domains remain in shadow or staged authority migration."]
+    },
+    {
+      "id": "replay-evidence",
+      "domain": "evidence",
+      "label": "Replay and evidence operations",
+      "level": "implemented",
+      "summary": "Receipt preservation, replay bundles, experiment comparison, regression detection, and baseline promotion surfaces.",
+      "sourcePaths": ["evidence-schema/", "prism-mcp-core/", "prism-mcp-replay/", "prism-mcp-lab/"],
+      "buildFeatures": [],
+      "limitations": ["Individual evidence classes remain scoped to their producing build and fixture."]
+    },
+    {
+      "id": "multimodal",
+      "domain": "model",
+      "label": "Multimodal image pipeline",
+      "level": "qualifying",
+      "summary": "Image ingestion, dynamic tiling, vision encoders, projectors, image-token strategy, and multimodal composition.",
+      "sourcePaths": ["src/multimodal/"],
+      "buildFeatures": [],
+      "limitations": ["Requires separate end-to-end model and target qualification."]
+    },
+    {
+      "id": "audio",
+      "domain": "model",
+      "label": "Audio and speech pipeline",
+      "level": "qualifying",
+      "summary": "Streaming state, resampling, residual vector quantization, temporal attention, codecs, and generation receipts.",
+      "sourcePaths": ["src/audio/"],
+      "buildFeatures": [],
+      "limitations": ["Not presented as a finished universal speech product workflow."]
+    },
+    {
+      "id": "ternary-distill",
+      "domain": "compiler",
+      "label": "Resumable ternary distill compiler",
+      "level": "planned",
+      "summary": "Accepted architecture for an overnight resumable, evidence-preserving ternary compilation workflow.",
+      "sourcePaths": ["docs/adr-001-resumable-ternary-distill-compiler.md"],
+      "buildFeatures": [],
+      "limitations": ["Full foundation-through-parity implementation remains incomplete."]
+    }
+  ]
+}
