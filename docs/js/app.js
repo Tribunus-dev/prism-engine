@@ -17,7 +17,6 @@ import { createCanonicalFocusSystem } from './canonical-focus.js';
 import { createReceiptRenderer } from './renderers/receipt.js';
 import { createComputeImageRenderer, createComputeImageControls } from './renderers/computeimage.js';
 import { createCanonicalObjectSystem } from './systems/canonical-object.js';
-import { createPersistentObjectSystem } from './systems/persistent-object.js';
 import { createNavigationSystem } from './systems/navigation.js';
 import { createShellInstrumentsSystem } from './systems/shell-instruments.js';
 import { createVisitorStateSystem } from './visitor-state.js';
@@ -190,7 +189,6 @@ const buildSystems = ({ config, context, domRuntime }) => {
     { id: 'observation-graph', enabled: true, factory: createObservationGraphSystem },
     { id: 'accessibility', enabled: config.accessibility, factory: createAccessibilitySystem },
     { id: 'state-projection', enabled: true, factory: createStateProjectionSystem },
-    { id: 'persistent-object', enabled: config.receipts, factory: createPersistentObjectSystem },
     { id: 'observatory-shell', enabled: config.observer, factory: createObservatoryShellSystem },
     { id: 'canonical-stage', enabled: true, factory: createCanonicalStageSystem },
     { id: 'effect-budget', enabled: config.effects, factory: createEffectBudgetSystem },
