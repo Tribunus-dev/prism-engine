@@ -13,7 +13,7 @@ export const createPersistentObjectSystem = () => {
       ['persistence', 'Persistence', 'What remains attached to the object?'],
     ];
     const objectViews = ['silhouette', 'cross-section', 'topology', 'ABI', 'execution', 'receipts', 'history', 'Fabric', 'capabilities', 'relationships'];
-    const objectId = 'computational-subject:prism-model';
+    const objectId = kernel?.subject?.id || 'computational-subject:prism-model';
     const key = 'prism-experience-object';
     const owner = 'persistent-object';
 

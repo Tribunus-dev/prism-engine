@@ -27,11 +27,21 @@ export const createRepositoryService = ({ fetchImpl = fetch } = {}) => {
       const [state, claims, capabilities] = await Promise.all([
         fetchImpl('repository-state.json').then(response => response.ok ? response.json() : null),
         fetchImpl('claims.generated.json').then(response => response.ok ? response.json() : null),
-        fetchImpl('capabilities.generated.json').then(response => response.ok ? response.json() : null)
+        fetchImpl('capabilities.generated.json').then(response => response.ok ? response.json() : null),
       ]);
+      const normalizedClaims = Array.isArray(state?.claims)
+        ? state.claims
+        : Array.isArray(claims?.claims)
+          ? claims.claims
+          : [];
+      const normalizedCapabilities = Array.isArray(state?.capabilities)
+        ? state.capabilities
+        : Array.isArray(capabilities?.capabilities)
+          ? capabilities.capabilities
+          : [];
       service.state = state;
-      service.claims = claims?.claims || [];
-      service.capabilities = capabilities?.capabilities || [];
+      service.claims = normalizedClaims;
+      service.capabilities = normalizedCapabilities;
       const snapshot = Object.freeze({ state, claims: service.claims, capabilities: service.capabilities });
       service.publish('repository-ready', snapshot);
       return snapshot;

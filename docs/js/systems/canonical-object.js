@@ -10,7 +10,15 @@ export const createCanonicalObjectSystem = () => {
     const specimen = document.querySelector('[data-computeimage-life] .computeimage-specimen, [data-computeimage-renderer]');
     if (!specimen) return { stop() {} };
     const repositoryState = repository?.state;
-    const computation = kernel?.subject?.computeImage || {
+    const computation = kernel?.ensureComputeImageSubject?.({
+      claims,
+      sourceRefs: claims.flatMap(claim => claim.sourceRefs || []),
+      evidenceBoundary: repositoryState?.evidenceBoundary || 'repository evidence pending',
+      provenance: {
+        source: repositoryState?.evidenceBoundary ? 'repository-state' : 'runtime-fallback',
+        boundary: repositoryState?.evidenceBoundary || 'repository evidence pending',
+      },
+    }) || kernel?.subject?.computeImage || {
       id: 'computational-subject:prism-model',
       kind: 'ComputeImage',
       claims,

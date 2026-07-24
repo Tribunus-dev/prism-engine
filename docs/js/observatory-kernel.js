@@ -2,6 +2,22 @@ import { OBSERVER_MODES, OPTICAL_STATES, BELIEF_STATES, OBJECT_KINDS } from './c
 
 export const createKernel = ({ continuity } = {}) => {
   const subjectId = 'computational-subject:prism-model';
+  const createComputeImageSubject = () => ({
+    id: subjectId,
+    kind: 'ComputeImage',
+    intent: 'one-subject-canonical-journey',
+    representations: [],
+    plans: [],
+    execution: [],
+    receipts: [],
+    lifecycle: [{ phase: 'computeimage-seeded', timestamp: Date.now(), state: 'present' }],
+    sourceRefs: [],
+    evidenceBoundary: 'repository evidence pending',
+    provenance: {
+      source: 'prism-runtime',
+      boundary: 'repository-state-first',
+    },
+  });
   const state = { subjectId, currentObservation: null, observerMode: 'observer', opticalState: 'observation', observations: [], transformations: [], claims: [], receipts: [], visitorIntent: 'explore', disclosureLevel: 'intuition', repositoryState: null, history: [], continuity: { visits: 1, lastObservation: null, lastStage: null } };
   const subject = { id: subjectId, name: 'Semantic Continuum', intent: null, representations: [], plans: [], computeImage: null, execution: [], receipts: [], existence: 'active', knowledge: 'observed', belief: 'observed', questions: [], lifecycle: [{ phase: 'birth', timestamp: Date.now(), state: 'possible' }], history: [], relationships: [], objects: Object.fromEntries(OBJECT_KINDS.map(kind => [kind, { kind, subject: subjectId, knowledge: 'observed', belief: 'observed', existence: 'active', history: [], relationships: [] }])) };
   const listeners = new Map();
@@ -88,6 +104,21 @@ export const createKernel = ({ continuity } = {}) => {
     },
     inspectSubject() {
       return { identity: subject.id, state: subject.existence, knowledge: subject.knowledge, belief: subject.belief, evidence: subject.receipts, claims: state.claims, repositoryState: state.repositoryState, history: subject.history, lifecycle: subject.lifecycle, relationships: subject.relationships, capabilities: subject.objects['Capability Surface']?.capabilities || [] };
+    },
+    ensureComputeImageSubject(update) {
+      if (!subject.computeImage) {
+        subject.computeImage = createComputeImageSubject();
+      }
+      const updates = update || {};
+      subject.computeImage = {
+        ...subject.computeImage,
+        ...updates,
+        sourceRefs: updates.sourceRefs || subject.computeImage.sourceRefs || [],
+      };
+      return subject.computeImage;
+    },
+    updateComputeImageSubject(update) {
+      return this.ensureComputeImageSubject(update || {});
     },
     questions() { return subject.questions; },
     assertConservation(event = {}) {

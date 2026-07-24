@@ -3,15 +3,23 @@ import { runtimeContext } from '../runtime/runtime-context.js';
 export const createComputeImageRenderer = (context = runtimeContext()) => {
   const modes = ['silhouette', 'identity', 'semantic', 'physical', 'execution', 'history', 'evidence', 'fabric'];
   const instances = new WeakMap();
-  const mount = (element, computation = { id: 'computational-subject:prism-model' }) => {
+  const resolveComputation = (computation) => {
+    if (computation) return computation;
+    const kernelSubject = context?.kernel?.computeImageSubject
+      || context?.kernel?.subject?.computeImage
+      || context?.kernel?.ensureComputeImageSubject?.();
+    return kernelSubject || { id: 'computational-subject:prism-model' };
+  };
+  const mount = (element, computation) => {
     if (!element) return null;
+    const resolved = resolveComputation(computation);
     const kernel = context?.kernel;
-    const instance = { element, computation };
+    const instance = { element, computation: resolved };
     element.dataset.computeimageRenderer = 'shared';
-    element.dataset.subjectId = computation.id;
+    element.dataset.subjectId = resolved.id;
     const setMode = mode => {
       if (!modes.includes(mode)) return false;
-      computation.mode = mode;
+      resolved.mode = mode;
       element.dataset.computeimageMode = mode;
       kernel?.record({
         type: 'computeimage-mode',
@@ -24,12 +32,12 @@ export const createComputeImageRenderer = (context = runtimeContext()) => {
     };
     instance.setMode = setMode;
     instance.selectLayer = layer => {
-      computation.layer = layer;
+      resolved.layer = layer;
       element.dataset.computeimageLayer = layer;
       return layer;
     };
     instance.attachReceipt = receiptId => {
-      computation.receiptId = receiptId;
+      resolved.receiptId = receiptId;
       element.dataset.computeimageReceipt = receiptId;
       return receiptId;
     };
