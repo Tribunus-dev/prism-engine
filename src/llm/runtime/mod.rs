@@ -109,6 +109,8 @@ pub struct PrismInferenceServer {
     pub scheduler: Arc<scheduler::InferenceScheduler>,
     /// Routes dispatches to execution lanes.
     pub lane_router: Arc<lanes::LaneRouter>,
+    /// ECS-owned Metal execution lane used by compiled model work items.
+    pub ecs_metal_lane: Arc<lanes::EcsMetalLane>,
     /// Append-only event-sourced receipt store.
     pub receipt_store: Arc<receipt::ReceiptStore>,
     /// Cooperative session cancellation.
@@ -132,6 +134,9 @@ impl PrismInferenceServer {
         let kv_manager = Arc::new(kv::KvManager::new(4096, 32768));
         let scheduler = Arc::new(scheduler::InferenceScheduler::new());
         let lane_router = Arc::new(lanes::LaneRouter::new());
+        let ecs_metal_lane = Arc::new(lanes::EcsMetalLane::new(Arc::new(
+            prism_ecs_runtime::BackendExecutionRegistry::new(),
+        )));
         let receipt_store = Arc::new(receipt::ReceiptStore::new(config.receipt_store_path));
         let cancellation_manager = Arc::new(cancel::CancellationManager::new());
         let memory_monitor = Arc::new(memory::MemoryPressureMonitor::new(
@@ -149,12 +154,18 @@ impl PrismInferenceServer {
             kv_manager,
             scheduler,
             lane_router,
+            ecs_metal_lane,
             receipt_store,
             cancellation_manager,
             memory_monitor,
             http_server,
             ecs_kernel: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Return the ECS-owned Metal lane for compiled kernel dispatch.
+    pub fn metal_lane(&self) -> Arc<lanes::EcsMetalLane> {
+        Arc::clone(&self.ecs_metal_lane)
     }
 
     /// Attach the canonical ECS kernel used for journaled inference/KV state.
