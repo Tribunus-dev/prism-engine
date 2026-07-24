@@ -148,7 +148,7 @@ export const createObservationGraphSystem = () => {
     const page = location.pathname.split('/').pop() || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];
-    const objectId = 'computational-subject:prism-model';
+    const objectId = kernel?.subject?.id || 'computational-subject:prism-model';
 
     if (!scene) return { stop() {} };
 
