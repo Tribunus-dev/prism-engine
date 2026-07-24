@@ -1,5 +1,13 @@
 # Prism Interaction Runtime v1
 
+Status: frozen for this sprint (2026-07-24)
+
+This document is frozen. The authoritative interaction orchestration is now in:
+- [`prism-runtime.md`](prism-runtime.md)
+- [`prism-experience-architecture.md`](prism-experience-architecture.md)
+
+Do not add new interaction runtime layers while this freeze is in place; route implementation work through shared subject, observation graph, and explicit scene projection in canonical runtime modules.
+
 The Prism Observatory is the first client of a reusable interaction runtime. Website, desktop inspector, debugger, ComputeImage explorer, and Fabric console should consume the same semantic state and choose different renderers.
 
 ## Kernel modules

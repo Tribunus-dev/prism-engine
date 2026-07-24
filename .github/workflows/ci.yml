@@ -84,6 +84,8 @@ jobs:
         run: cargo test -p tribunus-compute-core --lib --features backend-cpu -- embed_cluster
       - name: Validate runtime ontology and observation graph
         run: node docs/scripts/validate-observatory-runtime.mjs
+      - name: Validate runtime architecture doc freeze state
+        run: node docs/scripts/validate-doc-freeze.mjs
       - name: Clippy (lib only, skip broken bins/tests)
         run: cargo clippy -p tribunus-compute-core --features backend-cpu --lib -- -D warnings
       - name: Report sccache statistics
