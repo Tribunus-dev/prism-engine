@@ -15,5 +15,10 @@ export const createRouteProjection = ({ routeForLocation, primaryRoute }) => ({
     document.body.dataset.prismObservationProjected = 'true';
     document.body.dataset.prismProjectionRoute = route.observation;
     return route;
+  },
+  projectForPath(pathname) {
+    return routeForLocation(pathname);
+  },
+});
   }
 });

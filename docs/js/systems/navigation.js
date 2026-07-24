@@ -11,8 +11,13 @@ export const chapterMap = [
   ['Work With Prism', 'work-with-prism.html', 'research'],
 ];
 
-export const currentChapter = () => {
-  const file = location.pathname.split('/').pop() || 'index.html';
+export const currentChapter = (context = {}) => {
+  const file = context?.runtime?.getProjection?.()?.route
+    || context?.runtime?.currentRoute
+    || context?.currentFile
+    || context?.location
+    || location.pathname.split('/').pop()
+    || 'index.html';
   return Math.max(0, chapterMap.findIndex(chapter => chapter[1].split('#')[0] === file));
 };
 
@@ -25,7 +30,7 @@ export const createNavigationSystem = () => {
       const header = document.querySelector('.component-header');
       const shell = header || document.body;
       const nodes = [];
-      const current = currentChapter();
+      const current = currentChapter(context);
       const [name, , accent] = chapterMap[current];
       const primary = [0, 2, 3, 4, 6];
       const primaryIndex = primary.indexOf(current);

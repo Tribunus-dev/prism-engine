@@ -145,7 +145,11 @@ export const createObservationGraphSystem = () => {
       'prism-ml.html': 'fabric',
       'work-with-prism.html': 'fabric',
     };
-    const page = location.pathname.split('/').pop() || 'index.html';
+    const page = context?.runtime?.getProjection?.()?.route
+      || context?.runtime?.currentRoute
+      || context?.currentPage
+      || location.pathname.split('/').pop()
+      || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];
     const canonicalSubject = context?.runtime?.getCanonicalSubject?.()
