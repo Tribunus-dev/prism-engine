@@ -315,7 +315,6 @@ pub enum CalibrationPolicy {
     FromFile(String),
     Auto,
 }
-
 impl Default for CalibrationPolicy {
     fn default() -> Self {
         Self::Auto
@@ -327,7 +326,6 @@ pub enum ValidationPolicy {
     Structural,
     Production,
 }
-
 impl Default for ValidationPolicy {
     fn default() -> Self {
         Self::Structural
@@ -417,32 +415,17 @@ impl SearchConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchTrace {
-    pub search_id: Uuid,
-    pub generations_completed: u32,
-    pub candidates_evaluated: u64,
-    pub best_score: Option<f64>,
-    pub pareto_frontier_size: usize,
-    pub elapsed_ms: u64,
-    #[serde(default)]
-    pub config: Option<SearchConfig>,
+    pub search_id: String,
+    pub config: SearchConfig,
     #[serde(default)]
     pub generations: Vec<GenerationRecord>,
     #[serde(default)]
     pub pareto_frontier: Vec<CandidateRecord>,
     #[serde(default)]
-    pub quality_diversity_archive: Vec<CandidateRecord>,
-    #[serde(default)]
+    pub quality_diversity_archive: Vec<prism_ecs_ir::evolution::ArchiveEntry>,
     pub best_genome: Option<String>,
     #[serde(default)]
     pub trace_digest: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct CandidateMeasurements {
-    #[serde(default)]
-    pub values: std::collections::BTreeMap<String, f64>,
-    #[serde(default)]
-    pub evidence: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -459,23 +442,29 @@ impl Default for CandidateStatus {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CandidateRecord {
-    pub candidate_id: String,
+    pub candidate_digest: String,
+    #[serde(default)]
+    pub parent_digests: Vec<String>,
     pub genome: String,
-    pub score: Option<f64>,
     #[serde(default)]
+    pub tensor_scope: Vec<String>,
+    #[serde(default)]
+    pub score_vector: Vec<f64>,
+    pub measurements: Option<serde_json::Value>,
     pub status: CandidateStatus,
-    #[serde(default)]
-    pub measurements: CandidateMeasurements,
+    pub rejection_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerationRecord {
     pub generation: u32,
     #[serde(default)]
     pub candidates: Vec<CandidateRecord>,
-    pub best_score: Option<f64>,
+    pub best_score: f64,
+    pub diversity: f64,
+    pub timestamp: DateTime<Utc>,
 }
 
 #[derive(Debug, Error)]
