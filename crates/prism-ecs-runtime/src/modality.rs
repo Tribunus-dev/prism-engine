@@ -27,3 +27,10 @@ pub struct ModalityExecution {
 }
 
 impl Component for ModalityExecution {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModalityFailure {
+    pub error: String,
+}
+
+impl Component for ModalityFailure {}

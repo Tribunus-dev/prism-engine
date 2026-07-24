@@ -135,7 +135,13 @@ impl ModalityProvider for PrismInferenceServer {
             "",
         )
         .map_err(|error| ImageGenerationError::MissingComponent { component: error })?;
-        let result = crate::image::generate_image(model_path, request)?;
+        let result = match crate::image::generate_image(model_path, request) {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = self.fail_modality_work(work_entity, error.to_string());
+                return Err(error);
+            }
+        };
         self.complete_modality_work(
             work_entity,
             result.receipt.output_digest.to_string(),
@@ -158,7 +164,13 @@ impl ModalityProvider for PrismInferenceServer {
             "",
         )
         .map_err(crate::audio::PrismAudioError::GenerationFailed)?;
-        let result = crate::audio::generate_speech(model_path, text, params)?;
+        let result = match crate::audio::generate_speech(model_path, text, params) {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = self.fail_modality_work(work_entity, error.to_string());
+                return Err(error);
+            }
+        };
         self.complete_modality_work(
             work_entity,
             result.output_digest.clone(),
@@ -181,7 +193,13 @@ impl ModalityProvider for PrismInferenceServer {
             "",
         )
         .map_err(crate::video::PrismVideoError::GenerationFailed)?;
-        let result = crate::video::generate_video(model_path, prompt, params)?;
+        let result = match crate::video::generate_video(model_path, prompt, params) {
+            Ok(result) => result,
+            Err(error) => {
+                let _ = self.fail_modality_work(work_entity, error.to_string());
+                return Err(error);
+            }
+        };
         let mut hasher = blake3::Hasher::new();
         let mut bytes = 0u64;
         for (_, _, frame) in &result.frames {

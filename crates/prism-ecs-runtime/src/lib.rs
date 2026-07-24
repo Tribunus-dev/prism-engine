@@ -17,7 +17,7 @@ pub use backend::{
     KernelDispatchSpec,
 };
 pub use inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata, KvCacheBinding};
-pub use modality::{ModalityExecution, ModalityKind, ModalityWork};
+pub use modality::{ModalityExecution, ModalityFailure, ModalityKind, ModalityWork};
 pub use kernel::{
     create_kernel, AgentSnapshot, Command, CommandEnvelope, CommandResult, CommitOutcome,
     KernelHandle, KernelHealth, RuntimeKernel,

@@ -75,6 +75,7 @@ pub enum Command {
         output_digest: String,
         output_bytes: u64,
     },
+    FailModalityWork { entity: u64, error: String },
 
     // ── Lifecycle (typed, domain-specific) ──
     Lifecycle(LifecycleCommand),
@@ -106,6 +107,7 @@ pub enum CommandResult {
     },
     ModalitySubmitted { entity_id: u64 },
     ModalityCompleted { entity_id: u64, output_digest: String },
+    ModalityFailed { entity_id: u64, error: String },
 
     // Lifecycle
     Lifecycle(LifecycleCommandResult),
@@ -143,6 +145,7 @@ impl CommandEnvelope {
             Command::BindInferenceKv { .. } => 0,
             Command::CreateModalityWork { .. } => 0,
             Command::CompleteModalityWork { .. } => 0,
+            Command::FailModalityWork { .. } => 0,
             Command::Lifecycle(lc) => lc.type_id().discriminant(),
         };
         Self {
@@ -167,6 +170,7 @@ impl CommandEnvelope {
             BindInferenceKv { .. } => 5,
             CreateModalityWork { .. } => 6,
             CompleteModalityWork { .. } => 7,
+            FailModalityWork { .. } => 8,
             Lifecycle(_) => self.command_type_id as u64,
         })
     }
@@ -478,6 +482,19 @@ impl KernelHandle {
                         .map_err(|error| RuntimeError::Dispatch(error.to_string()))
                 }
             }
+            Command::FailModalityWork { entity, error } => {
+                if error.trim().is_empty() {
+                    Err(RuntimeError::Dispatch("modality failure must include an error".into()))
+                } else {
+                    world
+                        .add_component(
+                            prism_ecs_core::Entity::new(entity, 0),
+                            crate::modality::ModalityFailure { error: error.clone() },
+                        )
+                        .map(|_| CommandResult::ModalityFailed { entity_id: entity, error })
+                        .map_err(|error| RuntimeError::Dispatch(error.to_string()))
+                }
+            }
             Command::Lifecycle(lc) => execute_lifecycle(&mut world, lc),
         };
 
@@ -768,6 +785,19 @@ impl RuntimeKernel {
                         output_digest: expected_digest,
                     } if entity == expected && output_digest == expected_digest => {}
                     _ => return Err(RuntimeError::Journal("replay modality completion mismatch".into())),
+                }
+            }
+            Command::FailModalityWork { entity, error } => {
+                world
+                    .add_component(
+                        prism_ecs_core::Entity::new(entity, 0),
+                        crate::modality::ModalityFailure { error: error.clone() },
+                    )
+                    .map_err(|error| RuntimeError::Journal(error.to_string()))?;
+                match stored_result {
+                    CommandResult::ModalityFailed { entity_id, error: expected }
+                        if entity == entity_id && error == expected => {}
+                    _ => return Err(RuntimeError::Journal("replay modality failure mismatch".into())),
                 }
             }
             // Re-execute lifecycle commands so entity ID allocation stays
