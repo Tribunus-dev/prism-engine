@@ -1,5 +1,78 @@
 const levelOrder = ['released', 'validated', 'qualifying', 'implemented', 'planned'];
 
+const capabilityDomainMap = {
+  runtime: 'runtime',
+  artifact: 'artifact',
+  model: 'model',
+  compiler: 'compiler',
+  authority: 'authority',
+  evidence: 'evidence',
+};
+
+const inferDomainFromId = (id = '') => {
+  const value = String(id || '').toLowerCase();
+  if (value.includes('computeimage') || value.includes('artifact')) return 'artifact';
+  if (value.includes('metal') || value.includes('rocm') || value.includes('cuda') || value.includes('xdna') || value.includes('ane') || value.includes('cpu') || value.includes('backend')) return 'runtime';
+  if (value.includes('compiler')) return 'compiler';
+  if (value.includes('replay') || value.includes('evidence')) return 'evidence';
+  if (value.includes('constit') || value.includes('authority')) return 'authority';
+  return 'model';
+};
+
+const inferLevel = (status = '') => {
+  const normalized = String(status || '').toLowerCase();
+  return levelOrder.includes(normalized) ? normalized : 'implemented';
+};
+
+const fallbackCapabilitiesState = () => ({
+  source: 'repository-state',
+  commit: 'local-worktree',
+  verifiedAt: 'unverified',
+  levels: {
+    released: 'Versioned, reproducible distribution with explicit support boundaries.',
+    validated: 'Measured on a defined build and hardware configuration with evidence.',
+    qualifying: 'Implemented and tested or compile-verified, with target evidence still being gathered.',
+    implemented: 'Code path, data model, command, or provider boundary exists.',
+    planned: 'Architecture or accepted design exists; end-to-end implementation is incomplete.',
+  },
+});
+
+const normalizeRepositoryCapabilities = (repositoryState = {}) => {
+  const capabilities = Array.isArray(repositoryState.capabilities) ? repositoryState.capabilities : [];
+  return {
+    generatedFromCommit: repositoryState.commit?.slice?.(0, 12) || 'local-worktree',
+    verifiedAt: repositoryState.generatedAt || repositoryState.generated_at || 'local-worktree',
+    levels: fallbackCapabilitiesState().levels,
+    capabilities: capabilities.map((capability = {}, index) => ({
+      id: capability.id || `capability-${index + 1}`,
+      domain: capability.domain || inferDomainFromId(capability.id),
+      label: capability.label || 'Capability',
+      level: inferLevel(capability.status),
+      summary: capability.summary || 'Capability summary is staged from repository state.',
+      sourcePaths: capability.sourceRefs || [],
+      buildFeatures: capability.tags || [],
+      limitations: capability.limitations || ['Evidence boundary and support limits remain explicit.'],
+    })),
+  };
+};
+
+const loadCapabilityRegistry = async () => {
+  const response = await fetch('./repository-state.json', { cache: 'no-store' });
+  if (response.ok) {
+    const repositoryState = await response.json();
+    return {
+      source: 'repository-state',
+      ...normalizeRepositoryCapabilities(repositoryState),
+    };
+  }
+  const fallback = await fetch('./data/capabilities.json', { cache: 'no-store' });
+  if (!fallback.ok) throw new Error(`Capability registry request failed: ${response.status} / ${fallback.status}`);
+  return {
+    source: 'capability-registry',
+    ...(await fallback.json()),
+  };
+};
+
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
 }[character]));
@@ -29,9 +102,7 @@ const renderCapabilities = (root, capabilities, filter = 'all') => {
 };
 
 const start = async () => {
-  const response = await fetch('./data/capabilities.json', { cache: 'no-store' });
-  if (!response.ok) throw new Error(`Capability registry request failed: ${response.status}`);
-  const registry = await response.json();
+  const registry = await loadCapabilityRegistry();
   document.querySelector('[data-capability-commit]').textContent = registry.generatedFromCommit.slice(0, 12);
   document.querySelector('[data-capability-date]').textContent = registry.verifiedAt;
   renderLegend(document.querySelector('[data-capability-legend]'), registry.levels || {});

@@ -1,10 +1,19 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve, relative, extname } from 'node:path';
+import { statSync, existsSync } from 'node:fs';
 
 const root = process.cwd();
 const allowedRuntimeContextFile = resolve(root, 'docs/js/runtime/runtime-context.js');
 const jsRoot = resolve(root, 'docs/js');
 const issues = [];
+const hasAllowedRuntimeContextFile = existsSync(allowedRuntimeContextFile);
+const isRuntimeContextFile = (file) => {
+  try {
+    return statSync(file).isFile();
+  } catch {
+    return false;
+  }
+};
 
 const walk = async (dir, files = []) => {
   const entries = await readdir(dir, { withFileTypes: true });
@@ -24,7 +33,7 @@ const jsFiles = await walk(jsRoot);
 
 for (const file of jsFiles) {
   const content = await readFile(file, 'utf8');
-  if (file === allowedRuntimeContextFile) continue;
+  if (hasAllowedRuntimeContextFile && isRuntimeContextFile(file) && file === allowedRuntimeContextFile) continue;
   if (/import\s+\{?\s*runtimeContext\s*\}?\s+from\s+['"].+runtime-context\.js['"]/.test(content)) {
     issues.push(`runtimeContext import remains in ${relative(root, file)}`);
   }
