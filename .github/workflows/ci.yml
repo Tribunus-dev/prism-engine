@@ -90,6 +90,8 @@ jobs:
         run: node docs/scripts/validate-canonical-subject.mjs
       - name: Validate explicit runtime construction
         run: node docs/scripts/validate-runtime-construction.mjs
+      - name: Validate stylesheet import ordering and style references
+        run: node docs/scripts/validate-style-assets.mjs
       - name: Validate repository subject and canonicalization state
         run: node docs/scripts/validate-repository-subjects.mjs
       - name: Validate deployment CNAME configuration
