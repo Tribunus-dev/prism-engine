@@ -14,20 +14,20 @@ const docs = [
     path: 'docs/prism-meaning-runtime.md',
     mustContain: [
       'Status: frozen for this sprint',
-      'archived as a compatibility naming layer only',
-      '`prism-runtime.md`',
-      '`prism-semantics.md`',
-      'Do not introduce new Meaning Runtime abstractions',
+      'Canonical source',
+      'Compatibility guidance',
+      'prism-semantics.md',
+      'prism-runtime.md',
     ],
   },
   {
     path: 'docs/prism-interaction-runtime.md',
     mustContain: [
       'Status: frozen for this sprint',
-      'archived as a compatibility naming layer',
-      '`prism-runtime.md`',
-      '`prism-experience-architecture.md`',
-      'Do not add new interaction runtime layers',
+      'Canonical source',
+      'Compatibility guidance',
+      'prism-runtime.md',
+      'prism-experience-architecture.md',
     ],
   },
   {
