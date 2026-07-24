@@ -35,6 +35,7 @@ pub mod pattern_rewriter;
 pub mod region;
 pub mod rewrite_driver;
 pub mod scf;
+pub mod semantic_region;
 pub mod serde;
 pub mod symbol_table;
 pub mod traits;
