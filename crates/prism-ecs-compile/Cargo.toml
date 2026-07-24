@@ -29,8 +29,9 @@ chrono = { workspace = true }
 tracing = { workspace = true }
 half = { workspace = true }
 libc.workspace = true
+safetensors = "0.8"
+
 [features]
-# Phase 4 activates this feature and creates EvaluationStrategy in prism-spatial-ir.
 phase4_evaluation = []
 metal-dispatch = ["prism-ecs-kernel/metal-dispatch"]
 ane = [
