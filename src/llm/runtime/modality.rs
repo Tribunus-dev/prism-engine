@@ -128,6 +128,13 @@ impl ModalityProvider for PrismInferenceServer {
         model_path: &str,
         request: ImageGenerationRequest,
     ) -> Result<ImageGenerationResult, ImageGenerationError> {
+        self.submit_modality_work(
+            prism_ecs_runtime::ModalityKind::Image,
+            model_path,
+            &request.prompt,
+            "",
+        )
+        .map_err(|error| ImageGenerationError::MissingComponent { component: error })?;
         crate::image::generate_image(model_path, request)
     }
 
@@ -137,6 +144,13 @@ impl ModalityProvider for PrismInferenceServer {
         text: &str,
         params: crate::audio::AudioParams,
     ) -> Result<crate::audio::AudioGenerationReceipt, crate::audio::PrismAudioError> {
+        self.submit_modality_work(
+            prism_ecs_runtime::ModalityKind::Audio,
+            model_path,
+            text,
+            "",
+        )
+        .map_err(crate::audio::PrismAudioError::GenerationFailed)?;
         crate::audio::generate_speech(model_path, text, params)
     }
 
@@ -146,6 +160,13 @@ impl ModalityProvider for PrismInferenceServer {
         prompt: &str,
         params: crate::video::VideoParams,
     ) -> Result<crate::video::VideoGenerationReceipt, crate::video::PrismVideoError> {
+        self.submit_modality_work(
+            prism_ecs_runtime::ModalityKind::Video,
+            model_path,
+            prompt,
+            "",
+        )
+        .map_err(crate::video::PrismVideoError::GenerationFailed)?;
         crate::video::generate_video(model_path, prompt, params)
     }
 
