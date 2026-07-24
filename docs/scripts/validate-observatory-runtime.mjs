@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { chapterMap } from '../js/systems/navigation.js';
 
 const root = process.cwd();
 const docsRoot = resolve(root, 'docs');
@@ -78,6 +79,18 @@ for (const route of Object.values(projections.PROJECTIONS || {})) {
 
 const scenes = new Set(Object.keys(observationGraph.SCENES || {}));
 const pageScenes = new Map(Object.entries(observationGraph.PAGE_SCENES || {}));
+const projectedRoutes = new Set(Object.values(projections.PROJECTIONS || {}).map(route => route.route));
+const navigationRoutes = new Set((chapterMap || []).map(([_, route]) => String(route || '').split('#')[0]).filter(Boolean));
+for (const route of navigationRoutes) {
+  if (!projectedRoutes.has(route)) {
+    report.push(`navigation route ${route} is not declared in PROJECTIONS`);
+  }
+}
+for (const route of projectedRoutes) {
+  if (!navigationRoutes.has(route)) {
+    report.push(`projection route ${route} is not represented in chapterMap`);
+  }
+}
 
 for (const [page, scene] of pageScenes) {
   if (!scenes.has(scene)) {

@@ -161,7 +161,7 @@ export const createObservationGraphSystem = () => {
     const scenes = SCENES;
     const pageScenes = PAGE_SCENES;
     const page = context?.runtime?.getProjection?.()?.route
-      || context?.runtime?.currentRoute
+      || context?.runtime?.getCurrentRoute?.()
       || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];
