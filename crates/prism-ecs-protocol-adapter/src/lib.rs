@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Client-side protocol boundary implemented by a runtime-backed adapter.
-pub trait ApplicationClient {
+pub trait ApplicationClient: Send + Sync {
     fn send(&self, request: ProtocolRequest) -> Event;
 }
 

@@ -13,6 +13,7 @@ use prism_ecs_runtime::schedule::{
 };
 use prism_ecs_runtime::RuntimeKernel;
 use prism_ecs_runtime::RuntimeSchedule;
+use prism_ecs_protocol_adapter::{NoopWorkflowCancellation, ProjectionWorkflowStore, WorkflowClient};
 use prism_ecs_server::inference::ModelRegistry;
 use prism_mcp_core::{
     ConnectionId, DaemonState, FileLock, ProcessCache, RequestEnvelope, ResponseFrame, Scheduler,
@@ -382,6 +383,7 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
         let dashboard_projection_store = projection_store.clone();
         let dashboard_provenance_store = provenance_store.clone();
         let dashboard_graph_projection = graph_projection.clone();
+        let workflow_store = projection_store.clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().expect("dashboard tokio runtime");
             rt.block_on(async move {
@@ -413,6 +415,11 @@ pub fn run_daemon(state_dir: &str, artifact_dir: &str) -> anyhow::Result<()> {
                     projection_store: dashboard_projection_store,
                     provenance_store: dashboard_provenance_store,
                     graph_projection: dashboard_graph_projection,
+                    workflow_client: Arc::new(WorkflowClient::new(
+                        kh.clone(),
+                        ProjectionWorkflowStore::new(workflow_store),
+                        NoopWorkflowCancellation,
+                    )),
                     authorized: Arc::new(AtomicBool::new(auth_path.exists())),
                     auth_token: Arc::new(auth_token),
                 };

@@ -19,6 +19,8 @@ use prism_ecs_ir::evolution::{
 };
 use prism_ecs_runtime::KernelHandle;
 use prism_ecs_runtime::{Command, CommandEnvelope};
+use prism_ecs_protocol::{Event, ProtocolRequest, ProtocolError, EventBody, ErrorCode};
+use prism_ecs_protocol_adapter::ApplicationClient;
 use prism_ecs_server::runtime::server::PrefillDecodeRuntime;
 use prism_ecs_server::runtime::server_types::SamplingConfig;
 use prism_mcp_core::{
@@ -59,6 +61,8 @@ pub struct DashboardState {
     pub projection_store: Arc<dyn ProjectionStore>,
     pub provenance_store: Arc<dyn prism_mcp_core::ProvenanceGraphStore>,
     pub graph_projection: Arc<crate::daemon::trifecta_store::DuckDbGraphProjection>,
+    /// Versioned Rust-owned application/workflow protocol boundary.
+    pub workflow_client: Arc<dyn ApplicationClient>,
 }
 
 pub fn router(state: DashboardState) -> Router {
@@ -77,7 +81,26 @@ pub fn router(state: DashboardState) -> Router {
         .route("/api/ws", get(ws_handler))
         .route("/api/pull", get(pull_model))
         .route("/api/assemble", post(assemble))
+        .route("/api/ecs", post(ecs_protocol))
         .with_state(Arc::new(state))
+}
+
+async fn ecs_protocol(
+    State(state): State<Arc<DashboardState>>,
+    Json(request): Json<Result<ProtocolRequest, serde_json::Error>>,
+) -> Json<Event> {
+    match request {
+        Ok(request) => Json(state.workflow_client.send(request)),
+        Err(error) => Json(Event::new(
+            uuid::Uuid::nil(),
+            EventBody::Error(ProtocolError::new(
+                uuid::Uuid::nil(),
+                ErrorCode::InvalidRequest,
+                format!("invalid ECS protocol request: {error}"),
+                false,
+            )),
+        )),
+    }
 }
 
 #[derive(Deserialize)]
