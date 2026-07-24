@@ -70,17 +70,17 @@
       </div>
     </section>
   <section class="living-atlas" data-atlas-context="Start Here" aria-labelledby="living-atlas-title">
-  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from semantic input to physical execution and evidence.</p></div>
+  <div class="atlas-intro"><label>PRISM / LIVING ARCHITECTURE</label><h2 id="living-atlas-title">Watch the system<br><em>decompose and route.</em></h2><p>Select a subsystem. The atlas follows its dependencies from representation input to physical execution and evidence.</p></div>
   <div class="atlas-layout">
     <div class="atlas-graph" role="list" aria-label="Prism living architecture">
-      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>meaning → candidates</span></button>
+      <button type="button" class="atlas-node is-active" data-atlas-node="compiler" role="listitem"><small>01</small><strong>Compiler</strong><span>representation → candidates</span></button>
       <button type="button" class="atlas-node" data-atlas-node="image" role="listitem"><small>02</small><strong>ComputeImage</strong><span>views → sealed artifact</span></button>
       <button type="button" class="atlas-node" data-atlas-node="scheduler" role="listitem"><small>03</small><strong>Scheduler</strong><span>work → execution lanes</span></button>
       <button type="button" class="atlas-node" data-atlas-node="evidence" role="listitem"><small>04</small><strong>Evidence</strong><span>run → receipt</span></button>
       <button type="button" class="atlas-node" data-atlas-node="fabric" role="listitem"><small>05</small><strong>Fabric</strong><span>machine → fleet</span></button>
       <svg class="atlas-wires" viewBox="0 0 700 360" aria-hidden="true"><path d="M140 70 C250 20 340 20 560 70 M140 70 C250 130 350 130 560 180 M140 180 C270 180 370 180 560 180 M140 290 C250 240 350 240 560 290 M140 290 C290 350 420 350 560 290"/><path d="M560 70 C600 120 600 230 560 290"/></svg>
     </div>
-    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves semantic identity while searching representation, placement, and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
+    <aside class="atlas-inspector" aria-live="polite"><span class="atlas-kicker">COMPILER / SEARCH</span><h3>Compiler</h3><p>Preserves representation identity while searching placement and target legality.</p><dl><div><dt>INPUT</dt><dd>Model graph + quality contract</dd></div><div><dt>HOME</dt><dd>ECS world / CPU analysis</dd></div><div><dt>OUTPUT</dt><dd>Admitted candidates + PrismIR</dd></div></dl><div class="atlas-proof"><span>DEPENDENCIES</span><strong>ComputeImage · Scheduler · Evidence</strong></div><div class="atlas-trace"><span>ACTIVE TRACE</span><strong data-atlas-trace>identity → search → admission</strong></div></aside>
   </div>
 </section>
 <aside class="shared-computeimage-observation" aria-labelledby="shared-computeimage-title">
