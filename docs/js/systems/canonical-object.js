@@ -3,13 +3,11 @@ export const createCanonicalObjectSystem = () => {
   const start = (context) => {
     const domRuntime = context.domRuntime;
     const kernel = context.kernel;
-    const repository = context.repository;
     const owner = 'canonical-object';
-    const claims = repository?.claims || context?.client?.claims || [];
+    const getSubject = () => context?.runtime?.getCanonicalSubject?.() || context?.runtime?.stateSubject;
     const specimen = document.querySelector('[data-computeimage-life] .computeimage-specimen, [data-computeimage-renderer]');
     if (!specimen) return { stop() {} };
-    const repositoryState = repository?.state;
-    const computation = context?.runtime?.getCanonicalSubject?.() || context?.runtime?.stateSubject;
+    const computation = getSubject();
     if (!computation) return { stop() {} };
     specimen.dataset.subjectId = computation.id;
     specimen.dataset.canonicalObject = 'true';
@@ -28,16 +26,18 @@ export const createCanonicalObjectSystem = () => {
     const phaseStages = { intent: 'source', representation: 'representation', plan: 'plan', computeimage: 'computeimage', execution: 'execution', receipt: 'receipt', fabric: 'fabric' };
     const update = event => {
       const stage = event.detail?.stage || phaseStages[event?.phase] || document.body.dataset.canonicalStage || 'source';
+      const currentComputation = getSubject() || computation;
       mounted?.setMode?.(modes[stage] || 'silhouette');
       specimen.dataset.canonicalStage = stage;
-      document.body.dataset.canonicalObjectId = computation.id;
-      computation.claims = repository?.claims || computation.claims;
-      computation.sourceRefs = computation.claims.flatMap(claim => claim.sourceRefs || []);
-      computation.evidenceBoundary = repository?.state?.evidenceBoundary || computation.evidenceBoundary;
+      specimen.dataset.subjectId = currentComputation?.id || '';
+      document.body.dataset.canonicalObjectId = currentComputation?.id || '';
+      const claims = currentComputation?.claims || [];
+      const sourceRefs = Array.isArray(claims) ? claims.flatMap(claim => claim.sourceRefs || []) : [];
+      const evidenceBoundary = currentComputation?.evidenceBoundary || kernel?.state?.repositoryState?.evidenceBoundary || '';
       const receipt = kernel?.state.receipts.at(-1);
       if (receipt) mounted?.attachReceipt?.(receipt.id);
       const observation = context.kernel?.state.currentObservation || 'observation pending';
-      narrative.textContent = `Canonical ComputeImage ${stage}. Observation ${observation}. ${receipt ? `Evidence class ${receipt.claimClass}; receipt ${receipt.id}.` : 'No receipt is attached yet.'} Source references ${computation.sourceRefs.length}; evidence boundary: ${computation.evidenceBoundary}. Identity and intent remain preserved; remaining unknowns are disclosed in the observatory. `;
+      narrative.textContent = `Canonical ComputeImage ${stage}. Observation ${observation}. ${receipt ? `Evidence class ${receipt.claimClass}; receipt ${receipt.id}.` : 'No receipt is attached yet.'} Source references ${sourceRefs.length}; evidence boundary: ${evidenceBoundary || 'repository-state'}. Identity and intent remain preserved; remaining unknowns are disclosed in the observatory. `;
     };
     addEventListener('prism:canonical-stage', update);
     kernel?.on('observation', update);

@@ -1,14 +1,5 @@
 const levelOrder = ['released', 'validated', 'qualifying', 'implemented', 'planned'];
 
-const capabilityDomainMap = {
-  runtime: 'runtime',
-  artifact: 'artifact',
-  model: 'model',
-  compiler: 'compiler',
-  authority: 'authority',
-  evidence: 'evidence',
-};
-
 const inferDomainFromId = (id = '') => {
   const value = String(id || '').toLowerCase();
   if (value.includes('computeimage') || value.includes('artifact')) return 'artifact';
@@ -20,7 +11,10 @@ const inferDomainFromId = (id = '') => {
 };
 
 const inferLevel = (status = '') => {
-  const normalized = String(status || '').toLowerCase();
+  const normalized = String(status || '').toLowerCase().trim();
+  if (normalized === 'repository-evidence' || normalized === 'measured' || normalized === 'validated') return 'validated';
+  if (normalized === 'compile-verified' || normalized === 'illustrative' || normalized === 'architectural-derivation') return 'implemented';
+  if (normalized === 'research-direction') return 'planned';
   return levelOrder.includes(normalized) ? normalized : 'implemented';
 };
 
@@ -119,5 +113,5 @@ const start = async () => {
 start().catch((error) => {
   console.error('[prism] capability registry failed', error);
   const root = document.querySelector('[data-capability-grid]');
-  if (root) root.innerHTML = '<p class="capability-empty">The generated capability registry could not be loaded. Open <a href="data/capabilities.json">the source data</a> directly.</p>';
+  if (root) root.innerHTML = '<p class="capability-empty">The generated capability registry could not be loaded. Open <a href="repository-state.json">the repository source</a> directly.</p>';
 });
