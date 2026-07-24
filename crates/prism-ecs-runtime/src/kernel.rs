@@ -64,6 +64,12 @@ pub enum Command {
         logical_context_tokens: u32,
         capacity_tokens: u32,
     },
+    CreateModalityWork {
+        kind: crate::modality::ModalityKind,
+        model_path: String,
+        prompt: String,
+        output_path: String,
+    },
 
     // ── Lifecycle (typed, domain-specific) ──
     Lifecycle(LifecycleCommand),
@@ -93,6 +99,7 @@ pub enum CommandResult {
         entity_id: u64,
         epoch: u64,
     },
+    ModalitySubmitted { entity_id: u64 },
 
     // Lifecycle
     Lifecycle(LifecycleCommandResult),
@@ -128,6 +135,7 @@ impl CommandEnvelope {
             Command::RegisterModel { .. } => 0,
             Command::AdvanceInference { .. } => 0,
             Command::BindInferenceKv { .. } => 0,
+            Command::CreateModalityWork { .. } => 0,
             Command::Lifecycle(lc) => lc.type_id().discriminant(),
         };
         Self {
@@ -150,6 +158,7 @@ impl CommandEnvelope {
             RegisterModel { .. } => 3,
             AdvanceInference { .. } => 4,
             BindInferenceKv { .. } => 5,
+            CreateModalityWork { .. } => 6,
             Lifecycle(_) => self.command_type_id as u64,
         })
     }
@@ -423,6 +432,19 @@ impl KernelHandle {
                 entity_id: entity,
                 epoch,
             }),
+            Command::CreateModalityWork {
+                kind,
+                model_path,
+                prompt,
+                output_path,
+            } => execute_create_modality_work(
+                &mut world,
+                kind,
+                model_path,
+                prompt,
+                output_path,
+            )
+            .map(|entity_id| CommandResult::ModalitySubmitted { entity_id }),
             Command::Lifecycle(lc) => execute_lifecycle(&mut world, lc),
         };
 
@@ -671,6 +693,27 @@ impl RuntimeKernel {
                     logical_context_tokens,
                     capacity_tokens,
                 )?;
+            }
+            Command::CreateModalityWork {
+                kind,
+                model_path,
+                prompt,
+                output_path,
+            } => {
+                let entity_id = execute_create_modality_work(
+                    &mut world,
+                    kind,
+                    model_path,
+                    prompt,
+                    output_path,
+                )?;
+                if let CommandResult::ModalitySubmitted { entity_id: expected } = stored_result {
+                    if entity_id != expected {
+                        return Err(RuntimeError::Journal(format!(
+                            "replay modality entity mismatch: generated {entity_id}, stored {expected}"
+                        )));
+                    }
+                }
             }
             // Re-execute lifecycle commands so entity ID allocation stays
             // consistent across the command sequence. The execute_lifecycle
@@ -1331,6 +1374,36 @@ fn execute_bind_inference_kv(
         .map_err(|error| RuntimeError::Entity(format!("bind inference KV failed: {error}")))
 }
 
+fn execute_create_modality_work(
+    world: &mut World,
+    kind: crate::modality::ModalityKind,
+    model_path: String,
+    prompt: String,
+    output_path: String,
+) -> Result<u64, RuntimeError> {
+    if model_path.trim().is_empty() || prompt.trim().is_empty() {
+        return Err(RuntimeError::Entity(
+            "modality work requires model_path and prompt".into(),
+        ));
+    }
+    let spawned = world
+        .spawn(EntityKind::WorkUnit, None)
+        .map_err(|error| RuntimeError::Entity(format!("spawn modality work failed: {error}")))?;
+    let entity_id = spawned.entity.id();
+    world
+        .add_component(
+            spawned.entity,
+            crate::modality::ModalityWork {
+                kind,
+                model_path,
+                prompt,
+                output_path,
+            },
+        )
+        .map_err(|error| RuntimeError::Entity(format!("attach modality work failed: {error}")))?;
+    Ok(entity_id)
+}
+
 fn execute_advance_inference(
     world: &mut World,
     entity: u64,
@@ -1566,6 +1639,34 @@ mod tests {
             world.get_component::<prism_ecs_constitutional::artifact::ArtifactDigest>(artifact)
                 .expect("artifact digest"),
             &model_ref.digest
+        );
+    }
+
+    #[test]
+    fn modality_submission_is_a_canonical_ecs_work_entity() {
+        let kernel = RuntimeKernel::new();
+        let outcome = kernel
+            .handle()
+            .submit(CommandEnvelope::new(Command::CreateModalityWork {
+                kind: crate::modality::ModalityKind::Image,
+                model_path: "model.cimage".into(),
+                prompt: "sunrise".into(),
+                output_path: "out.png".into(),
+            }))
+            .expect("modality submission");
+        let entity_id = match outcome.result {
+            CommandResult::ModalitySubmitted { entity_id } => entity_id,
+            other => panic!("expected modality submission, got {other:?}"),
+        };
+        let handle = kernel.handle();
+        let world = handle.lock_world();
+        let entity = Entity::new(entity_id, 0);
+        assert_eq!(world.entity_kind(entity), Some(EntityKind::WorkUnit));
+        assert_eq!(
+            world.get_component::<crate::modality::ModalityWork>(entity)
+                .expect("modality component")
+                .kind,
+            crate::modality::ModalityKind::Image
         );
     }
 }

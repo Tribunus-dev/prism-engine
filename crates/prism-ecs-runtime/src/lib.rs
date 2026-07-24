@@ -1,6 +1,7 @@
 pub mod fault;
 pub mod backend;
 pub mod inference;
+pub mod modality;
 mod kernel;
 mod ports;
 pub mod schedule;
@@ -16,6 +17,7 @@ pub use backend::{
     KernelDispatchSpec,
 };
 pub use inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata, KvCacheBinding};
+pub use modality::{ModalityKind, ModalityWork};
 pub use kernel::{
     create_kernel, AgentSnapshot, Command, CommandEnvelope, CommandResult, CommitOutcome,
     KernelHandle, KernelHealth, RuntimeKernel,

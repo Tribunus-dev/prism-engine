@@ -188,6 +188,35 @@ impl PrismInferenceServer {
             .map_err(|error| error.to_string())
     }
 
+    /// Submit image/audio/video/Metal work to the canonical ECS world. The
+    /// returned entity is the hand-off point for provider execution and
+    /// completion receipts.
+    pub fn submit_modality_work(
+        &self,
+        kind: prism_ecs_runtime::ModalityKind,
+        model_path: impl Into<String>,
+        prompt: impl Into<String>,
+        output_path: impl Into<String>,
+    ) -> Result<u64, String> {
+        let kernel = self
+            .ecs_kernel
+            .read()
+            .clone()
+            .ok_or_else(|| "ECS kernel is not attached".to_string())?;
+        let outcome = kernel
+            .submit(CommandEnvelope::new(Command::CreateModalityWork {
+                kind,
+                model_path: model_path.into(),
+                prompt: prompt.into(),
+                output_path: output_path.into(),
+            }))
+            .map_err(|error| error.to_string())?;
+        match outcome.result {
+            prism_ecs_runtime::CommandResult::ModalitySubmitted { entity_id } => Ok(entity_id),
+            other => Err(format!("unexpected modality command result: {other:?}")),
+        }
+    }
+
     /// Creates a new inference session and returns its [`SessionId`].
     ///
     /// Delegates to the session manager for admission and initial state
