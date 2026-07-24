@@ -227,3 +227,45 @@ impl Default for LaneRouter {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod ecs_metal_tests {
+    use super::*;
+    use prism_ecs_kernel::{
+        BackendKind, DispatchGeometry, KernelBackend, KernelCompileRequest, KernelDescriptor,
+        KernelVariant, MetalBackend,
+    };
+
+    #[test]
+    fn metal_lane_dispatches_registered_artifact_through_ecs_registry() {
+        let router = LaneRouter::new();
+        let artifact = MetalBackend::new()
+            .compile(&KernelCompileRequest {
+                source: b"kernel void fp16_gemv() {}".to_vec(),
+                descriptor: KernelDescriptor {
+                    name: "fp16_gemv".into(),
+                    variant: KernelVariant::FP16GEMV,
+                    backend: BackendKind::Metal,
+                    source_digest: String::new(),
+                    binary_digest: String::new(),
+                    binding_signature: Vec::new(),
+                    dispatch_geometry: DispatchGeometry {
+                        threads_per_threadgroup: [1, 1, 1],
+                        threadgroups_per_grid: [1, 1, 1],
+                        threads_per_grid: [1, 1, 1],
+                    },
+                },
+                source_path: None,
+            })
+            .expect("compile Metal artifact");
+        let binding = router
+            .kernel_registry()
+            .register_artifact(artifact)
+            .expect("register Metal artifact");
+        let result = router.dispatch_metal_kernel(&binding.dispatch_spec());
+        #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
+        assert!(result.is_ok(), "native Metal dispatch failed: {result:?}");
+        #[cfg(not(all(target_os = "macos", feature = "metal-dispatch")))]
+        assert!(result.unwrap_err().contains("Metal dispatch requires"));
+    }
+}
