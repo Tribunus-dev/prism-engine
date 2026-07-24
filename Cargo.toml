@@ -116,6 +116,7 @@ prism-ecs-duckdb = { path = "crates/prism-ecs-duckdb" }
 prism-ecs-compile = { path = "crates/prism-ecs-compile" }
 prism-ecs-constitutional = { path = "crates/prism-ecs-constitutional" }
 prism-ecs-runtime = { path = "crates/prism-ecs-runtime" }
+prism-ecs-kernel = { path = "crates/prism-ecs-kernel" }
 prism-audio = { path = "crates/prism-audio" }
 prism-video = { path = "crates/prism-video" }
 prism-kv-cache = { path = "crates/prism-kv-cache" }

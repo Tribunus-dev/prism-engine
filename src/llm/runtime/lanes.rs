@@ -14,6 +14,28 @@ use super::super::server::{
     LaneExecutionReceipt, MetalExecutionReceipt,
 };
 use crate::image::types::ArtifactDigest;
+use prism_ecs_runtime::{BackendExecutionRegistry, KernelDispatchSpec};
+use std::sync::Arc;
+
+/// ECS-owned Metal execution surface. Unlike the legacy compatibility router,
+/// this path only returns after the persistent backend registry has validated
+/// the artifact, bindings, and input buffers and the kernel backend has
+/// produced an actual output.
+pub struct EcsMetalLane {
+    registry: Arc<BackendExecutionRegistry>,
+}
+
+impl EcsMetalLane {
+    pub fn new(registry: Arc<BackendExecutionRegistry>) -> Self {
+        Self { registry }
+    }
+
+    pub fn dispatch(&self, spec: &KernelDispatchSpec) -> Result<prism_ecs_kernel::KernelOutput, String> {
+        self.registry
+            .dispatch("metal", spec)
+            .map_err(|error| error.to_string())
+    }
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -202,4 +224,3 @@ impl Default for LaneRouter {
         Self::new()
     }
 }
-
