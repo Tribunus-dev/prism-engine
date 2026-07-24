@@ -1,16 +1,3 @@
-@import url("site.css");
-@import url("architecture.css");
-@import url("architecture-explainers.css");
-@import url("demo.css");
-@import url("field-guide.css");
-@import url("general-compute.css");
-@import url("heterogeneous.css");
-@import url("home.css");
-@import url("prism-ml.css");
-@import url("roadmap.css");
-@import url("site-system.css");
-@import url("mythology.css");
-@import url("capabilities.css");
 @layer pages {
   .reading-column{max-width:760px}
   .wide-stage{max-width:1180px}
