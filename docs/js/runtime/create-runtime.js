@@ -6,8 +6,8 @@ import { createRouteProjection } from './route-projection.js';
 import { createPrismError, ERROR_CODES } from './errors.js';
 
 /* Composition boundary for the Observatory. Side-effect systems remain
- * compatibility-loaded for now, but application orchestration is centralized
- * here and receives its collaborators explicitly. */
+ * application orchestration is centralized here and receives its collaborators
+ * explicitly so systems follow one explicit canonical path. */
 export const createRuntime = ({ kernel, domRuntime, registries, adapters, continuity, repository = createRepositoryService(), projection = createRouteProjection({ routeForLocation: projectionForLocation, primaryRoute: primaryProjection }) }) => {
   const runtime = {
     kernel,
