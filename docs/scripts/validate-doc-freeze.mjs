@@ -30,6 +30,14 @@ const docs = [
       'Do not add new interaction runtime layers',
     ],
   },
+  {
+    path: 'docs/prism-semantics.md',
+    mustContain: [
+      'Status: frozen for this sprint',
+      'This document is the canonical source for semantic',
+      'Do not split semantics into separate runtime layers',
+    ],
+  },
 ];
 
 const issues = [];

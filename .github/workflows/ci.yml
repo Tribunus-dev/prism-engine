@@ -88,6 +88,18 @@ jobs:
         run: node docs/scripts/validate-doc-freeze.mjs
       - name: Validate explicit runtime construction
         run: node docs/scripts/validate-runtime-construction.mjs
+      - name: Validate repository subject and canonicalization state
+        run: node docs/scripts/validate-repository-subjects.mjs
+      - name: Validate deployment CNAME configuration
+        run: |
+          if [ ! -f docs/CNAME ]; then
+            echo "CNAME file is missing from docs/"
+            exit 1
+          fi
+          if [ "$(cat docs/CNAME | tr -d '[:space:]')" != "prism-engine.tribunus.dev" ]; then
+            echo "CNAME does not match prism-engine.tribunus.dev"
+            exit 1
+          fi
       - name: Clippy (lib only, skip broken bins/tests)
         run: cargo clippy -p tribunus-compute-core --features backend-cpu --lib -- -D warnings
       - name: Report sccache statistics

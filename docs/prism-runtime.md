@@ -4,7 +4,7 @@ Status: frozen for this sprint (2026-07-24)
 
 The Prism Runtime is one executable coordinator with systems for observation, knowledge, receipts, optics, interaction, rendering, accessibility, and visitor continuity. The systems are plugins; the runtime owns their ordering and shared subject state.
 
-This document is the canonical reference for runtime layering and execution orchestration in the web experience.
+This document is the canonical reference for runtime layering and execution orchestration in the web experience. Semantic transition behavior is defined in [`prism-semantics.md`](prism-semantics.md).
 
 Canonical mappings
 

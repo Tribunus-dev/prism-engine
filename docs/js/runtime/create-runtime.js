@@ -36,6 +36,20 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
           cause: cause?.message || String(cause || ''),
         });
       });
+      if (kernel?.syncFromRepository) {
+        kernel.syncFromRepository({
+          ...repositorySnapshot,
+          claims: repositorySnapshot?.claims,
+          capabilities: repositorySnapshot?.capabilities,
+          state: repositorySnapshot?.state,
+          subjectId: repositorySnapshot?.state?.subjectId,
+        });
+      } else if (kernel?.setSubjectId && (repositorySnapshot?.state?.subjectId || Array.isArray(repositorySnapshot?.claims))) {
+        const fallbackSubjectId = repositorySnapshot?.state?.subjectId || repositorySnapshot?.claims?.find((claim) => claim?.subjectId)?.subjectId;
+        if (fallbackSubjectId) {
+          kernel.setSubjectId(fallbackSubjectId);
+        }
+      }
       domRuntime?.mark('repository-loaded', { synchronized: Boolean(repositorySnapshot) });
       const invalid = validateTransformations(TRANSFORMATIONS).concat(
         Object.values(PROJECTIONS).flatMap(page => page.claims.map(claim => validateClaim(claim)))

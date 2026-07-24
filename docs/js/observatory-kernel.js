@@ -1,7 +1,7 @@
 import { OBSERVER_MODES, OPTICAL_STATES, BELIEF_STATES, OBJECT_KINDS } from './core/vocabulary.js';
 
 export const createKernel = ({ continuity } = {}) => {
-  const subjectId = 'computational-subject:prism-model';
+  let subjectId = 'computational-subject:prism-model';
   const createComputeImageSubject = () => ({
     id: subjectId,
     kind: 'ComputeImage',
@@ -45,6 +45,36 @@ export const createKernel = ({ continuity } = {}) => {
       emit('observer-mode', mode);
       this.remember({ observerMode: mode });
       return true;
+    },
+    setSubjectId(nextId) {
+      if (typeof nextId !== 'string' || !nextId.trim()) return false;
+      if (subjectId === nextId) return true;
+      subjectId = nextId;
+      subject.id = nextId;
+      subject.objects = Object.fromEntries(OBJECT_KINDS.map(kind => [kind, { kind, subject: subjectId, knowledge: 'observed', belief: 'observed', existence: 'active', history: [], relationships: [] }]));
+      if (subject.computeImage) {
+        subject.computeImage.id = nextId;
+      }
+      this.record({ type: 'subject-id-updated', visible: 'repository subject synchronized', transformed: `subject id set to ${nextId}`, hidden: 'transient startup metadata' });
+      this.remember({ subjectId: nextId });
+      return true;
+    },
+    syncFromRepository(snapshot = {}) {
+      const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
+      const nextCapabilities = Array.isArray(snapshot?.capabilities) ? snapshot.capabilities : [];
+      const nextSubjectId = (
+        typeof snapshot?.subjectId === 'string' && snapshot.subjectId.trim()
+          ? snapshot.subjectId.trim()
+          : (nextClaims.find(claim => typeof claim?.subjectId === 'string' && claim.subjectId.trim())?.subjectId || null)
+      ) || subjectId;
+      const nextRepositoryState = snapshot.state
+        ? snapshot.state
+        : { ...snapshot, schema: snapshot.schema || 'repository-state/v1', crates: snapshot.crates || [], docs: snapshot.docs || [] };
+      this.setSubjectId(nextSubjectId);
+      state.repositoryState = nextRepositoryState;
+      state.claims = nextClaims;
+      subject.capabilities = nextCapabilities;
+      return { subjectId: nextSubjectId, repositoryState: nextRepositoryState, claims: nextClaims, capabilities: nextCapabilities };
     },
     setOpticalState(next) {
       if (!OPTICAL_STATES.includes(next)) return false;
