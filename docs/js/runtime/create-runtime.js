@@ -14,8 +14,10 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
     const evidenceBoundary = (snapshot?.state?.evidenceBoundary
       || snapshot?.evidenceBoundary
       || 'repository evidence pending');
+    const fromClaims = nextClaims.find(claim => typeof claim?.subjectId === 'string' && claim.subjectId.trim())?.subjectId;
+
     return {
-      id: snapshot?.subjectId || 'computational-subject:prism-model',
+      id: snapshot?.subjectId || fromClaims || 'computational-subject:prism-model',
       kind: 'ComputeImage',
       name: 'ComputeImage Runtime Subject',
       intent: 'one-subject-canonical-journey',
