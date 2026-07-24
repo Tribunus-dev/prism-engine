@@ -165,7 +165,7 @@ export const createObservationGraphSystem = () => {
       || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];
-    const canonicalSubject = context?.runtime?.getCanonicalSubject?.() || context?.runtime?.stateSubject;
+    const canonicalSubject = context?.runtime?.getCanonicalSubject?.();
     const objectId = canonicalSubject?.id || '';
 
     if (!scene) return { stop() {} };

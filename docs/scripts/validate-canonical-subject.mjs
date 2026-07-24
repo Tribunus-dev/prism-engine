@@ -132,6 +132,9 @@ for (const file of filePaths) {
   if (hasSubjectFallback && file !== 'js/observatory-kernel.js') {
     checks.push(`${file} contains legacy kernel subject fallback; use runtime.getCanonicalSubject/stateSubject instead`);
   }
+  if (/(runtime\?\.stateSubject|stateSubject\s*\|\|)/g.test(lower) && file !== 'js/runtime/create-runtime.js') {
+    checks.push(`${file} contains stateSubject fallback; consume runtime.getCanonicalSubject directly`);
+  }
   if (hasLegacyRoute && file !== 'js/runtime/create-runtime.js') {
     checks.push(`${file} contains legacy runtime.currentRoute access`);
   }

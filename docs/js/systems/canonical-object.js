@@ -4,7 +4,7 @@ export const createCanonicalObjectSystem = () => {
     const domRuntime = context.domRuntime;
     const kernel = context.kernel;
     const owner = 'canonical-object';
-    const getSubject = () => context?.runtime?.getCanonicalSubject?.() || context?.runtime?.stateSubject;
+    const getSubject = () => context?.runtime?.getCanonicalSubject?.() || null;
     const specimen = document.querySelector('[data-computeimage-life] .computeimage-specimen, [data-computeimage-renderer]');
     if (!specimen) return { stop() {} };
     const computation = getSubject();

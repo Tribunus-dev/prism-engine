@@ -4,7 +4,7 @@ export const createStateProjectionSystem = () => {
     const kernel = context?.kernel;
     if (!kernel) return;
     const project = () => {
-      const canonicalSubject = context?.runtime?.getCanonicalSubject?.() || context?.runtime?.stateSubject;
+      const canonicalSubject = context?.runtime?.getCanonicalSubject?.();
       if (!canonicalSubject) return;
       document.body.dataset.computationalSubject = canonicalSubject.id;
       document.body.dataset.observerMode = kernel.state.observerMode;
