@@ -315,6 +315,7 @@ pub enum CalibrationPolicy {
     FromFile(String),
     Auto,
 }
+
 impl Default for CalibrationPolicy {
     fn default() -> Self {
         Self::Auto
@@ -326,6 +327,7 @@ pub enum ValidationPolicy {
     Structural,
     Production,
 }
+
 impl Default for ValidationPolicy {
     fn default() -> Self {
         Self::Structural
@@ -421,12 +423,67 @@ pub struct SearchTrace {
     pub best_score: Option<f64>,
     pub pareto_frontier_size: usize,
     pub elapsed_ms: u64,
+    #[serde(default)]
+    pub config: Option<SearchConfig>,
+    #[serde(default)]
+    pub generations: Vec<GenerationRecord>,
+    #[serde(default)]
+    pub pareto_frontier: Vec<CandidateRecord>,
+    #[serde(default)]
+    pub quality_diversity_archive: Vec<CandidateRecord>,
+    #[serde(default)]
+    pub best_genome: Option<String>,
+    #[serde(default)]
+    pub trace_digest: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CandidateMeasurements {
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, f64>,
+    #[serde(default)]
+    pub evidence: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CandidateStatus {
+    Proposed,
+    Evaluated,
+    Rejected,
+    Promoted,
+}
+
+impl Default for CandidateStatus {
+    fn default() -> Self {
+        Self::Proposed
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CandidateRecord {
+    pub candidate_id: String,
+    pub genome: String,
+    pub score: Option<f64>,
+    #[serde(default)]
+    pub status: CandidateStatus,
+    #[serde(default)]
+    pub measurements: CandidateMeasurements,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GenerationRecord {
+    pub generation: u32,
+    #[serde(default)]
+    pub candidates: Vec<CandidateRecord>,
+    pub best_score: Option<f64>,
 }
 
 #[derive(Debug, Error)]
 pub enum CompileError {
     #[error("source detection failed: {0}")]
     SourceDetectionFailed(String),
+    #[error("source ingestion failed: {0}")]
+    SourceIngestionFailed(String),
     #[error("graph build failed: {0}")]
     GraphBuildFailed(String),
     #[error("search failed: {0}")]
@@ -437,12 +494,18 @@ pub enum CompileError {
     KernelGenerationFailed(String),
     #[error("CImage emission failed: {0}")]
     CImageEmissionFailed(String),
+    #[error("CImage emission failed: {0}")]
+    CImageEmitFailed(String),
     #[error("receipt construction failed: {0}")]
     ReceiptBuildFailed(String),
     #[error("certification failed: {0}")]
     CertificationFailed(String),
     #[error("invalid configuration: {0}")]
     InvalidConfiguration(String),
+    #[error("compilation failed: {0}")]
+    CompilationFailed(String),
+    #[error("policy violation: {0}")]
+    PolicyViolation(String),
 }
 
 pub trait CompilationEventSink: Send + Sync {
@@ -476,6 +539,8 @@ pub struct CompileReceipt {
     pub output_path: Option<String>,
     pub output_digest: Option<String>,
     pub status: CompileStatus,
+    #[serde(default)]
+    pub metadata: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
