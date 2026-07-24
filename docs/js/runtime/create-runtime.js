@@ -9,6 +9,40 @@ import { createPrismError, ERROR_CODES } from './errors.js';
  * application orchestration is centralized here and receives its collaborators
  * explicitly so systems follow one explicit canonical path. */
 export const createRuntime = ({ kernel, domRuntime, registries, adapters, continuity, repository = createRepositoryService(), projection = createRouteProjection({ routeForLocation: projectionForLocation, primaryRoute: primaryProjection }) }) => {
+  const buildCanonicalSubject = snapshot => {
+    const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
+    const evidenceBoundary = (snapshot?.state?.evidenceBoundary
+      || snapshot?.evidenceBoundary
+      || 'repository evidence pending');
+    return {
+      id: snapshot?.subjectId || 'computational-subject:prism-model',
+      kind: 'ComputeImage',
+      name: 'ComputeImage Runtime Subject',
+      intent: 'one-subject-canonical-journey',
+      representations: snapshot?.representations || [],
+      plans: snapshot?.plans || [],
+      execution: snapshot?.execution || [],
+      receipts: snapshot?.receipts || [],
+      lifecycle: snapshot?.lifecycle || [{ phase: 'computeimage-seeded', timestamp: Date.now(), state: 'present' }],
+      questions: snapshot?.questions || [],
+      sourceRefs: Array.isArray(snapshot?.sourceRefs)
+        ? snapshot.sourceRefs
+        : nextClaims.flatMap(claim => claim.sourceRefs || []),
+      evidenceBoundary,
+      provenance: {
+        source: snapshot?.provenance?.source || 'repository-state',
+        boundary: snapshot?.provenance?.boundary || evidenceBoundary,
+      },
+      evidenceLevel: snapshot?.state?.evidenceLevel || snapshot?.evidenceLevel,
+      knowledge: snapshot?.knowledge || 'observed',
+      belief: snapshot?.belief || 'observed',
+      existence: snapshot?.existence || 'active',
+      objects: snapshot?.objects || {},
+      capabilities: snapshot?.capabilities || [],
+      claims: nextClaims,
+    };
+  };
+
   const runtime = {
     kernel,
     domRuntime,
@@ -18,23 +52,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
     projection,
     currentProjection: null,
     currentRoute: null,
-    subjectFromRepository: (snapshot = kernel?.state?.repositoryState) => {
-      if (!kernel?.ensureComputeImageSubject) return null;
-      const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
-      const evidenceBoundary = (snapshot?.state?.evidenceBoundary
-        || snapshot?.evidenceBoundary
-        || 'repository evidence pending');
-      return kernel.ensureComputeImageSubject({
-        claims: nextClaims,
-        sourceRefs: nextClaims.flatMap(claim => claim.sourceRefs || []),
-        evidenceBoundary,
-        provenance: {
-          source: 'repository-state',
-          boundary: evidenceBoundary,
-        },
-        evidenceLevel: snapshot?.state?.evidenceLevel || snapshot?.evidenceLevel,
-      });
-    },
+    subjectFromRepository: snapshot => buildCanonicalSubject(snapshot || kernel?.state?.repositoryState || {}),
     getCanonicalSubject: () => runtime.subjectFromRepository({
       ...(kernel?.state?.repositoryState || {}),
       claims: kernel?.state?.claims || [],
@@ -76,7 +94,8 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
         subjectId: repositorySnapshot?.state?.subjectId,
       });
       runtime.stateSubject = runtime.getCanonicalSubject();
-      domRuntime?.mark('build-subject', { subject: runtime.stateSubject?.id || kernel?.subject?.id });
+      kernel?.setSubject?.(runtime.stateSubject);
+      domRuntime?.mark('build-subject', { subject: runtime.stateSubject?.id });
       domRuntime?.mark('repository-loaded', { synchronized: Boolean(repositorySnapshot) });
       const invalid = validateTransformations(TRANSFORMATIONS).concat(
         Object.values(PROJECTIONS).flatMap(page => page.claims.map(claim => validateClaim(claim)))
@@ -99,6 +118,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
       kernel.state.repositoryState = snapshot.state;
       kernel.state.claims = snapshot.claims;
       runtime.stateSubject = runtime.subjectFromRepository(snapshot);
+      kernel?.setSubject?.(runtime.stateSubject);
       runtime.client?.setRepository?.(snapshot);
     } else if (type === 'capability-updated') {
       kernel.state.repositoryState = { ...(kernel.state.repositoryState || {}), capabilities: snapshot.capabilities };
@@ -106,6 +126,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
         ...snapshot,
         claims: kernel.state.claims || snapshot.claims,
       });
+      kernel?.setSubject?.(runtime.stateSubject);
       runtime.client?.setRepository?.({ state: kernel.state.repositoryState, claims: kernel.state.claims, capabilities: snapshot.capabilities });
     } else if (type === 'claim-updated') {
       kernel.state.claims = snapshot.claims;
@@ -113,6 +134,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
         ...snapshot,
         state: kernel.state.repositoryState,
       });
+      kernel?.setSubject?.(runtime.stateSubject);
       runtime.client?.setRepository?.({ state: kernel.state.repositoryState, claims: snapshot.claims, capabilities: runtime.client.capabilities });
     } else if (type === 'evidence-updated') {
       kernel.state.repositoryState = snapshot.state;
@@ -120,6 +142,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
         ...snapshot,
         claims: kernel.state.claims || snapshot.claims,
       });
+      kernel?.setSubject?.(runtime.stateSubject);
       runtime.client?.setRepository?.({ state: snapshot.state, claims: kernel.state.claims, capabilities: runtime.client.capabilities });
     }
     kernel.emit(type, snapshot);

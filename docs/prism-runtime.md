@@ -9,7 +9,7 @@ This document is the canonical reference for runtime layering and execution orch
 Canonical mappings
 
 - Subject lifecycle and canonical observational identity are defined in [`observatory-kernel.js`](js/observatory-kernel.js) and surfaced via [`runtime/create-runtime.js`](js/runtime/create-runtime.js).
-- Canonical compute-image subject shape is managed by `ensureComputeImageSubject` and `updateComputeImageSubject` in `observatory-kernel.js`.
+- Canonical compute-image subject shape is assembled by repository projection in `runtime/create-runtime.js` and synchronized into `observatory-kernel.js` via `setSubject`.
 - Canonical observation flow and scene transitions are validated in [`runtime/repository-state.json`](repository-state.json) and enforced by [`core/observation-graph.js`](js/core/observation-graph.js).
 
 Do not split runtime layers into new architecture names while the canonical flow is frozen. Consolidation should remain focused on implementation reduction and projection consistency.
