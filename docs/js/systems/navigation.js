@@ -11,13 +11,16 @@ export const chapterMap = [
   ['Work With Prism', 'work-with-prism.html', 'research'],
 ];
 
-export const currentChapter = (context = {}) => {
-  const file = context?.runtime?.getProjection?.()?.route
+const normalizeChapterRoute = (context = {}) => {
+  const route = context?.runtime?.getProjection?.()?.route
     || context?.runtime?.currentRoute
-    || context?.currentFile
-    || context?.location
-    || location.pathname.split('/').pop()
-    || 'index.html';
+    || context?.route;
+  if (!route) return 'index.html';
+  return String(route).split('#')[0];
+};
+
+export const currentChapter = (context = {}) => {
+  const file = normalizeChapterRoute(context);
   return Math.max(0, chapterMap.findIndex(chapter => chapter[1].split('#')[0] === file));
 };
 

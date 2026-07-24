@@ -466,7 +466,7 @@ const initAtlasScroll = (kernel) => {
   addEventListener("resize", request);
   request();
 };
-const initDiscoveryRooms = (domRuntime) => {
+const initDiscoveryRooms = (domRuntime, context = {}) => {
   const owner = 'site-shell';
   if (document.querySelector(".discovery-room")) return;
   const questions = [
@@ -479,7 +479,7 @@ const initDiscoveryRooms = (domRuntime) => {
     "What can be proven, and what remains ahead?",
     "How does the field become a fabric?",
   ];
-  const current = currentChapter(),
+  const current = currentChapter(context),
     header = document.querySelector(".component-header");
   if (!header || !questions[current]) return;
   const room = document.createElement("div");
@@ -570,7 +570,7 @@ const initSurfaceConstellation = () => {
   });
   set("cimage");
 };
-const initStoryHooks = () => {
+const initStoryHooks = (context = {}) => {
   const hooks = [
     "The field is where intent becomes visible.",
     "The graph is where structure becomes law.",
@@ -581,7 +581,7 @@ const initStoryHooks = () => {
     "The future must earn its proof.",
     "The field becomes a fabric.",
   ];
-  const current = currentChapter(),
+  const current = currentChapter(context),
     next = document.querySelector(".chapter-nav a:last-child");
   if (next && hooks[current] && current < chapterMap.length - 1) {
     next.querySelector("small").textContent = hooks[current];
@@ -594,8 +594,8 @@ export const createSiteShellSystem = () => {
   const start = (context) => {
     const domRuntime = context?.domRuntime;
     const kernel = context?.kernel;
-    initDiscoveryRooms(domRuntime);
-    initStoryHooks();
+    initDiscoveryRooms(domRuntime, context);
+    initStoryHooks(context);
     initMythology(domRuntime);
     initActCorrection();
     initSignatureMoment(domRuntime);

@@ -147,8 +147,7 @@ export const createObservationGraphSystem = () => {
     };
     const page = context?.runtime?.getProjection?.()?.route
       || context?.runtime?.currentRoute
-      || context?.currentPage
-      || location.pathname.split('/').pop()
+      || context?.route
       || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];

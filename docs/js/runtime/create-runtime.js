@@ -55,7 +55,7 @@ export const createRuntime = ({ kernel, domRuntime, registries, adapters, contin
       }
       domRuntime?.mark('observation-graph-loaded');
       domRuntime?.mark('build-subject', { subject: kernel?.subject?.id });
-      const route = projection.project();
+      const route = projection.project(window?.location?.pathname);
       runtime.currentProjection = route;
       runtime.currentRoute = route?.route || null;
       if (!route?.observation) {
