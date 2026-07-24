@@ -20,6 +20,10 @@ if (!runtimeSource.includes('getCanonicalSubject:')) {
   checks.push('create-runtime.js is missing getCanonicalSubject');
 }
 
+if (!runtimeSource.includes('applyRepositorySnapshot(')) {
+  checks.push('create-runtime.js is missing shared repository snapshot normalizer');
+}
+
 if (!runtimeSource.includes('subjectFromRepository')) {
   checks.push('create-runtime.js is missing subjectFromRepository');
 }

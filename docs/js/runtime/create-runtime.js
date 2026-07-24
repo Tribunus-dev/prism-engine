@@ -72,6 +72,21 @@ export const createRuntime = ({
       claims: kernel?.state?.claims || [],
       capabilities: kernel?.state?.capabilities || [],
     }),
+    applyRepositorySnapshot(snapshot = {}, mode = 'event') {
+      const mergedState = mode === 'replace'
+        ? snapshot?.state || snapshot || {}
+        : {
+          ...(kernel?.state?.repositoryState || {}),
+          ...(snapshot?.state || snapshot || {}),
+        };
+      return runtime.refreshCanonicalProjection({
+        state: mergedState,
+        claims: Array.isArray(snapshot?.claims) ? snapshot.claims : kernel?.state?.claims || [],
+        capabilities: Array.isArray(snapshot?.capabilities)
+          ? snapshot.capabilities
+          : kernel?.state?.capabilities || [],
+      });
+    },
     refreshCanonicalProjection(snapshot = {}) {
       const nextState = snapshot?.state && typeof snapshot.state === 'object' ? snapshot.state : {};
       const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
@@ -152,28 +167,13 @@ export const createRuntime = ({
   };
   repository.subscribe(({ type, snapshot }) => {
     if (type === 'repository-ready') {
-      runtime.refreshCanonicalProjection(snapshot);
+      runtime.applyRepositorySnapshot(snapshot, 'replace');
     } else if (type === 'capability-updated') {
-      runtime.refreshCanonicalProjection({
-        ...snapshot,
-        state: kernel.state.repositoryState,
-        claims: kernel.state.claims,
-        capabilities: snapshot.capabilities,
-      });
+      runtime.applyRepositorySnapshot(snapshot);
     } else if (type === 'claim-updated') {
-      runtime.refreshCanonicalProjection({
-        ...snapshot,
-        state: kernel.state.repositoryState,
-        claims: snapshot.claims,
-        capabilities: kernel.state.capabilities,
-      });
+      runtime.applyRepositorySnapshot(snapshot);
     } else if (type === 'evidence-updated') {
-      runtime.refreshCanonicalProjection({
-        ...snapshot,
-        state: snapshot.state,
-        claims: kernel.state.claims,
-        capabilities: kernel.state.capabilities,
-      });
+      runtime.applyRepositorySnapshot(snapshot);
     }
     kernel.emit(type, snapshot);
   });
