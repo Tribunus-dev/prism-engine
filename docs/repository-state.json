@@ -124,5 +124,78 @@
       ],
       "status": "repository-evidence"
     }
+  ],
+  "claims": [
+    {
+      "id": "claim:ecs-native-compiler",
+      "class": "repository",
+      "subjectId": "computational-subject:prism-model",
+      "capabilityId": "ecs-native-compiler",
+      "status": "repository-evidence",
+      "sourceRefs": [
+        "crates/prism-ecs-compile",
+        "crates/prism-ecs-core",
+        "crates/prism-ecs-ir"
+      ],
+      "constraints": "file presence and repository documents; not hardware execution measurement"
+    },
+    {
+      "id": "claim:computeimage",
+      "class": "repository",
+      "subjectId": "computational-subject:prism-model",
+      "capabilityId": "computeimage",
+      "status": "repository-evidence",
+      "sourceRefs": [
+        "docs/cimage-layout-abi-v1.md",
+        "crates/prism-ecs-artifact"
+      ],
+      "constraints": "file presence and repository documents; not hardware execution measurement"
+    },
+    {
+      "id": "claim:metal",
+      "class": "repository",
+      "subjectId": "computational-subject:prism-model",
+      "capabilityId": "metal",
+      "status": "repository-evidence",
+      "sourceRefs": [
+        "crates/prism-metal-runtime",
+        "docs/demo.html"
+      ],
+      "constraints": "file presence and repository documents; not hardware execution measurement"
+    },
+    {
+      "id": "claim:rocm",
+      "class": "repository",
+      "subjectId": "computational-subject:prism-model",
+      "capabilityId": "rocm",
+      "status": "repository-evidence",
+      "sourceRefs": [
+        "docs/adr-031-aiter-atom-rocm-provider.md",
+        "crates/prism-amd-npu-runtime"
+      ],
+      "constraints": "file presence and repository documents; not hardware execution measurement"
+    },
+    {
+      "id": "claim:xdna",
+      "class": "repository",
+      "subjectId": "computational-subject:prism-model",
+      "capabilityId": "xdna",
+      "status": "repository-evidence",
+      "sourceRefs": [
+        "crates/prism-intel-npu-runtime",
+        "docs/heterogeneous.html"
+      ],
+      "constraints": "file presence and repository documents; not hardware execution measurement"
+    },
+    {
+      "id": "claim:canonical-journey",
+      "class": "architectural",
+      "subjectId": "computational-subject:prism-model",
+      "status": "architectural-derivation",
+      "sourceRefs": [
+        "docs/prism-semantics.md"
+      ],
+      "constraints": "canonical journey is an explanatory model"
+    }
   ]
 }

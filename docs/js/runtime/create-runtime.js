@@ -72,6 +72,26 @@ export const createRuntime = ({
       claims: kernel?.state?.claims || [],
       capabilities: kernel?.state?.capabilities || [],
     }),
+    refreshCanonicalProjection(snapshot = {}) {
+      const nextState = snapshot?.state && typeof snapshot.state === 'object' ? snapshot.state : {};
+      const nextClaims = Array.isArray(snapshot?.claims) ? snapshot.claims : [];
+      const nextCapabilities = Array.isArray(snapshot?.capabilities) ? snapshot.capabilities : [];
+      kernel.state.repositoryState = nextState;
+      kernel.state.claims = nextClaims;
+      kernel.state.capabilities = nextCapabilities;
+      runtime.stateSubject = runtime.subjectFromRepository({
+        ...nextState,
+        claims: nextClaims,
+        capabilities: nextCapabilities,
+      });
+      kernel?.setSubject?.(runtime.stateSubject);
+      runtime.client?.setRepository?.({
+        state: nextState,
+        claims: nextClaims,
+        capabilities: nextCapabilities,
+      });
+      return runtime.stateSubject;
+    },
     getCurrentRoute: () => runtime.currentRoute,
     getProjection: () => runtime.currentProjection,
     async start() {
@@ -107,8 +127,11 @@ export const createRuntime = ({
         state: repositorySnapshot?.state,
         subjectId: repositorySnapshot?.state?.subjectId,
       });
-      runtime.stateSubject = runtime.getCanonicalSubject();
-      kernel?.setSubject?.(runtime.stateSubject);
+      runtime.refreshCanonicalProjection({
+        state: repositorySnapshot?.state,
+        claims: repositorySnapshot?.claims,
+        capabilities: repositorySnapshot?.capabilities,
+      });
       domRuntime?.mark('build-subject', { subject: runtime.stateSubject?.id });
       domRuntime?.mark('repository-loaded', { synchronized: Boolean(repositorySnapshot) });
       const invalid = validateTransformations(TRANSFORMATIONS).concat(
@@ -129,35 +152,28 @@ export const createRuntime = ({
   };
   repository.subscribe(({ type, snapshot }) => {
     if (type === 'repository-ready') {
-      kernel.state.repositoryState = snapshot.state;
-      kernel.state.claims = snapshot.claims;
-      runtime.stateSubject = runtime.subjectFromRepository(snapshot);
-      kernel?.setSubject?.(runtime.stateSubject);
-      runtime.client?.setRepository?.(snapshot);
+      runtime.refreshCanonicalProjection(snapshot);
     } else if (type === 'capability-updated') {
-      kernel.state.repositoryState = { ...(kernel.state.repositoryState || {}), capabilities: snapshot.capabilities };
-      runtime.stateSubject = runtime.subjectFromRepository({
-        ...snapshot,
-        claims: kernel.state.claims || snapshot.claims,
-      });
-      kernel?.setSubject?.(runtime.stateSubject);
-      runtime.client?.setRepository?.({ state: kernel.state.repositoryState, claims: kernel.state.claims, capabilities: snapshot.capabilities });
-    } else if (type === 'claim-updated') {
-      kernel.state.claims = snapshot.claims;
-      runtime.stateSubject = runtime.subjectFromRepository({
+      runtime.refreshCanonicalProjection({
         ...snapshot,
         state: kernel.state.repositoryState,
+        claims: kernel.state.claims,
+        capabilities: snapshot.capabilities,
       });
-      kernel?.setSubject?.(runtime.stateSubject);
-      runtime.client?.setRepository?.({ state: kernel.state.repositoryState, claims: snapshot.claims, capabilities: runtime.client.capabilities });
-    } else if (type === 'evidence-updated') {
-      kernel.state.repositoryState = snapshot.state;
-      runtime.stateSubject = runtime.subjectFromRepository({
+    } else if (type === 'claim-updated') {
+      runtime.refreshCanonicalProjection({
         ...snapshot,
-        claims: kernel.state.claims || snapshot.claims,
+        state: kernel.state.repositoryState,
+        claims: snapshot.claims,
+        capabilities: kernel.state.capabilities,
       });
-      kernel?.setSubject?.(runtime.stateSubject);
-      runtime.client?.setRepository?.({ state: snapshot.state, claims: kernel.state.claims, capabilities: runtime.client.capabilities });
+    } else if (type === 'evidence-updated') {
+      runtime.refreshCanonicalProjection({
+        ...snapshot,
+        state: snapshot.state,
+        claims: kernel.state.claims,
+        capabilities: kernel.state.capabilities,
+      });
     }
     kernel.emit(type, snapshot);
   });

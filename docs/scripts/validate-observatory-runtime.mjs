@@ -14,16 +14,20 @@ const observationGraph = await import(pathToFileURL(resolve(docsRoot, 'js/core/o
 
 const claimClassValues = new Set(Object.values(ontology.CLAIM_CLASSES || {}));
 const repositoryState = JSON.parse(await readFile(resolve(docsRoot, 'repository-state.json'), 'utf8'));
-const claimsGenerated = JSON.parse(await readFile(resolve(docsRoot, 'claims.generated.json'), 'utf8'));
+const capabilities = Array.isArray(repositoryState?.capabilities) ? repositoryState.capabilities : [];
+const claims = Array.isArray(repositoryState?.claims) ? repositoryState.claims : [];
 
-const claims = Array.isArray(repositoryState?.claims)
-  ? repositoryState.claims
-  : Array.isArray(claimsGenerated?.claims)
-    ? claimsGenerated.claims
-    : [];
+if (!Array.isArray(repositoryState?.capabilities) || repositoryState.capabilities.length === 0) {
+  report.push('repository-state.json capabilities is empty or missing; canonical capability truth is missing.');
+}
+if (!Array.isArray(repositoryState?.claims) || repositoryState.claims.length === 0) {
+  report.push('repository-state.json claims is empty or missing; canonical claim truth is missing.');
+}
 
-if (!Array.isArray(claims) || claims.length === 0) {
-  report.push('claims list is empty; expected repository-backed claims to be available.');
+for (const capability of capabilities) {
+  if (!capability?.id) {
+    report.push(`capability missing id: ${JSON.stringify(capability)}`);
+  }
 }
 
 for (const claim of claims) {

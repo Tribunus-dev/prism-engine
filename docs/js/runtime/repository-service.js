@@ -24,29 +24,14 @@ export const createRepositoryService = ({ fetchImpl = fetch } = {}) => {
       return service.publish('evidence-updated', { state: service.state, evidence });
     },
     async load() {
-      const [state, claims, capabilities] = await Promise.all([
-        fetchImpl('repository-state.json').then(response => response.ok ? response.json() : null),
-        fetchImpl('claims.generated.json').then(response => response.ok ? response.json() : null),
-        fetchImpl('capabilities.generated.json').then(response => response.ok ? response.json() : null),
-      ]);
-      const normalizedClaims = Array.isArray(state?.claims)
-        ? state.claims
-        : Array.isArray(claims?.claims)
-          ? claims.claims
-          : [];
-      const normalizedCapabilities = Array.isArray(state?.capabilities)
-        ? state.capabilities
-        : Array.isArray(capabilities?.capabilities)
-          ? capabilities.capabilities
-          : [];
-      const normalizedState = state || {};
-      if (!Array.isArray(normalizedState.claims) && Array.isArray(normalizedClaims)) {
-        normalizedState.claims = normalizedClaims;
-      }
-      if (!Array.isArray(normalizedState.capabilities) && Array.isArray(normalizedCapabilities)) {
-        normalizedState.capabilities = normalizedCapabilities;
-      }
-      service.state = state;
+      const state = await fetchImpl('repository-state.json')
+        .then(response => response.ok ? response.json() : null);
+      const normalizedState = state && typeof state === 'object' ? state : {};
+      const normalizedClaims = Array.isArray(normalizedState.claims) ? normalizedState.claims : [];
+      const normalizedCapabilities = Array.isArray(normalizedState.capabilities) ? normalizedState.capabilities : [];
+      normalizedState.claims = normalizedClaims;
+      normalizedState.capabilities = normalizedCapabilities;
+      service.state = normalizedState;
       service.claims = normalizedClaims;
       service.capabilities = normalizedCapabilities;
       const snapshot = Object.freeze({

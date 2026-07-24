@@ -59,12 +59,7 @@ const loadCapabilityRegistry = async () => {
       ...normalizeRepositoryCapabilities(repositoryState),
     };
   }
-  const fallback = await fetch('./data/capabilities.json', { cache: 'no-store' });
-  if (!fallback.ok) throw new Error(`Capability registry request failed: ${response.status} / ${fallback.status}`);
-  return {
-    source: 'capability-registry',
-    ...(await fallback.json()),
-  };
+  throw new Error(`Repository-state capability registry request failed: ${response.status}`);
 };
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (character) => ({
