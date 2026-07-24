@@ -8,6 +8,7 @@ const checks = [];
 const runtimeSource = await read('../js/runtime/create-runtime.js');
 const canonicalObjectSource = await read('../js/systems/canonical-object.js');
 const computeImageSource = await read('../js/renderers/computeimage.js');
+const observationGraphSource = await read('../js/core/observation-graph.js');
 
 if (!runtimeSource.includes('getCanonicalSubject:')) {
   checks.push('create-runtime.js is missing getCanonicalSubject');
@@ -31,6 +32,10 @@ if (!/modes\s*=\s*\{[^}]*representation:\s*[\'\"]representation[\'\"]/.test(cano
 
 if (!computeImageSource.includes('context?.runtime?.getCanonicalSubject')) {
   checks.push('computeimage.js is not consuming runtime.getCanonicalSubject');
+}
+
+if (!observationGraphSource.includes('context?.runtime?.getCanonicalSubject') && !observationGraphSource.includes('context?.runtime?.stateSubject')) {
+  checks.push('observation-graph.js is not consuming canonical runtime subject');
 }
 
 if (!computeImageSource.includes("'representation'") && !computeImageSource.includes('"representation"')) {

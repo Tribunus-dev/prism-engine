@@ -148,7 +148,12 @@ export const createObservationGraphSystem = () => {
     const page = location.pathname.split('/').pop() || 'index.html';
     const sceneId = pageScenes[page] || 'origin';
     const scene = scenes[sceneId];
-    const objectId = kernel?.ensureComputeImageSubject?.()?.id || kernel?.subject?.id || '';
+    const canonicalSubject = context?.runtime?.getCanonicalSubject?.()
+      || context?.runtime?.stateSubject
+      || kernel?.subject?.computeImage
+      || kernel?.subject
+      || kernel?.ensureComputeImageSubject?.();
+    const objectId = canonicalSubject?.id || '';
 
     if (!scene) return { stop() {} };
 
@@ -210,10 +215,12 @@ export const createObservationGraphSystem = () => {
     });
 
     if (kernel) {
-      kernel.subject.knowledge = scene.knowledge;
-      kernel.subject.existence = scene.existence;
-      kernel.subject.intent = scene.intent;
-      kernel.subject.questions = [scene.next, scene.question];
+      if (canonicalSubject) {
+        canonicalSubject.knowledge = scene.knowledge;
+        canonicalSubject.existence = scene.existence;
+        canonicalSubject.intent = scene.intent;
+        canonicalSubject.questions = [scene.next, scene.question];
+      }
       const belief = scene.knowledge === 'repository-evidence' ? 'verified' : scene.knowledge === 'compile-verification' ? 'verified' : scene.knowledge === 'research-direction' ? 'hypothesized' : 'observed';
       kernel.setBelief(belief, { observation: scene.effect });
       kernel.record({
