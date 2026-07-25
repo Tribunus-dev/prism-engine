@@ -86,7 +86,7 @@ impl ReceiptStore {
         };
         self.receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(*session_id, receipt.clone());
         receipt
     }
@@ -97,7 +97,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.admission = admission;
@@ -109,7 +109,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.weight_residency = residency;
@@ -121,7 +121,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.lane_receipts.push(lane);
@@ -133,7 +133,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.kv_history.push(epoch);
@@ -145,7 +145,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.materialization_events.push(event);
@@ -157,7 +157,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.memory_pressure_history.push(pressure);
@@ -169,7 +169,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.output = Some(output);
@@ -181,7 +181,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.failure = Some(failure);
@@ -197,7 +197,7 @@ impl ReceiptStore {
         if let Some(receipt) = self
             .receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get_mut(session_id)
         {
             receipt.cancellation = Some(cancellation);
@@ -215,7 +215,10 @@ impl ReceiptStore {
         session_id: &SessionId,
         terminal_state: InferenceTerminalState,
     ) -> Result<MultiIslandInferenceReceipt, String> {
-        let mut guard = self.receipts.lock().expect("receipts lock poisoned");
+        let mut guard = self
+            .receipts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let receipt = guard
             .get_mut(session_id)
             .ok_or_else(|| format!("no receipt found for session {session_id:?}"))?;
@@ -247,7 +250,7 @@ impl ReceiptStore {
     pub fn get_receipt(&self, session_id: &SessionId) -> Option<MultiIslandInferenceReceipt> {
         self.receipts
             .lock()
-            .expect("receipts lock poisoned")
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(session_id)
             .cloned()
     }

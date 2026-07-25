@@ -1,0 +1,93 @@
+{
+  "primary": [
+    {
+      "label": "Start",
+      "path": "/start/"
+    },
+    {
+      "label": "Architecture",
+      "path": "/architecture/"
+    },
+    {
+      "label": "Evidence",
+      "path": "/evidence/"
+    },
+    {
+      "label": "Status",
+      "path": "/status/"
+    },
+    {
+      "label": "GitHub",
+      "path": "https://github.com/Tribunus-dev/prism-engine",
+      "external": true
+    }
+  ],
+  "secondary": [
+    {
+      "label": "Home",
+      "path": "/",
+      "from": "global"
+    },
+    {
+      "label": "ComputeImage",
+      "path": "/computeimage/",
+      "from": "architecture"
+    },
+    {
+      "label": "Specimen",
+      "path": "/computeimage/specimen/",
+      "from": "computeimage"
+    },
+    {
+      "label": "The Life of a ComputeImage",
+      "path": "/observatory/life/",
+      "from": "architecture"
+    },
+    {
+      "label": "Run",
+      "path": "/run/",
+      "from": "evidence"
+    },
+    {
+      "label": "Roadmap",
+      "path": "/roadmap/",
+      "from": "status"
+    },
+    {
+      "label": "PrismAgent",
+      "path": "/prismagent/",
+      "from": "evidence"
+    },
+    {
+      "label": "Prism ML",
+      "path": "/prism-ml/",
+      "from": "architecture",
+      "conditional": true
+    },
+    {
+      "label": "General Compute",
+      "path": "/general-compute/",
+      "from": "architecture",
+      "conditional": true
+    },
+    {
+      "label": "Lab Notes",
+      "path": "/lab/",
+      "from": "global"
+    },
+    {
+      "label": "Colophon",
+      "path": "/colophon/",
+      "from": "global"
+    }
+  ],
+  "footer": {
+    "canonical_origin": "https://prism-engine.tribunus.dev",
+    "license": "See repository LICENSE",
+    "author": {
+      "name": "Julian Torres",
+      "role": "Architect and sole developer"
+    },
+    "repository": "https://github.com/Tribunus-dev/prism-engine"
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/release.schema.json",
+  "title": "ReleasesFile",
+  "description": "The releases data file: a wrapper around a list of release records. The list is empty in v1 (no packaged release has been published).",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "releases"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "releases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/release" }
+    }
+  },
+  "$defs": {
+    "release": {
+      "type": "object",
+      "required": [
+        "id", "version", "signature", "signature_verification_path",
+        "support_boundary_document", "qualified_targets",
+        "as_of_commit", "build_features", "recorded_at"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^release\\.[0-9]+\\.[0-9]+\\.[0-9]+([a-z0-9\\-]+)?$" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+([a-z0-9\\-]+)?$" },
+        "signature": { "type": "string" },
+        "signature_verification_path": { "type": "string" },
+        "support_boundary_document": { "type": "string" },
+        "qualified_targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["target", "capability_id", "maturity"],
+            "properties": {
+              "target": { "type": "string" },
+              "capability_id": { "type": "string", "pattern": "^capability\\..+$" },
+              "maturity": { "type": "string", "enum": ["implemented", "qualifying", "validated"] }
+            }
+          }
+        },
+        "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "build_features": { "type": "string" },
+        "recorded_at": { "type": "string", "format": "date-time" },
+        "installation_path": { "type": "string" },
+        "deprecation_policy": { "type": "string" }
+      }
+    }
+  }
+}

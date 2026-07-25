@@ -165,6 +165,7 @@ members = [
     "crates/prism-ecs-backend",
     "crates/prism-ecs-core",
     "crates/prism-ecs-constitutional",
+    "crates/prism-ecs-ffi",
     "crates/prism-ecs-quantization",
     "crates/prism-ecs-runtime",
     "crates/prism-ecs-protocol",

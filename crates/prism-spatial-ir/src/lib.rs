@@ -27,6 +27,7 @@ pub mod hardware;
 pub mod legalize;
 pub mod memory;
 pub mod mutation;
+pub mod phase_graph;
 pub mod plan;
 pub mod scheduler;
 pub mod semantic_region;
@@ -34,7 +35,6 @@ pub mod semantic_region_schedule;
 pub mod target;
 pub mod three_thread;
 pub mod tiling;
-pub mod tinygrad_core;
 pub mod topology;
 pub mod xdna;
 pub mod xdna_manifest;
@@ -79,7 +79,7 @@ pub use tiling::{
     validate_joint_tiling_geometry, validate_tiling_geometry, TilingBackend, TilingConfiguration,
     TilingValidationError,
 };
-pub use tinygrad_core::{
+pub use phase_graph::{
     BroadcastBinaryOperation, BufferAllocation, CaptureExecutor, CapturePlan, ExecutionReceipt,
     KernelGroup, KernelOp, LoweredKernel, LoweringTarget, MemoryPlan, ReplayPlan, TinyGraph,
     TinyJitCache, UOp, UOpId, UOpKind,

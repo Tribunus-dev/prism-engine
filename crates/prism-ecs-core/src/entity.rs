@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 ///   world slot is stale — `is_alive()` returns `false`, queries skip it.
 /// - Fabricated handles (created outside `World::spawn()`) are treated as
 ///   stale unless the slot exists AND generation matches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct Entity(pub u64, pub u32);
 
 impl Entity {

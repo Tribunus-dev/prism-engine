@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/search-index.schema.json",
+  "title": "SearchIndexFile",
+  "description": "The site search index. Generated at build time from the data layer; consulted by the 404 page's search field. See OBSERVATORY_V1_SPEC.md §7.4 and §14.8.",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "entries"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "description": { "type": "string" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["route", "title", "summary", "kind", "boost"],
+        "properties": {
+          "route": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "kind": { "type": "string", "enum": ["page", "adr", "evidence", "capability", "model", "release"] },
+          "boost": { "type": "number", "minimum": 0, "maximum": 100 }
+        }
+      }
+    }
+  }
+}

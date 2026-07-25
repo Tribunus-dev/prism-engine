@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/evidence.schema.json",
+  "title": "EvidenceIndexFile",
+  "description": "The evidence-index data file: a wrapper around a list of published evidence artifacts. Each artifact binds to an engine schema named in ADR-033. See OBSERVATORY_V1_SPEC.md §10 and §4.8. Sanitized publications carry the four redaction fields per §4.8.",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "artifacts"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "as_of_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "required": [
+        "id", "schema", "schema_version", "kind", "title", "producer",
+        "as_of_commit", "target", "recorded_at", "applicability", "publication"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^evidence\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$"
+        },
+        "schema": {
+          "type": "string",
+          "enum": [
+            "cimage-manifest-v1",
+            "compile-receipt-v1",
+            "qualify-record-v1",
+            "execute-receipt-v1",
+            "replay-result-v1",
+            "regression-finding-v1",
+            "provenance-chain-v1"
+          ]
+        },
+        "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "computeimage_manifest",
+            "compile_receipt",
+            "qualify_record",
+            "execute_receipt",
+            "execute_receipt_failure",
+            "replay_result",
+            "regression_finding",
+            "provenance_chain"
+          ]
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "producer": { "type": "string" },
+        "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "target": { "type": "string" },
+        "hardware": { "type": "string" },
+        "validation_scope": { "type": "string" },
+        "recorded_at": { "type": "string", "format": "date-time" },
+        "applicability": {
+          "type": "object",
+          "required": ["schema_version", "target_identity"],
+          "properties": {
+            "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+            "build_identity": { "type": "string" },
+            "schema_version": { "type": "string" },
+            "target_identity": { "type": "string" },
+            "feature_set": { "type": "string" },
+            "model_identity_id": { "type": "string" },
+            "validation_scope": { "type": "string" }
+          }
+        },
+        "publication": {
+          "type": "object",
+          "required": ["url", "public_projection_digest"],
+          "properties": {
+            "url": { "type": "string" },
+            "public_projection_digest": { "type": "string" },
+            "sanitized": { "type": "boolean" },
+            "original_artifact_digest": { "type": "string" },
+            "redaction_manifest": {
+              "type": "object",
+              "required": ["declared_synthetic_fields", "redaction_kind"],
+              "properties": {
+                "redaction_kind": { "type": "string", "enum": ["declarative", "byte_modifying"] },
+                "declared_synthetic_fields": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "removed_fields": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                }
+              }
+            },
+            "remaining_verifiable": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "digest_of_source_package",
+                  "semantic_graph_identity",
+                  "execution_target_identity",
+                  "route_identity",
+                  "evidence_chain_integrity"
+                ]
+              }
+            }
+          },
+          "if": {
+            "properties": { "sanitized": { "const": true } },
+            "required": ["sanitized"]
+          },
+          "then": {
+            "required": ["original_artifact_digest", "redaction_manifest", "remaining_verifiable"]
+          }
+        },
+        "superseded": {
+          "type": "object",
+          "properties": {
+            "superseded_at": { "type": "string", "format": "date-time" },
+            "reason": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

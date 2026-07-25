@@ -39,14 +39,22 @@ use prism_docs_runtime::resources::visitor_state::VisitorState;
 use prism_docs_runtime::systems::render_coordinator_system::RenderedPages;
 use thiserror::Error;
 
+use prism_docs_ssg::build_identity::build_identity;
 use prism_docs_ssg::css::{aggregate_css, CssError};
+use prism_docs_ssg::data_layer::{DataLayer, DataLayerError};
 use prism_docs_ssg::fixtures;
+use prism_docs_ssg::headers::render_headers;
 use prism_docs_ssg::hydration::HYDRATION_JS;
+use prism_docs_ssg::manuscript::{load_manuscript, ManuscriptError};
+use prism_docs_ssg::new_render::{render_all as render_all_new, write_pages, RenderContext, RenderError};
+use prism_docs_ssg::redirects::render_redirects;
+use prism_docs_ssg::selection_controller::SELECTION_CONTROLLER_JS;
 
 #[derive(Parser, Debug)]
 #[command(name = "prism-docs-ssg", about = "Prism docs site generator")]
 struct Cli {
     /// Path to the content directory (containing `manifest.toml`).
+    /// Used by the legacy constitutional-ECS renderers.
     #[arg(long, default_value = "docs/content")]
     content: PathBuf,
 
@@ -58,6 +66,40 @@ struct Cli {
     /// Output directory for the generated site.
     #[arg(long, default_value = "docs")]
     out: PathBuf,
+
+    /// Path to the data layer directory (containing the
+    /// twelve JSON files per OBSERVATORY_V1_SPEC.md §4.1).
+    #[arg(long, default_value = "docs/data")]
+    data: PathBuf,
+
+    /// Path to the schemas directory (containing the eight
+    /// JSON Schemas per OBSERVATORY_V1_SPEC.md §4.3).
+    #[arg(long, default_value = "schemas")]
+    schemas: PathBuf,
+
+    /// Path to the manuscript (`OBSERVATORY_V1_MANUSCRIPT.md`).
+    #[arg(long, default_value = "OBSERVATORY_V1_MANUSCRIPT.md")]
+    manuscript: PathBuf,
+
+    /// Render with the new Observatory v1 renderer (consumes
+    /// the data layer + manuscript) instead of the legacy
+    /// constitutional-ECS renderer (which consumes the
+    /// manifest.toml). Default: true. Pass --legacy to use
+    /// the old renderers.
+    #[arg(long, default_value_t = true)]
+    new_render: bool,
+
+    /// Validate the data layer against the schemas before
+    /// rendering. Validation failures abort the build with a
+    /// non-zero exit.
+    #[arg(long, default_value_t = false)]
+    validate: bool,
+
+    /// Validate the data layer and exit. No pages are
+    /// rendered. Used by the build script's --validate-only
+    /// path and by CI to fail fast on schema drift.
+    #[arg(long, default_value_t = false)]
+    validate_only: bool,
 }
 
 #[derive(Debug, Error)]
@@ -71,6 +113,15 @@ enum SsgError {
     #[error("css error: {0}")]
     Css(#[from] CssError),
 
+    #[error("data layer error: {0}")]
+    DataLayer(#[from] DataLayerError),
+
+    #[error("manuscript error: {0}")]
+    Manuscript(#[from] ManuscriptError),
+
+    #[error("render error: {0}")]
+    Render(#[from] RenderError),
+
     #[error("io error at {path}: {source}")]
     Io {
         path: PathBuf,
@@ -80,6 +131,35 @@ enum SsgError {
 }
 
 fn run(cli: Cli) -> Result<(), SsgError> {
+    // ----- Validate the data layer against the schemas. This is
+    // the gate the spec's §4.4 demands. Every data file is
+    // loaded, parsed, and validated before any rendering begins.
+    // Validation failures abort the build with a non-zero exit.
+    if cli.validate || cli.validate_only || cli.new_render {
+        eprintln!(
+            "prism-docs-ssg: validating data layer at {} against schemas at {}",
+            cli.data.display(),
+            cli.schemas.display()
+        );
+        let _layer = DataLayer::load(&cli.data, &cli.schemas)?;
+        eprintln!("prism-docs-ssg: data layer validation passed");
+    }
+    if cli.validate_only {
+        eprintln!("prism-docs-ssg: --validate-only; exiting before render");
+        return Ok(());
+    }
+
+    // ----- Render with the new Observatory v1 renderer when
+    // --new-render (the default). The new renderer consumes
+    // the data layer + the manuscript + the navigation config
+    // and emits the canonical routes the spec names. The legacy
+    // path (--legacy) is the old constitutional-ECS demo
+    // renderer; it remains in place for backwards compatibility
+    // but is not the v1 surface.
+    if cli.new_render {
+        return run_new_render(&cli);
+    }
+
     let manifest_path = cli.content.join("manifest.toml");
     eprintln!(
         "prism-docs-ssg: loading manifest from {}",
@@ -222,7 +302,180 @@ fn run(cli: Cli) -> Result<(), SsgError> {
     })?;
     eprintln!("prism-docs-ssg: wrote {}", js_path.display());
 
+    // Emit the SelectionController JS (the non-rendering URL-
+    // addressable selection reducer per §8 and §5.3).
+    let sc_path = cli.out.join("selection-controller.js");
+    std::fs::write(&sc_path, SELECTION_CONTROLLER_JS).map_err(|e| SsgError::Io {
+        path: sc_path.clone(),
+        source: e,
+    })?;
+    eprintln!("prism-docs-ssg: wrote {}", sc_path.display());
+
+    // ----- Emit deployable artifacts (Cloudflare Pages) -----
+    // _redirects — the §7.2 redirect table. Real HTTP 301s.
+    // _headers — the §15.4 security + cache policy. Real
+    // response headers served at the edge.
+    // build.json — the §12 A16 build identity, served at
+    // the site root so the post-production smoke test can
+    // verify the live build.
+    let redirects_path = cli.out.join("_redirects");
+    std::fs::write(&redirects_path, render_redirects()).map_err(|e| SsgError::Io {
+        path: redirects_path.clone(),
+        source: e,
+    })?;
+    eprintln!("prism-docs-ssg: wrote {}", redirects_path.display());
+
+    let headers_path = cli.out.join("_headers");
+    std::fs::write(&headers_path, render_headers()).map_err(|e| SsgError::Io {
+        path: headers_path.clone(),
+        source: e,
+    })?;
+    eprintln!("prism-docs-ssg: wrote {}", headers_path.display());
+
+    // Re-load the data layer (already validated) to build the
+    // build identity. Re-loading is cheap; the alternative is
+    // threading the validated layer through every prior step.
+    let layer = DataLayer::load(&cli.data, &cli.schemas)?;
+    let site = layer
+        .get("site")
+        .expect("site.json is always present in the data layer")
+        .as_site_summary()
+        .expect("site summary is parseable; validator already checked");
+    let build_id = std::env::var("PRISM_BUILD_ID")
+        .ok()
+        .or_else(|| Some(format!("ssg-{}", std::process::id())));
+    let build_kind = std::env::var("PRISM_BUILD_KIND")
+        .unwrap_or_else(|_| "release".to_string());
+    let id = build_identity(&layer, &site, build_id, &build_kind);
+    let build_json = id
+        .to_json()
+        .map_err(|e| SsgError::Io {
+            path: cli.out.join("build.json"),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+        })?;
+    let build_path = cli.out.join("build.json");
+    std::fs::write(&build_path, build_json).map_err(|e| SsgError::Io {
+        path: build_path.clone(),
+        source: e,
+    })?;
+    eprintln!("prism-docs-ssg: wrote {}", build_path.display());
+
     eprintln!("prism-docs-ssg: done");
+    Ok(())
+}
+
+/// Run the new Observatory v1 renderer. Loads the data layer,
+/// reads the manuscript, renders every canonical page, and
+/// emits the deployable artifacts (`_redirects`, `_headers`,
+/// `build.json`, the SelectionController JS, and a
+/// per-component CSS aggregation from `docs/styles/`).
+fn run_new_render(cli: &Cli) -> Result<(), SsgError> {
+    eprintln!(
+        "prism-docs-ssg [new]: loading data layer from {}",
+        cli.data.display()
+    );
+    let data = DataLayer::load(&cli.data, &cli.schemas)?;
+    let site = data
+        .get("site")
+        .expect("site.json is always present in the data layer")
+        .as_site_summary()
+        .expect("site summary is parseable; validator already checked");
+
+    eprintln!(
+        "prism-docs-ssg [new]: loading manuscript from {}",
+        cli.manuscript.display()
+    );
+    let pages = load_manuscript(&cli.manuscript)?;
+    eprintln!("prism-docs-ssg [new]: parsed {} pages", pages.len());
+
+    let build_id = std::env::var("PRISM_BUILD_ID")
+        .ok()
+        .unwrap_or_else(|| format!("ssg-{}", std::process::id()));
+    let build_kind = std::env::var("PRISM_BUILD_KIND")
+        .unwrap_or_else(|_| "release".to_string());
+
+    let ctx = RenderContext::new(&data, &site, &pages, build_id.clone());
+
+    // Create the output directory.
+    std::fs::create_dir_all(&cli.out).map_err(|e| SsgError::Io {
+        path: cli.out.clone(),
+        source: e,
+    })?;
+
+    // Render and write every page.
+    let rendered = render_all_new(&ctx)?;
+    write_pages(&cli.out, &rendered)?;
+    eprintln!(
+        "prism-docs-ssg [new]: wrote {} pages",
+        rendered.len()
+    );
+
+    // Aggregate CSS into site.css + per-component files.
+    let css_bundle = aggregate_css(&cli.styles)?;
+    let css_out_dir = cli.out.join("styles");
+    std::fs::create_dir_all(&css_out_dir).map_err(|e| SsgError::Io {
+        path: css_out_dir.clone(),
+        source: e,
+    })?;
+    for (rel, contents) in &css_bundle.files {
+        let target = css_out_dir.join(rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| SsgError::Io {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
+        }
+        std::fs::write(&target, contents).map_err(|e| SsgError::Io {
+            path: target.clone(),
+            source: e,
+        })?;
+    }
+    let site_css_path = cli.out.join("site.css");
+    std::fs::write(&site_css_path, &css_bundle.combined).map_err(|e| SsgError::Io {
+        path: site_css_path.clone(),
+        source: e,
+    })?;
+    eprintln!(
+        "prism-docs-ssg [new]: wrote {} CSS files (combined: {} bytes)",
+        css_bundle.files.len(),
+        css_bundle.combined.len()
+    );
+
+    // SelectionController JS (the non-rendering URL-addressable
+    // selection reducer per §5.3 and §8).
+    let sc_path = cli.out.join("selection-controller.js");
+    std::fs::write(&sc_path, SELECTION_CONTROLLER_JS).map_err(|e| SsgError::Io {
+        path: sc_path.clone(),
+        source: e,
+    })?;
+
+    // Deployable artifacts: _redirects, _headers, build.json.
+    let redirects_path = cli.out.join("_redirects");
+    std::fs::write(&redirects_path, render_redirects()).map_err(|e| SsgError::Io {
+        path: redirects_path.clone(),
+        source: e,
+    })?;
+    let headers_path = cli.out.join("_headers");
+    std::fs::write(&headers_path, render_headers()).map_err(|e| SsgError::Io {
+        path: headers_path.clone(),
+        source: e,
+    })?;
+
+    let id = build_identity(&data, &site, Some(build_id), &build_kind);
+    let build_json = id
+        .to_json()
+        .map_err(|e| SsgError::Io {
+            path: cli.out.join("build.json"),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+        })?;
+    let build_path = cli.out.join("build.json");
+    std::fs::write(&build_path, build_json).map_err(|e| SsgError::Io {
+        path: build_path.clone(),
+        source: e,
+    })?;
+
+    eprintln!("prism-docs-ssg [new]: wrote _redirects, _headers, build.json, selection-controller.js");
+    eprintln!("prism-docs-ssg [new]: done");
     Ok(())
 }
 

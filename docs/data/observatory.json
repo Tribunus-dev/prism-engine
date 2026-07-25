@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0.0",
+  "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+  "specimens": [
+    {
+      "specimen_id": "observatory.specimen.test_output_cimage",
+      "display_name": "Sanitized ComputeImage specimen (test fixture)",
+      "evidence_id": "evidence.computeimage.test_output_cimage.001",
+      "source_url": "/computeimage/specimen/",
+      "default_density": "technical",
+      "stage_assignments": {
+        "1_source_package_ingest": "Test fixture; no real source package.",
+        "2_graph_recovery_and_declaration": "No graph recovery; no declaration.",
+        "3_region_decomposition": "Header has 9 LLaMA-shaped tensor records.",
+        "4_representation_search": "No search trace emitted.",
+        "5_target_constraints": "No legalization report emitted.",
+        "6_admitted_compilation_plan": "No plan emitted.",
+        "7_computeimage_realization": "Yes. This is the cimage.",
+        "8_constitutional_transaction": "No transaction; no execution.",
+        "9_residency_and_placement": "Not applicable.",
+        "10_backend_execution": "Not executed.",
+        "11_output_and_receipt": "No receipt.",
+        "12_replay_comparison_promotion": "No replay; no comparison; no promotion."
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0.0",
+  "site_title": "Prism Engine",
+  "site_tagline": "Inspectable heterogeneous AI deployment.",
+  "canonical_origin": "https://prism-engine.tribunus.dev",
+  "author": {
+    "name": "Julian Torres",
+    "role": "Architect and sole developer of Prism Engine"
+  },
+  "build_identity": {
+    "commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+    "build_id": "ssg-pending-1",
+    "recorded_at": "2026-07-25T20:30:00Z"
+  },
+  "deployment_compatibility_window": {
+    "cutover_date": "2026-10-25",
+    "reason": "The §7.3 compatibility window for legacy asset paths. Until this date, expired legacy asset paths are absent from the build output and resolve through the authored 404. On this date, the Pages Function (ADR-032 D4) emits real HTTP 410 responses for the retired asset path prefixes."
+  }
+}

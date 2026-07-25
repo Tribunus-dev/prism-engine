@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/navigation.schema.json",
+  "title": "NavigationConfig",
+  "description": "The primary and secondary navigation. The primary nav is fixed at five items per OBSERVATORY_V1_SPEC.md §6.1 and §7.1: Start, Architecture, Evidence, Status, GitHub. The secondary nav holds orbit items that are reached from inside the primary pages. The footer holds the canonical origin, license, authorship, and repository link.",
+  "type": "object",
+  "required": ["primary", "secondary", "footer"],
+  "properties": {
+    "primary": {
+      "description": "The primary navigation, rendered in the site header. Exactly five items: Start, Architecture, Evidence, Status, GitHub.",
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["label", "path"],
+        "properties": {
+          "label": { "type": "string" },
+          "path": { "type": "string" },
+          "external": {
+            "description": "True for items that leave the site (e.g., GitHub).",
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "secondary": {
+      "description": "Orbit items, reachable from inside the primary pages. The conditional routes (Prism ML, General Compute) are in this list when they exist.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "path", "from"],
+        "properties": {
+          "label": { "type": "string" },
+          "path": { "type": "string" },
+          "from": {
+            "description": "The primary page from which this item is reached.",
+            "type": "string"
+          },
+          "conditional": {
+            "description": "True for items that may not exist (Prism ML, General Compute).",
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "footer": {
+      "type": "object",
+      "required": ["canonical_origin", "license", "author", "repository"],
+      "properties": {
+        "canonical_origin": { "type": "string", "format": "uri" },
+        "license": { "type": "string" },
+        "author": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "name": { "type": "string" },
+            "role": { "type": "string" }
+          }
+        },
+        "repository": { "type": "string", "format": "uri" }
+      }
+    }
+  }
+}

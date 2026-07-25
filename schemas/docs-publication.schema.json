@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/docs-publication.schema.json",
+  "title": "DocsPublicationFile",
+  "description": "The /docs/ allowlist. Only files named here are emitted under /docs/ on the live site. See OBSERVATORY_V1_SPEC.md §7.1 and A21.",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "allowlist"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "description": { "type": "string" },
+    "allowlist": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source_path", "url_path", "title", "current_state"],
+        "properties": {
+          "source_path": { "type": "string" },
+          "url_path": { "type": "string" },
+          "title": { "type": "string" },
+          "current_state": { "type": "string", "enum": ["current", "superseded", "deprecated"] }
+        }
+      }
+    }
+  }
+}

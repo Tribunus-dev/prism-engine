@@ -3,7 +3,7 @@ use crate::types::*;
 use prism_ecs_core::World;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// A single entry in the durable event log.
 ///
@@ -101,23 +101,80 @@ pub type ReplayApplier = fn(&mut World, &DomainEvent) -> Result<(), String>;
 ///
 /// Internally dispatches to `ReplayApplier` functions that operate on
 /// [`Entity`](prism_ecs_core::Entity) handles.
+///
+/// `BTreeMap<SchemaKey, ReplayApplier>` keyed by [`SchemaKey`] (not
+/// `String`): the schema key is the durable identity, and iteration
+/// must be deterministic for replay. See AGENTS.md "no HashMap/HashSet
+/// for canonical collections whose order is observable."
+///
+/// NOTE: `event.kind` is still a free `String` (a separate B-2 newtype
+/// concern). The boundary mapping `String → SchemaKey` is encoded by
+/// [`event_kind_to_schema_key`] and is stable across processes.
 pub struct ReplayRegistry {
-    appliers: HashMap<String, ReplayApplier>,
+    appliers: BTreeMap<SchemaKey, ReplayApplier>,
+}
+
+/// Stable, total mapping from canonical event-kind strings to
+/// [`SchemaKey`]. Used at the `register` / `apply` boundary so the
+/// internal BTreeMap is keyed by a typed, ordered identity.
+///
+/// Unknown event kinds fall back to a deterministic id derived from
+/// the FNV-1a hash of the kind string. The fallback is preserved in
+/// the BTreeMap so non-canonical kinds still resolve during replay.
+fn event_kind_to_schema_key(kind: &str) -> SchemaKey {
+    match kind {
+        "artifact_loaded" => SchemaKey { namespace: "event", id: 1, version: 1 },
+        "device_discovered" => SchemaKey { namespace: "event", id: 2, version: 1 },
+        "model_deployed" => SchemaKey { namespace: "event", id: 3, version: 1 },
+        "session_admitted" => SchemaKey { namespace: "event", id: 4, version: 1 },
+        "work_created" => SchemaKey { namespace: "event", id: 5, version: 1 },
+        "compilation_job_created" => SchemaKey { namespace: "event", id: 6, version: 1 },
+        "lease_acquired" => SchemaKey { namespace: "event", id: 7, version: 1 },
+        "lease_completed" => SchemaKey { namespace: "event", id: 8, version: 1 },
+        "pipeline_created" => SchemaKey { namespace: "event", id: 9, version: 1 },
+        "agent_run_created" => SchemaKey { namespace: "event", id: 10, version: 1 },
+        "peer_registered" => SchemaKey { namespace: "event", id: 11, version: 1 },
+        "ingress_request_submitted" => SchemaKey { namespace: "event", id: 12, version: 1 },
+        // Fallback: FNV-1a 32-bit hash, masked into the u32 id field.
+        // Deterministic across processes and stable across replays.
+        _ => {
+            let mut h: u32 = 0x811c_9dc5;
+            for b in kind.as_bytes() {
+                h ^= *b as u32;
+                h = h.wrapping_mul(0x0100_0193);
+            }
+            // Avoid collision with the canonical namespace (id 1..=12).
+            let id = h.wrapping_add(1000);
+            SchemaKey {
+                namespace: "event",
+                id,
+                version: 0,
+            }
+        }
+    }
 }
 
 impl ReplayRegistry {
     pub fn new() -> Self {
         Self {
-            appliers: HashMap::new(),
+            appliers: BTreeMap::new(),
         }
     }
 
+    /// Register a replay applier under a canonical event-kind string.
+    ///
+    /// The string is mapped to a stable [`SchemaKey`] via
+    /// [`event_kind_to_schema_key`]. The public API keeps the
+    /// `&str` signature so existing call sites compile unchanged; the
+    /// typed key is the internal storage form.
     pub fn register(&mut self, event_kind: &str, applier: ReplayApplier) {
-        self.appliers.insert(event_kind.to_string(), applier);
+        self.appliers
+            .insert(event_kind_to_schema_key(event_kind), applier);
     }
 
     pub fn apply(&self, world: &mut World, event: &DomainEvent) -> Result<(), String> {
-        let applier = self.appliers.get(&event.kind).ok_or_else(|| {
+        let key = event_kind_to_schema_key(&event.kind);
+        let applier = self.appliers.get(&key).ok_or_else(|| {
             format!(
                 "no replay applier registered for event kind: {}",
                 event.kind

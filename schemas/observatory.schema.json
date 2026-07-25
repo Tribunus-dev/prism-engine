@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/observatory.schema.json",
+  "title": "ObservatoryFile",
+  "description": "The Observatory specimens file. Each specimen references an evidence record and a set of stage assignments for the Life of a ComputeImage experience.",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "specimens"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "specimens": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["specimen_id", "display_name", "evidence_id", "source_url", "default_density", "stage_assignments"],
+        "properties": {
+          "specimen_id": { "type": "string", "pattern": "^observatory\\.specimen\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$" },
+          "display_name": { "type": "string" },
+          "evidence_id": { "type": "string", "pattern": "^evidence\\..+$" },
+          "source_url": { "type": "string" },
+          "default_density": { "type": "string", "enum": ["overview", "technical", "raw-artifact"] },
+          "stage_assignments": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

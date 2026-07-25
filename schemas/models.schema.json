@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/models.schema.json",
+  "title": "ModelsFile",
+  "description": "The models data file: a wrapper around a list of admitted model identities. The list is empty in v1 (no real model has been admitted).",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "models"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "models": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/model" }
+    }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "required": ["id", "source", "license", "ingest_path", "evidence_class", "admitted_at"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^model\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$" },
+        "source": { "type": "string" },
+        "license": { "type": "string" },
+        "ingest_path": { "type": "string" },
+        "evidence_class": { "type": "string", "enum": ["illustrative", "compile_verified", "measured", "none"] },
+        "admitted_at": { "type": "string", "format": "date-time" },
+        "evidence_id": { "type": "string", "pattern": "^evidence\\..+$" }
+      }
+    }
+  }
+}

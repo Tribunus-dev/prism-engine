@@ -1,0 +1,104 @@
+{
+  "schema_version": "1.0.0",
+  "transitions": [
+    {
+      "transition_id": "transition.capability.target.apple_silicon.m_series.cpu.001",
+      "capability_id": "capability.target.apple_silicon.m_series.cpu",
+      "sequence": 1,
+      "from": null,
+      "to": "implemented",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Source path introduced under crates/prism-ecs-runtime/; first reviewable code path on Apple Silicon. No executed receipt emitted at this commit."
+    },
+    {
+      "transition_id": "transition.capability.target.linux.x86_64.cpu.001",
+      "capability_id": "capability.target.linux.x86_64.cpu",
+      "sequence": 1,
+      "from": null,
+      "to": "implemented",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Source path introduced under crates/prism-ecs-runtime/; first reviewable code path on Linux x86_64. No executed receipt emitted at this commit."
+    },
+    {
+      "transition_id": "transition.capability.target.ane.001",
+      "capability_id": "capability.target.ane",
+      "sequence": 1,
+      "from": null,
+      "to": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Architecture contract described in ADR-031; no end-to-end code path exists."
+    },
+    {
+      "transition_id": "transition.capability.target.rocm.mi300x.001",
+      "capability_id": "capability.target.rocm.mi300x",
+      "sequence": 1,
+      "from": null,
+      "to": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Provider boundary described in ADR-031; no end-to-end code path exists."
+    },
+    {
+      "transition_id": "transition.capability.target.xdna.001",
+      "capability_id": "capability.target.xdna",
+      "sequence": 1,
+      "from": null,
+      "to": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Target class named; no code path exists."
+    },
+    {
+      "transition_id": "transition.capability.target.other_accelerators.001",
+      "capability_id": "capability.target.other_accelerators",
+      "sequence": 1,
+      "from": null,
+      "to": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Catch-all bucket for un-named accelerator targets."
+    },
+    {
+      "transition_id": "transition.capability.backend.in_memory_cpu.001",
+      "capability_id": "capability.backend.in_memory_cpu",
+      "sequence": 1,
+      "from": null,
+      "to": "implemented",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Source path introduced under crates/prism-ecs-runtime/; first reviewable code path for in-memory CPU dispatch."
+    },
+    {
+      "transition_id": "transition.capability.backend.disk_backed_mmap.001",
+      "capability_id": "capability.backend.disk_backed_mmap",
+      "sequence": 1,
+      "from": null,
+      "to": "implemented",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Source path introduced under crates/prism-ecs-compile/src/cimage/; 16 KB-aligned mmap path is reviewable."
+    },
+    {
+      "transition_id": "transition.capability.backend.provider_delegated.001",
+      "capability_id": "capability.backend.provider_delegated",
+      "sequence": 1,
+      "from": null,
+      "to": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "evidence_id": null,
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "reason": "v1 evidence freeze genesis. Provider boundary described in ADR-031; no provider-delegated backend is implemented in v1."
+    }
+  ]
+}

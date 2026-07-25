@@ -1,0 +1,119 @@
+{
+  "schema_version": "1.0.0",
+  "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+  "description": "A minimal search index over the v1 data layer. Generated at build time from the data files; consulted by the 404 page's search field. See OBSERVATORY_V1_SPEC.md §7.4 and §14.8. The index is small in v1 because the data layer is small. Each entry carries a stable route, a title, a short summary, and a kind discriminator.",
+  "entries": [
+    {
+      "route": "/",
+      "title": "Prism Engine",
+      "summary": "Compile intelligence into something you can inspect. Prism is a constitutional ECS compiler and runtime for local, heterogeneous AI deployment.",
+      "kind": "page",
+      "boost": 10
+    },
+    {
+      "route": "/start/",
+      "title": "Start",
+      "summary": "A new visitor can understand Prism in five minutes without reading the README. The reading path starts with motivation and ends with the source.",
+      "kind": "page",
+      "boost": 8
+    },
+    {
+      "route": "/architecture/",
+      "title": "Architecture",
+      "summary": "Prism separates the decisions that model formats and runtimes usually blend together, then names each contract. LogicalTensor, PhysicalTileLayout, ExecutionView.",
+      "kind": "page",
+      "boost": 9
+    },
+    {
+      "route": "/computeimage/",
+      "title": "ComputeImage",
+      "summary": "A ComputeImage is the boundary between compilation and execution, and it is inspectable. Six strata, three identities, the receipt.",
+      "kind": "page",
+      "boost": 9
+    },
+    {
+      "route": "/computeimage/specimen/",
+      "title": "ComputeImage Specimen",
+      "summary": "A sanitized ComputeImage. The published bytes are a test fixture with LLaMA-shaped header and empty payloads. The redaction manifest is displayed.",
+      "kind": "page",
+      "boost": 7
+    },
+    {
+      "route": "/evidence/",
+      "title": "Evidence",
+      "summary": "An output is not authoritative because a backend returned it. Prism preserves the chain from accepted work to execution outcome. The v1 corpus is small; the gaps are named.",
+      "kind": "page",
+      "boost": 9
+    },
+    {
+      "route": "/status/",
+      "title": "Status",
+      "summary": "The authoritative answer to what exists, what qualifies, and what has been validated. The v1 status is small and honest.",
+      "kind": "page",
+      "boost": 10
+    },
+    {
+      "route": "/run/",
+      "title": "Run",
+      "summary": "The system that exists today can be built and run on Apple Silicon from the repository. The Packaged Path names its absence.",
+      "kind": "page",
+      "boost": 7
+    },
+    {
+      "route": "/roadmap/",
+      "title": "Roadmap",
+      "summary": "Future milestones with explicit exit criteria. Ten milestones. The v1 release is milestone ten.",
+      "kind": "page",
+      "boost": 7
+    },
+    {
+      "route": "/observatory/life/",
+      "title": "The Life of a ComputeImage",
+      "summary": "The architecture as one experience. Twelve instruments, three densities, URL-addressable selection.",
+      "kind": "page",
+      "boost": 6
+    },
+    {
+      "route": "/prismagent/",
+      "title": "PrismAgent",
+      "summary": "A private, local, conversational screen companion. Combines structured accessibility information with visual interpretation. Currently unreleased.",
+      "kind": "page",
+      "boost": 5
+    },
+    {
+      "route": "/lab/",
+      "title": "Lab Notes",
+      "summary": "Some directions are research. They do not ship until they ship. Engram sidecars, KV-cache compaction, shadow calibration, adapter training.",
+      "kind": "page",
+      "boost": 4
+    },
+    {
+      "route": "/colophon/",
+      "title": "Colophon",
+      "summary": "Prism Engine is independently developed by Julian Torres. Five shapes of collaboration. The evidence class is recorded either way.",
+      "kind": "page",
+      "boost": 3
+    },
+    {
+      "route": "/docs/adr/032-observatory-deployment-platform/",
+      "title": "ADR-032: Prism Observatory Deployment Platform (Cloudflare Pages)",
+      "summary": "Cloudflare Pages is the v1 publication layer. Real HTTP 301 redirects, real response headers, isolated previews, instant rollback.",
+      "kind": "adr",
+      "boost": 2
+    },
+    {
+      "route": "/docs/adr/033-observatory-schema-binding/",
+      "title": "ADR-033: Schema Binding for Observatory v1 Evidence Artifacts",
+      "summary": "The §10 schema names are bound to engine types. Bindings 1, 2 are bound; bindings 3–7 are gaps closed by follow-on ADRs.",
+      "kind": "adr",
+      "boost": 2
+    },
+    {
+      "route": "/docs/adr/034-observatory-evidence-freeze/",
+      "title": "ADR-034: Evidence Freeze for Observatory v1",
+      "summary": "One sanitized ComputeImage specimen. The other §10 slots are gap-flagged. The freeze is reopened when follow-on ADRs land.",
+      "kind": "adr",
+      "boost": 2
+    }
+  ]
+}

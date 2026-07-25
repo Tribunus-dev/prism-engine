@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0.0",
+  "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+  "artifacts": [
+    {
+      "id": "evidence.computeimage.test_output_cimage.001",
+      "schema": "cimage-manifest-v1",
+      "schema_version": "1.0.0",
+      "kind": "computeimage_manifest",
+      "title": "Sanitized ComputeImage specimen (test fixture)",
+      "summary": "A sanitized cimage produced by the engine's compile test. The header has LLaMA-style layer names (q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj, embed_tokens, lm_head) with shape metadata, but all tensor payload bytes are empty (size: 0). The artifact is a compile test output, not a real model. No execution target, no search trace, no legalization report, no selection receipt is present in the published header.",
+      "producer": "crates/prism-ecs-compile (test harness)",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "target": "none",
+      "hardware": "none (test artifact; no execution)",
+      "validation_scope": "Confirms the cimage encoder emits a JSON header with named tensor records. Does not confirm any real model, real target, or real measurement.",
+      "recorded_at": "2026-07-25T20:30:00Z",
+      "applicability": {
+        "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+        "build_identity": "ssg-pending-1",
+        "schema_version": "1.0.0",
+        "target_identity": "none",
+        "feature_set": "test",
+        "model_identity_id": "none (no model admitted)",
+        "validation_scope": "compile_test_only"
+      },
+      "publication": {
+        "url": "/evidence/corpus/computeimage-test-output-cimage-001.cimage",
+        "public_projection_digest": "ad7810c94836e5fa838a7a827c36ca097367d4eb49c8d89c77b6e05c82762e98",
+        "sanitized": true,
+        "original_artifact_digest": "ad7810c94836e5fa838a7a827c36ca097367d4eb49c8d89c77b6e05c82762e98",
+        "redaction_manifest": {
+          "redaction_kind": "declarative",
+          "declared_synthetic_fields": [
+            "header.tensor_records[*].size",
+            "header.search_trace (absent)",
+            "header.legalization_report (absent)",
+            "header.selection_receipt (absent)",
+            "header.source_identity (absent)",
+            "header.source_catalog (absent)"
+          ],
+          "removed_fields": []
+        },
+        "remaining_verifiable": [
+          "digest_of_source_package"
+        ]
+      }
+    }
+  ]
+}

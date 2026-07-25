@@ -1,0 +1,115 @@
+{
+  "schema_version": "1.0.0",
+  "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+  "description": "The /docs/ allowlist. Only files named here are emitted under /docs/ on the live site. ADRs older than the current migration cutoff, internal notes, and implementation debris are not in the allowlist and do not reach the live site. See OBSERVATORY_V1_SPEC.md §7.1 and A21.",
+  "allowlist": [
+    {
+      "source_path": "docs/ARCHITECTURE.md",
+      "url_path": "/docs/architecture/",
+      "title": "Prism Engine architecture (overview)",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/CAMPAIGN.md",
+      "url_path": "/docs/campaign/",
+      "title": "Subsystem migration state",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/MIGRATION.md",
+      "url_path": "/docs/migration/",
+      "title": "Migration guide (from earlier compute-core)",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/RELEASE_CHECKLIST.md",
+      "url_path": "/docs/release-checklist/",
+      "title": "Release checklist",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-001-resumable-ternary-distill-compiler.md",
+      "url_path": "/docs/adr/001-resumable-ternary-distill-compiler/",
+      "title": "ADR-001: Resumable Ternary Distill Compiler",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-002-progressive-tensor-update.md",
+      "url_path": "/docs/adr/002-progressive-tensor-update/",
+      "title": "ADR-002: Progressive Tensor Update",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-003-canonical-ecs-world.md",
+      "url_path": "/docs/adr/003-canonical-ecs-world/",
+      "title": "ADR-003: Canonical ECS World",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-005-ecs-native-compiler-absorption.md",
+      "url_path": "/docs/adr/005-ecs-native-compiler-absorption/",
+      "title": "ADR-005: ECS-Native Compiler Absorption",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-026-workspace-consolidation.md",
+      "url_path": "/docs/adr/026-workspace-consolidation/",
+      "title": "ADR-026: Workspace Consolidation",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-027-memory-model.md",
+      "url_path": "/docs/adr/027-memory-model/",
+      "title": "ADR-027: Memory Model",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-028-ntb-cluster-coordination.md",
+      "url_path": "/docs/adr/028-ntb-cluster-coordination/",
+      "title": "ADR-028: NTB Cluster Coordination",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-029-prism-fabric-os-blackhole.md",
+      "url_path": "/docs/adr/029-prism-fabric-os-blackhole/",
+      "title": "ADR-029: Prism Fabric OS — Blackhole",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-030-prism-fabric-os-strix-halo.md",
+      "url_path": "/docs/adr/030-prism-fabric-os-strix-halo/",
+      "title": "ADR-030: Prism Fabric OS — Strix Halo",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-031-aiter-atom-rocm-provider.md",
+      "url_path": "/docs/adr/031-aiter-atom-rocm-provider/",
+      "title": "ADR-031: AITER/ATOM-Informed ROCm Provider and Serving Boundaries",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-032-observatory-deployment-platform.md",
+      "url_path": "/docs/adr/032-observatory-deployment-platform/",
+      "title": "ADR-032: Prism Observatory Deployment Platform (Cloudflare Pages)",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-033-observatory-schema-binding.md",
+      "url_path": "/docs/adr/033-observatory-schema-binding/",
+      "title": "ADR-033: Schema Binding for Observatory v1 Evidence Artifacts",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/adr-034-observatory-evidence-freeze.md",
+      "url_path": "/docs/adr/034-observatory-evidence-freeze/",
+      "title": "ADR-034: Evidence Freeze for Observatory v1",
+      "current_state": "current"
+    },
+    {
+      "source_path": "docs/cimage-layout-abi-v1.md",
+      "url_path": "/docs/cimage-layout-abi-v1/",
+      "title": "cimage layout ABI v1",
+      "current_state": "current"
+    }
+  ]
+}

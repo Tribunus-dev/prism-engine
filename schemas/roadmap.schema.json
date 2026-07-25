@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/roadmap.schema.json",
+  "title": "RoadmapFile",
+  "description": "The roadmap data file: a wrapper around a list of milestones. Each milestone has an exit_criterion that references a capability record.",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "milestones"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "milestones": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/milestone" }
+    }
+  },
+  "$defs": {
+    "milestone": {
+      "type": "object",
+      "required": ["id", "title", "work", "exit_criterion", "current_state", "as_of_commit"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^roadmap\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "work": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "exit_criterion": {
+          "type": "object",
+          "required": ["capability_id", "required_state"],
+          "properties": {
+            "capability_id": { "type": "string", "pattern": "^capability\\..+$" },
+            "required_state": { "type": "string", "enum": ["implemented", "qualifying", "validated"] },
+            "evidence_id": { "type": "string", "pattern": "^evidence\\..+$" }
+          }
+        },
+        "current_state": { "type": "string", "enum": ["planned", "implemented", "qualifying", "validated"] },
+        "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "order": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

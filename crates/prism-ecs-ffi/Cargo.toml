@@ -1,0 +1,14 @@
+[package]
+name = "prism-ecs-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "C-ABI FFI bridge for the prism-ecs-constitutional crate — the only place in the Prism workspace that exposes raw-pointer C-ABI functions; constitutional crates depend on us for the FFI surface, never the other way around."
+
+[dependencies]
+prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-constitutional = { path = "../prism-ecs-constitutional" }
+parking_lot = { workspace = true }
+
+# `unsafe` is REQUIRED in this crate — C-ABI raw-pointer bridges are the
+# entire reason the crate exists. Do not add `unsafe_code = "deny"` here.

@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/vocabulary.json",
+  "title": "Prism Observatory v1 Vocabulary",
+  "description": "Closed enums from OBSERVATORY_V1_SPEC.md §3. The §3 vocabulary is the only status vocabulary permitted on the surface. Every other status-bearing word is forbidden by H1.",
+  "type": "object",
+  "properties": {
+    "capability_maturity_state": {
+      "description": "The four capability maturity states. See OBSERVATORY_V1_SPEC.md §3.1.",
+      "type": "string",
+      "enum": ["planned", "implemented", "qualifying", "validated"]
+    },
+    "distribution_state": {
+      "description": "The two distribution states. See OBSERVATORY_V1_SPEC.md §3.2.",
+      "type": "string",
+      "enum": ["unreleased", "released"]
+    },
+    "allowed_maturity_distribution_pair": {
+      "description": "The seven allowed maturity × distribution pairs. Released + Planned is the single invalid combination. See OBSERVATORY_V1_SPEC.md §3.3.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "maturity": { "$ref": "#/properties/capability_maturity_state" },
+          "distribution": { "$ref": "#/properties/distribution_state" }
+        },
+        "required": ["maturity", "distribution"]
+      },
+      "examples": [
+        [{ "maturity": "planned",      "distribution": "unreleased" }],
+        [{ "maturity": "implemented",  "distribution": "unreleased" }],
+        [{ "maturity": "qualifying",   "distribution": "unreleased" }],
+        [{ "maturity": "validated",    "distribution": "unreleased" }],
+        [{ "maturity": "implemented",  "distribution": "released"   }],
+        [{ "maturity": "qualifying",   "distribution": "released"   }],
+        [{ "maturity": "validated",    "distribution": "released"   }]
+      ]
+    },
+    "evidence_class": {
+      "description": "The class of evidence supporting a claim or capability record.",
+      "type": "string",
+      "enum": ["illustrative", "compile_verified", "measured", "none"]
+    },
+    "failure_class": {
+      "description": "Closed set of failure classes for receipts. See OBSERVATORY_V1_SPEC.md §2.2 stage 11.",
+      "type": "string",
+      "enum": [
+        "stale_outcome",
+        "provider_failure",
+        "restart_recovery",
+        "projection_loss",
+        "validation_failed"
+      ]
+    },
+    "sanitization_remaining_verifiable": {
+      "description": "Closed set of relationships that may still be verified after a sanitized publication. See OBSERVATORY_V1_SPEC.md §4.8.",
+      "type": "string",
+      "enum": [
+        "digest_of_source_package",
+        "semantic_graph_identity",
+        "execution_target_identity",
+        "route_identity",
+        "evidence_chain_integrity"
+      ]
+    }
+  }
+}

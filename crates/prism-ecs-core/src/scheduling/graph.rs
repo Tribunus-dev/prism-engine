@@ -4,7 +4,7 @@
 //! cycles, and reports structured diagnostics.  The graph is consumed by
 //! `Schedule::compile` and never escaped.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::scheduling::error::ScheduleError;
 use crate::scheduling::metadata::{SystemId, SystemMetadata};
@@ -47,7 +47,13 @@ pub struct DependencyGraph {
     /// Systems in registration order (indexed by position in this vec).
     systems: Vec<SystemMetadata>,
     /// SystemId → dense index.
-    id_to_idx: HashMap<SystemId, usize>,
+    ///
+    /// `BTreeMap` (not `HashMap`): the schedule graph is part of the
+    /// canonical runtime authority; iteration over the system set is
+    /// observable to the schedule executor and to projection rebuilds.
+    /// See AGENTS.md "no HashMap/HashSet for canonical collections
+    /// whose order is observable."
+    id_to_idx: BTreeMap<SystemId, usize>,
     /// Adjacency list: edges from → (target, kind).
     edges: Vec<Vec<(usize, EdgeKind)>>,
     /// In-degree count for topological sort.
@@ -91,7 +97,8 @@ impl DependencyGraph {
 /// Accumulates systems and edges, then validates and compiles the graph.
 pub struct GraphBuilder {
     systems: Vec<SystemMetadata>,
-    id_to_idx: HashMap<SystemId, usize>,
+    /// BTreeMap: see `DependencyGraph::id_to_idx` for rationale.
+    id_to_idx: BTreeMap<SystemId, usize>,
     pending_edges: Vec<(SystemId, SystemId, EdgeKind)>,
 }
 
@@ -100,7 +107,7 @@ impl GraphBuilder {
     ///
     /// System metadata is cloned; the caller keeps ownership of the original.
     pub fn new(metadata: Vec<SystemMetadata>) -> Self {
-        let mut id_to_idx = HashMap::with_capacity(metadata.len());
+        let mut id_to_idx = BTreeMap::new();
         for (i, meta) in metadata.iter().enumerate() {
             id_to_idx.insert(meta.id, i);
         }
@@ -211,7 +218,7 @@ impl GraphBuilder {
         let n = self.systems.len();
         let mut edges: Vec<Vec<(usize, EdgeKind)>> = vec![Vec::new(); n];
         let mut in_degree = vec![0usize; n];
-        let mut edge_set: HashSet<(usize, usize)> = HashSet::new();
+        let mut edge_set: BTreeSet<(usize, usize)> = BTreeSet::new();
 
         // Insert pending edges (from → target) where from runs before target.
         for &(from_id, target_id, kind) in &self.pending_edges {

@@ -1,7 +1,7 @@
 use crate::types::*;
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Whether a component type survives across sessions or is session-scoped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -17,9 +17,14 @@ impl Default for ComponentDurability {
 }
 
 /// Schema registry skeleton. Not yet wired into component operations.
+///
+/// `BTreeMap` (not `HashMap`): schema iteration is part of the durable
+/// schema registry export and must be deterministic across processes for
+/// replay. See AGENTS.md "no HashMap/HashSet for canonical collections
+/// whose order is observable."
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SchemaRegistry {
-    schemas: HashMap<ComponentSchemaId, SchemaEntry>,
+    schemas: BTreeMap<ComponentSchemaId, SchemaEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -37,7 +42,7 @@ pub struct SchemaEntry {
 impl SchemaRegistry {
     pub fn new() -> Self {
         Self {
-            schemas: HashMap::new(),
+            schemas: BTreeMap::new(),
         }
     }
 

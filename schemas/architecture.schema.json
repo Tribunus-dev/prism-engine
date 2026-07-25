@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/architecture.schema.json",
+  "title": "ArchitectureFile",
+  "description": "The architecture facts file: a wrapper around a list of contracts. Each contract names a primary contract, its purpose, and its current state in the source.",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "contracts"],
+  "properties": {
+    "schema_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "as_of_commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "contracts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "tagline", "purpose", "source_path", "current_state", "declared_limit"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^contract\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$" },
+          "name": { "type": "string" },
+          "tagline": { "type": "string" },
+          "purpose": { "type": "string" },
+          "source_path": { "type": "string" },
+          "current_state": { "type": "string", "enum": ["planned", "implemented", "qualifying", "validated"] },
+          "declared_limit": { "type": "string" }
+        }
+      }
+    }
+  }
+}

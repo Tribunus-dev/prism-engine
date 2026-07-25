@@ -14,7 +14,6 @@ pub mod driver;
 pub mod envelope;
 pub mod event_store;
 pub mod execution;
-pub mod ffi;
 pub mod ingress;
 pub mod lifecycle;
 pub mod lifecycle_command;
@@ -45,6 +44,9 @@ pub use envelope::*;
 pub use event_store::*;
 pub use execution::*;
 pub use ingress::*;
+// `ffi` re-export removed: the C-ABI bridge now lives in its own
+// crate `prism-ecs-ffi`. Callers should `use prism_ecs_ffi::*;`
+// (the FFI surface re-exports its symbols at the crate root).
 pub use lifecycle::*;
 pub use lifecycle_command::*;
 pub use migration::*;

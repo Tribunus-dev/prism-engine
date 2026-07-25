@@ -1,5 +1,5 @@
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::column::Column;
 use crate::component::Component;
@@ -74,7 +74,7 @@ pub struct World {
     pub(crate) next_id: u64,
     pub(crate) free_list: Vec<u64>,
     pub(crate) staging: Vec<StagingAction>,
-    pub(crate) component_versions: HashMap<u64, u64>,
+    pub(crate) component_versions: BTreeMap<Entity, u64>,
     /// Mutation access policy. Controls whether direct mutations are allowed
     /// or must go through WorldTxn. Defaults to Bootstrap for backward
     /// compatibility during migration.
@@ -118,7 +118,7 @@ impl World {
             next_id: 1,
             free_list: Vec::new(),
             staging: Vec::new(),
-            component_versions: HashMap::new(),
+            component_versions: BTreeMap::new(),
             mutation_policy: MutationPolicy::Bootstrap,
             extensions: HashMap::new(),
         }
@@ -133,7 +133,7 @@ impl World {
             next_id: 1,
             free_list: Vec::new(),
             staging: Vec::new(),
-            component_versions: HashMap::new(),
+            component_versions: BTreeMap::new(),
             mutation_policy: MutationPolicy::Bootstrap,
             extensions: HashMap::new(),
         }
@@ -152,7 +152,12 @@ impl World {
     }
 
     /// Access the component versions map (mutable reference).
-    pub fn component_versions_mut(&mut self) -> &mut HashMap<u64, u64> {
+    ///
+    /// `BTreeMap<Entity, u64>`: the version-keyed iteration participates
+    /// in canonical transaction replay and must be deterministic. See
+    /// AGENTS.md "no HashMap/HashSet for canonical collections whose
+    /// order is observable."
+    pub fn component_versions_mut(&mut self) -> &mut BTreeMap<Entity, u64> {
         &mut self.component_versions
     }
 
@@ -734,7 +739,7 @@ impl World {
     /// Returns 0 if no writes have occurred for this entity.
     pub fn component_version(&self, entity: Entity) -> u64 {
         self.component_versions
-            .get(&entity.id())
+            .get(&entity)
             .copied()
             .unwrap_or(0)
     }

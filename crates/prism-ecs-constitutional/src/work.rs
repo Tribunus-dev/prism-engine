@@ -29,7 +29,7 @@ pub const SCHEMA_WORK_OUTPUT: u64 = 23;
 // ── Kind of Work ─────────────────────────────────────────────────────────────
 
 /// Kind of work a work item represents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub enum WorkKind {
     LoadModel,
     CompileGraph,

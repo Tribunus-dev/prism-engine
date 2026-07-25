@@ -1,10 +1,13 @@
 //! CImage binary format types — ported from compute-core.
 //!
 //! Self-contained `repr(C)` binary format types with no external
-//! dependencies beyond `std`.
+//! dependencies beyond `std` and `bytemuck` (for safe unaligned reads of
+//! POD structs from the binary stream).
 
 use std::fmt;
 use std::mem;
+
+use bytemuck::AnyBitPattern;
 
 // =============================================================================
 // Error type
@@ -178,7 +181,7 @@ impl CimageHeader {
 // CimageLayoutMeta
 // =============================================================================
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, AnyBitPattern)]
 #[repr(C)]
 pub struct CimageLayoutMeta {
     pub embed_clustered: TensorRecord,
@@ -190,7 +193,7 @@ pub struct CimageLayoutMeta {
     pub _pad: [u8; 32],
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, AnyBitPattern)]
 #[repr(C)]
 pub struct TensorRecord {
     pub offset: u64,
@@ -275,11 +278,13 @@ pub fn verify_cimage(bytes: &[u8]) -> Result<(CimageHeader, CimageLayoutMeta), C
             if end > bytes.len() || entry.length as usize != mem::size_of::<CimageLayoutMeta>() {
                 return None;
             }
-            Some(unsafe {
-                std::ptr::read_unaligned(
-                    bytes.as_ptr().add(entry.offset as usize) as *const CimageLayoutMeta
-                )
-            })
+            // bytemuck::try_pod_read_unaligned is safe: it copies bytes into
+            // a properly-aligned stack slot and returns the struct by value.
+            // Returns `Err` if the bytes do not satisfy the `AnyBitPattern`
+            // invariant (all bit patterns are valid for the target type).
+            let start = entry.offset as usize;
+            let end = start + mem::size_of::<CimageLayoutMeta>();
+            bytemuck::try_pod_read_unaligned(&bytes[start..end]).ok()
         })
         .unwrap_or_default();
     Ok((header, layout))

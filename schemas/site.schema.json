@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/site.schema.json",
+  "title": "SiteConfig",
+  "description": "Project identity, canonical origin, and brand tokens. Read by SiteShell and ThemeProvider. The brand tokens are the single source of truth for color and typography across the site. No component invents a color; the palette is defined here and consumed by every component.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "site_title",
+    "site_tagline",
+    "canonical_origin",
+    "author",
+    "build_identity",
+    "deployment_compatibility_window"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "site_title": {
+      "description": "The site's name. Used in the title element and the brand mark.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "site_tagline": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "canonical_origin": {
+      "description": "The canonical URL of the site. Used in canonical URL metadata, sitemap, and OG tags.",
+      "type": "string",
+      "format": "uri"
+    },
+    "author": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string" }
+      }
+    },
+    "build_identity": {
+      "description": "The build identity surfaced on every page (A16).",
+      "type": "object",
+      "required": ["commit", "build_id", "recorded_at"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "build_id": { "type": "string" },
+        "recorded_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "deployment_compatibility_window": {
+      "description": "The §7.3 compatibility window for retired legacy asset paths. Before this date, 410s are not emitted; expired legacy asset paths resolve through the authored 404.",
+      "type": "object",
+      "required": ["cutover_date"],
+      "properties": {
+        "cutover_date": { "type": "string", "format": "date" },
+        "reason": { "type": "string" }
+      }
+    },
+    "brand_tokens": {
+      "description": "The palette, typography, and motion tokens. v1 ships dark only.",
+      "type": "object",
+      "properties": {
+        "themes": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/theme" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "theme": {
+      "type": "object",
+      "required": ["name", "tokens"],
+      "properties": {
+        "name": { "type": "string" },
+        "tokens": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "schema_version": "1.0.0",
+  "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+  "milestones": [
+    {
+      "id": "roadmap.evidence.execution_receipt",
+      "title": "Emit ExecutionReceipt to publishable storage",
+      "work": "Implement the emission path from runtime to content-addressed log. ADR-035 creates the ExecutionReceipt type and JSON Schema. The runtime emits the type to a stable path on every admitted request, success or failure.",
+      "exit_criterion": {
+        "capability_id": "capability.backend.in_memory_cpu",
+        "required_state": "validated",
+        "evidence_id": "evidence.execute.apple_silicon.cpu.001"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 1
+    },
+    {
+      "id": "roadmap.evidence.replay_result",
+      "title": "Emit ReplayResult to publishable storage",
+      "work": "Implement the replay applier's output path. ADR-036 creates the ReplayResult type and JSON Schema. Replay reads the durable event log, re-derives the canonical world, projects to the surface, and emits a ReplayResult with the event log digest, the replayed world digest, and the equality.",
+      "exit_criterion": {
+        "capability_id": "capability.backend.in_memory_cpu",
+        "required_state": "validated",
+        "evidence_id": "evidence.replay.apple_silicon.cpu.001"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 2
+    },
+    {
+      "id": "roadmap.evidence.qualify_apple_silicon_cpu",
+      "title": "Qualify Apple Silicon (M-series) CPU execution",
+      "work": "Run the qualification harness end-to-end against an M-series target, publish the QualificationRecord. ADR-034 creates the QualificationRecord type and JSON Schema. The harness emits a record with commit, target, build features, and validation scope.",
+      "exit_criterion": {
+        "capability_id": "capability.target.apple_silicon.m_series.cpu",
+        "required_state": "validated",
+        "evidence_id": "evidence.qualify.apple_silicon.cpu.001"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 3
+    },
+    {
+      "id": "roadmap.targets.ane",
+      "title": "Qualify ANE provider",
+      "work": "Implement ANE-aware operator lowering, fused islands, residency. Qualify against an M-series target. Publish the receipt.",
+      "exit_criterion": {
+        "capability_id": "capability.target.ane",
+        "required_state": "validated",
+        "evidence_id": "evidence.qualify.ane.001"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 4
+    },
+    {
+      "id": "roadmap.targets.rocm",
+      "title": "Qualify ROCm provider",
+      "work": "Implement ROCm dispatch per ADR-031, qualify, validate. Publish the receipt.",
+      "exit_criterion": {
+        "capability_id": "capability.target.rocm.mi300x",
+        "required_state": "validated",
+        "evidence_id": "evidence.qualify.rocm.001"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 5
+    },
+    {
+      "id": "roadmap.models.admit_real_model_identity",
+      "title": "Admit a real model identity",
+      "work": "Ingest a real model package, produce a real cimage, publish the cimage with a non-placeholder source_digest. The Specimen page no longer displays the sanitization manifest for the published specimen (or a new specimen is published alongside the test artifact).",
+      "exit_criterion": {
+        "capability_id": "capability.target.apple_silicon.m_series.cpu",
+        "required_state": "implemented",
+        "evidence_id": "evidence.computeimage.real_model.001"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 6
+    },
+    {
+      "id": "roadmap.routes.admit_real_route",
+      "title": "Admit a real route",
+      "work": "Run a real request through the constitutional transaction on a real target. Publish the execution receipt. The route capability advances from planned to validated.",
+      "exit_criterion": {
+        "capability_id": "capability.backend.in_memory_cpu",
+        "required_state": "validated",
+        "evidence_id": "evidence.execute.apple_silicon.cpu.001"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 7
+    },
+    {
+      "id": "roadmap.pages.prism_ml",
+      "title": "Make Prism ML page conditional route resolvable",
+      "work": "Publish the relationship, the artifact handoff, the license boundary, and the evidence. The conditional route /prism-ml/ resolves to the Prism ML page rather than /lab/.",
+      "exit_criterion": {
+        "capability_id": "capability.target.apple_silicon.m_series.cpu",
+        "required_state": "implemented"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 8
+    },
+    {
+      "id": "roadmap.pages.general_compute",
+      "title": "Make General Compute page conditional route resolvable",
+      "work": "Publish the relationship, the recorded plan and run, and the evidence. The conditional route /general-compute/ resolves to the General Compute page rather than /lab/.",
+      "exit_criterion": {
+        "capability_id": "capability.target.rocm.mi300x",
+        "required_state": "implemented"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 9
+    },
+    {
+      "id": "roadmap.release.observatory_v1",
+      "title": "Ship Prism Observatory v1.0",
+      "work": "Every gate in OBSERVATORY_V1_SPEC.md §12 is green. The release log entry 'prism-observatory-v1.0' is signed by the architect (H13).",
+      "exit_criterion": {
+        "capability_id": "capability.target.apple_silicon.m_series.cpu",
+        "required_state": "validated"
+      },
+      "current_state": "planned",
+      "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+      "order": 10
+    }
+  ]
+}

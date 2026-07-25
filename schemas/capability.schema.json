@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/capability.schema.json",
+  "title": "CapabilitiesFile",
+  "description": "The capabilities data file: a wrapper around a list of capability records, each of which is a discriminated union over the four maturity states from OBSERVATORY_V1_SPEC.md §3.1. The maturity × distribution pair for each record must be in the §3.3 allowed set (Released + Planned is invalid). The fields required per record depend on its maturity state: Planned records require an ADR; Implemented records require a source path; Qualifying records require a test or fixture path and a named limit; Validated records require a target and an evidence_id.",
+  "type": "object",
+  "required": ["schema_version", "as_of_commit", "capabilities"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "as_of_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability" }
+    }
+  },
+  "$defs": {
+    "capability": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "distribution_state",
+        "summary",
+        "source_path",
+        "recorded_at"
+      ],
+      "properties": {
+        "id": {
+          "description": "Stable, namespaced identifier. See §4.2.",
+          "type": "string",
+          "pattern": "^capability\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$"
+        },
+        "kind": {
+          "description": "The kind of capability this record describes. Targets are 'target', backends are 'backend', models are 'model', routes are 'route'.",
+          "type": "string",
+          "enum": ["target", "backend", "model", "route"]
+        },
+        "state": {
+          "description": "Capability maturity state. See §3.1.",
+          "type": "string",
+          "enum": ["planned", "implemented", "qualifying", "validated"]
+        },
+        "distribution_state": {
+          "description": "Distribution state. See §3.2.",
+          "type": "string",
+          "enum": ["unreleased", "released"]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "source_path": { "type": "string" },
+        "declared_limit": { "type": "string" },
+        "recorded_at": { "type": "string", "format": "date-time" },
+        "adr": { "type": "string" },
+        "target_class": { "type": "string" },
+        "build_features": { "type": "string" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+        "test_or_fixture_path": { "type": "string" },
+        "validation_scope": { "type": "string" },
+        "named_limit": { "type": "string" },
+        "target": { "type": "string" },
+        "evidence_id": { "type": "string", "pattern": "^evidence\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$" },
+        "current_history_sequence": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "description": "Released + Planned is the single invalid maturity × distribution pair. See §3.3.",
+          "not": {
+            "properties": {
+              "state": { "const": "planned" },
+              "distribution_state": { "const": "released" }
+            },
+            "required": ["state", "distribution_state"]
+          }
+        }
+      ],
+      "oneOf": [
+        {
+          "description": "PlannedRecord. ADR exists; end-to-end code path does not.",
+          "properties": { "state": { "const": "planned" } },
+          "required": ["adr", "target_class", "declared_limit"]
+        },
+        {
+          "description": "ImplementedRecord. Code path exists; may not be exercised end-to-end.",
+          "properties": { "state": { "const": "implemented" } },
+          "required": ["source_path", "build_features", "commit", "declared_limit"]
+        },
+        {
+          "description": "QualifyingRecord. Test or fixture exists; target-specific evidence incomplete.",
+          "properties": { "state": { "const": "qualifying" } },
+          "required": [
+            "source_path", "build_features", "commit",
+            "test_or_fixture_path", "validation_scope", "named_limit"
+          ]
+        },
+        {
+          "description": "ValidatedRecord. Receipt-class evidence exists.",
+          "properties": { "state": { "const": "validated" } },
+          "required": [
+            "source_path", "build_features", "commit",
+            "target", "evidence_id", "validation_scope", "named_limit"
+          ]
+        }
+      ]
+    }
+  }
+}

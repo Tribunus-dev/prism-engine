@@ -7,7 +7,7 @@ use prism_ecs_core::EntityKind;
 use prism_ecs_core::PendingEntity;
 use prism_ecs_core::World;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Access kind for concurrency control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -143,9 +143,15 @@ pub struct WorldTxn {
     pub(crate) removes: Vec<StagedRemove>,
     /// Staged entity spawns
     pub(crate) spawns: Vec<StagedSpawn>,
-    /// Pending operations keyed by pending token (1-indexed).
-    /// Resolved into real inserts/removes during `prepare_inner()`.
-    pub(crate) pending_resolutions: HashMap<u64, Vec<PendingOp>>,
+    /// Pending operations keyed by the placeholder [`Entity`] handle
+    /// (1-indexed token, generation 0). The token is a stand-in for the
+    /// real entity id that will be assigned during `prepare_inner()`.
+    ///
+    /// `BTreeMap` (not `HashMap`): the resolution order is part of the
+    /// canonical transaction replay and must be deterministic. See
+    /// AGENTS.md "no HashMap/HashSet for canonical collections whose
+    /// order is observable."
+    pub(crate) pending_resolutions: BTreeMap<Entity, Vec<PendingOp>>,
     /// Domain events to emit after successful commit
     pub(crate) events: Vec<DomainEvent>,
     /// Runtime-only observations to expose after successful commit. These are
@@ -234,7 +240,7 @@ impl WorldTxn {
             inserts: Vec::new(),
             removes: Vec::new(),
             spawns: Vec::new(),
-            pending_resolutions: HashMap::new(),
+            pending_resolutions: BTreeMap::new(),
             events: Vec::new(),
             advisory_events: Vec::new(),
             read_deps: Vec::new(),
@@ -296,7 +302,7 @@ impl WorldTxn {
         schema_version: SchemaVersion,
         component: T,
     ) {
-        let token = pending.0;
+        let token = Entity::new(pending.0, 0);
         let type_id = std::any::TypeId::of::<T>();
         let schema_key = SchemaKey {
             namespace: "",
@@ -344,7 +350,7 @@ impl WorldTxn {
         component: T,
     ) {
         let key = T::SCHEMA_KEY;
-        let token = pending.0;
+        let token = Entity::new(pending.0, 0);
         let type_id = std::any::TypeId::of::<T>();
 
         let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
@@ -386,7 +392,7 @@ impl WorldTxn {
         pending: PendingEntity,
         component: T,
     ) {
-        let token = pending.0;
+        let token = Entity::new(pending.0, 0);
         let type_id = std::any::TypeId::of::<T>();
 
         let resolve: Box<dyn FnOnce(Entity) -> StagedInsert + Send> = Box::new(move |entity_h| {
@@ -811,7 +817,7 @@ impl WorldTransitExt for World {
             (op.apply)(self.component_store_mut());
             *self
                 .component_versions_mut()
-                .entry(op.entity.id())
+                .entry(op.entity)
                 .or_insert(0) += 1;
         }
         // Apply transient ops (not journaled — component versions bumped)
@@ -819,7 +825,7 @@ impl WorldTransitExt for World {
             (op.apply)(self.component_store_mut());
             *self
                 .component_versions_mut()
-                .entry(op.entity.id())
+                .entry(op.entity)
                 .or_insert(0) += 1;
         }
 
@@ -963,8 +969,8 @@ impl WorldTxn {
             }
 
             // Resolve pending component operations against their assigned entity IDs
-            for (token, ops) in std::mem::take(&mut self.pending_resolutions) {
-                let resolved_id = allocator_base + (token - 1);
+            for (token_entity, ops) in std::mem::take(&mut self.pending_resolutions) {
+                let resolved_id = allocator_base + (token_entity.id() - 1);
                 for op in ops {
                     let insert = (op.resolve)(Entity::new(resolved_id, 0));
                     self.inserts.push(insert);

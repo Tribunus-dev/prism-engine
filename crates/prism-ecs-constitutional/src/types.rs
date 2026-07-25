@@ -10,7 +10,7 @@ pub use prism_ecs_core::WorldEpoch;
 pub struct AggregateSequence(pub u64);
 
 /// Component schema identity — stable across process restarts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
 pub struct ComponentSchemaId(pub u64);
 
 /// Schema version for migration detection.
@@ -195,6 +195,95 @@ pub struct SchemaKey {
 /// 256-bit digest for component value identification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Digest256(pub [u8; 32]);
+
+// ── Authority-bearing primitives (B-2 newtypes for the `cmd!` macro) ────────
+//
+// Every value below is a transparent newtype around a primitive. The type
+// says what the value is. `#[serde(transparent)]` ensures the wire format
+// is unchanged — existing serialized commands continue to deserialize
+// correctly. The `cmd!` macro in `lifecycle_command.rs` is the primary
+// consumer; call sites are updated in the B-2 follow-up change.
+
+/// Fencing generation: monotonic per resource; replaced on lease acquire.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Generation(pub u32);
+
+/// World epoch: increments on every `WorldTxn` commit. Read by stale-fencing.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Epoch(pub u64);
+
+/// Event sequence: monotonic per `EventStore`; never reused.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Sequence(pub u64);
+
+/// Command identity: assigned at ingress; never reused.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct CommandId(pub u64);
+
+/// Filesystem path: not a free `String`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct FilePath(pub String);
+
+/// Format tag: e.g. `"gguf"`, `"cimage"`, `"safetensors"`. Validated against
+/// the registered format set at construction.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Format(pub String);
+
+/// Rejection reason: human-readable, validated, not a free `String`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct RejectionReason(pub String);
+
+/// Adapter handle: backend-specific opaque token. The adapter is the only
+/// authority that can interpret the value.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct AdapterHandle(pub String);
+
+/// Backend config: free-form `key=value` text. Validated by the backend.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct Config(pub String);
+
+/// Receipt identity: monotonic per work entity; never reused.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct ReceiptId(pub String);
+
+/// Lease token: opaque to the constitutional layer; verified by the
+/// dispatcher at effect time. Replaces the `String` token used in
+/// `LifecycleCommandResult::LeaseAcquired::token`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct LeaseToken(pub String);
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 

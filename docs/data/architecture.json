@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0.0",
+  "as_of_commit": "8550c1b4b8a5898b0429767b35cd14cabb4987c5",
+  "contracts": [
+    {
+      "id": "contract.logical_tensor",
+      "name": "LogicalTensor",
+      "tagline": "The meaning. The tensor as the model defines it.",
+      "purpose": "Names the tensor's shape, dtype, semantic family, and role in the graph. A change to layout or representation does not change a LogicalTensor.",
+      "source_path": "crates/prism-ecs-core/src/component.rs, crates/prism-ecs-compile/src/cimage/mod.rs (CImageHeader.source_catalog)",
+      "current_state": "implemented",
+      "declared_limit": "The full LogicalTensor contract surface is implementation-defined; the cimage header carries the projection used at compile time. A formal schema for the contract is a follow-on deliverable."
+    },
+    {
+      "id": "contract.physical_tile_layout",
+      "name": "PhysicalTileLayout",
+      "tagline": "The storage. The tensor as the hardware stores it.",
+      "purpose": "Names tile sizes, padding, alignment, memory tier. A PhysicalTileLayout is a candidate transformation evaluated against the model, the target, and the constraints.",
+      "source_path": "crates/prism-ecs-compile/src/cimage/mod.rs (CImageHeader.tensors, CImageHeader.legalization_report)",
+      "current_state": "implemented",
+      "declared_limit": "The full PhysicalTileLayout schema is implementation-defined; the cimage header carries the projection. A formal schema is a follow-on deliverable."
+    },
+    {
+      "id": "contract.execution_view",
+      "name": "ExecutionView",
+      "tagline": "The consumption. The contract by which a backend reads the data.",
+      "purpose": "Names the lane, the provider, the dispatch path. An ExecutionView is durable state, not runtime cache.",
+      "source_path": "crates/prism-ecs-compile/src/cimage/mod.rs (CImageHeader.execution_plan)",
+      "current_state": "implemented",
+      "declared_limit": "The execution plan field in the cimage header is optional; a plan is emitted when heterogeneous routing is in use. The plan field is absent from the v1 specimen."
+    }
+  ]
+}

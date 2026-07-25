@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prism-engine.tribunus.dev/schemas/capability-history.schema.json",
+  "title": "CapabilityHistory",
+  "description": "Append-only transition log for capabilities. See OBSERVATORY_V1_SPEC.md §4.7. Each record carries a stable transition_id, a capability_id, a monotonically increasing sequence per capability, a from state (null only for the genesis record), a to state, an as_of_commit, an evidence_id (when the transition is supported by a specific evidence record), a recorded_at timestamp, and a short editorial reason. Ordering is (capability_id, sequence). recorded_at is metadata, not ordering authority.",
+  "type": "object",
+  "required": ["schema_version", "transitions"],
+  "properties": {
+    "schema_version": {
+      "description": "Schema version. Bump on any change to the transition shape.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "transitions": {
+      "description": "The append-only log of capability transitions.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/transition" }
+    }
+  },
+  "$defs": {
+    "transition": {
+      "type": "object",
+      "required": [
+        "transition_id",
+        "capability_id",
+        "sequence",
+        "from",
+        "to",
+        "as_of_commit",
+        "recorded_at",
+        "reason"
+      ],
+      "properties": {
+        "transition_id": {
+          "description": "Stable, namespaced identifier. Format: transition.<capability_id>.<sequence-padded>.",
+          "type": "string",
+          "pattern": "^transition\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*\\.[0-9]{3,}$"
+        },
+        "capability_id": {
+          "description": "The capability this transition applies to. Resolves to a record in capabilities.json.",
+          "type": "string",
+          "pattern": "^capability\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$"
+        },
+        "sequence": {
+          "description": "Monotonically increasing per capability_id, starting at 1 for the genesis record. recorded_at is metadata, not ordering authority.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "from": {
+          "description": "The previous state. Null only for the genesis record (sequence: 1).",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "enum": ["planned", "implemented", "qualifying", "validated"] }
+          ]
+        },
+        "to": {
+          "description": "The new state. Must be a valid maturity state.",
+          "type": "string",
+          "enum": ["planned", "implemented", "qualifying", "validated"]
+        },
+        "as_of_commit": {
+          "description": "The git commit SHA at which the transition was observed.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        },
+        "evidence_id": {
+          "description": "Optional evidence record supporting the transition. Resolves to a record in evidence-index.json when present.",
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^evidence\\.[a-z0-9_\\-]+(\\.[a-z0-9_\\-]+)*$" }
+          ]
+        },
+        "recorded_at": {
+          "description": "ISO 8601 timestamp. Metadata, not ordering authority. Sequence is the ordering authority.",
+          "type": "string",
+          "format": "date-time"
+        },
+        "reason": {
+          "description": "Short editorial reason for the transition. Not freeform prose; a one-sentence explanation of why the transition occurred.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "allOf": [
+        {
+          "description": "The genesis record (sequence: 1) must have from: null.",
+          "if": {
+            "properties": { "sequence": { "const": 1 } },
+            "required": ["sequence"]
+          },
+          "then": {
+            "properties": { "from": { "const": null } },
+            "required": ["from"]
+          }
+        },
+        {
+          "description": "Non-genesis records (sequence > 1) must have a non-null from state.",
+          "if": {
+            "properties": { "sequence": { "minimum": 2 } },
+            "required": ["sequence"]
+          },
+          "then": {
+            "properties": { "from": { "type": "string", "minLength": 1 } },
+            "required": ["from"]
+          }
+        }
+      ]
+    }
+  }
+}

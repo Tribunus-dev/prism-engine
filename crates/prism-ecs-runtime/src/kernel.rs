@@ -247,7 +247,15 @@ pub struct KernelHandle {
 // extensions which are not themselves marked Sync, even though they are
 // never accessed without the kernel's synchronization boundary. The handle
 // is the cross-thread boundary used by the daemon/application adapter.
+// SAFETY: `KernelHandle` exposes no mutable references to its inner state
+// without holding the kernel's internal lock. All cross-thread access is
+// serialized through that lock, so `Send` is sound. The inner types are
+// `Sync` because every field is either immutable, behind a synchronization
+// primitive, or only mutated through exclusive access.
 unsafe impl Send for KernelHandle {}
+// SAFETY: see `Send` impl above. `Sync` follows because the handle's
+// shared-reference operations all delegate to methods that take the kernel's
+// internal lock; no shared reference escapes the lock.
 unsafe impl Sync for KernelHandle {}
 
 impl KernelHandle {

@@ -1,3 +1,4 @@
+use prism_ecs_core::Entity;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
@@ -153,21 +154,21 @@ impl<T> Default for SparseSet<T> {
 /// Behavioral equivalence test helper.
 pub fn assert_sparse_equivalence<T: Clone + PartialEq + std::fmt::Debug>(
     set: &SparseSet<T>,
-    map: &std::collections::HashMap<u64, T>,
+    map: &std::collections::BTreeMap<Entity, T>,
 ) {
     for (&entity, value) in map {
         assert_eq!(
-            set.get(entity),
+            set.get(entity.id()),
             Some(value),
             "sparse set missing entity {}",
-            entity
+            entity.id()
         );
     }
     for (entity, value) in set.iter() {
         assert_eq!(
-            map.get(&entity),
+            map.get(&Entity::new(entity, 0)),
             Some(value),
-            "hash map missing entity {}",
+            "BTreeMap missing entity {}",
             entity
         );
     }

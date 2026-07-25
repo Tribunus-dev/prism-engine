@@ -1,6 +1,8 @@
 use crate::types::*;
 use crate::work::{Prerequisite, WorkKind, WorkState};
+use prism_ecs_core::Entity;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Resource claim — what resources this work item needs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -92,8 +94,13 @@ pub struct WorkLease {
 /// Maintains readiness indexes by kind and priority.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Scheduler {
-    /// Readiness index: work_entity ids grouped by WorkKind
-    ready_by_kind: std::collections::HashMap<WorkKind, Vec<u64>>,
+    /// Readiness index: work entity handles grouped by WorkKind.
+    ///
+    /// `BTreeMap` (not `HashMap`): the per-kind iteration order is part
+    /// of the canonical schedule and must be deterministic across
+    /// processes for replay. See AGENTS.md "no HashMap/HashSet for
+    /// canonical collections whose order is observable."
+    ready_by_kind: BTreeMap<WorkKind, Vec<Entity>>,
     /// Total ready count
     ready_count: usize,
     /// Next lease generation counter
@@ -103,7 +110,7 @@ pub struct Scheduler {
 impl Scheduler {
     pub fn new() -> Self {
         Self {
-            ready_by_kind: std::collections::HashMap::new(),
+            ready_by_kind: BTreeMap::new(),
             ready_count: 0,
             lease_gen: 0,
         }
@@ -116,7 +123,14 @@ impl Scheduler {
 
     /// Transition a work item to ready.
     pub fn mark_ready(&mut self, entity: u64, kind: WorkKind) {
-        self.ready_by_kind.entry(kind).or_default().push(entity);
+        // NOTE: the input is a raw `u64` entity id; the stored key is
+        // the typed `Entity` newtype so the readiness index participates
+        // in deterministic BTreeMap iteration. A typed handle is
+        // preferred but is gated on B-2 (the cmd! macro newtype refactor).
+        self.ready_by_kind
+            .entry(kind)
+            .or_default()
+            .push(Entity::new(entity, 0));
         self.ready_count += 1;
     }
 
@@ -129,7 +143,7 @@ impl Scheduler {
                     Some(entity) => {
                         self.lease_gen += 1;
                         leases.push(WorkLease {
-                            work_entity: entity,
+                            work_entity: entity.id(),
                             kind: *_kind,
                             lease_generation: self.lease_gen,
                             attempt: 0,
