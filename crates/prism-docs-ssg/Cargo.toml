@@ -1,0 +1,27 @@
+[package]
+name = "prism-docs-ssg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Prism docs SSG — composition root that loads the content manifest, builds the world, runs the schedule, and emits static HTML/CSS/JS to disk. Depends on prism-docs-content and prism-docs-runtime."
+
+[lib]
+name = "prism_docs_ssg"
+path = "src/lib.rs"
+
+[[bin]]
+name = "prism-docs-ssg"
+path = "src/main.rs"
+
+[dependencies]
+prism-docs-content = { workspace = true }
+prism-docs-runtime = { workspace = true }
+prism-ecs-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+clap = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

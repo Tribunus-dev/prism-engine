@@ -1,0 +1,30 @@
+/* Prism Engine docs — layout primitives.
+ *
+ * The max-width column, gutters, and the standard horizontal
+ * flow. Components compose these.
+ */
+
+* { box-sizing: border-box; }
+
+.page-column {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+.page-column-wide {
+  max-width: var(--max-width-wide);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
+
+.flow > * + * { margin-top: 1rem; }
+.flow-tight > * + * { margin-top: 0.5rem; }
+.flow-loose > * + * { margin-top: 2rem; }
+
+.row { display: flex; gap: var(--gutter); }
+.row-tight { display: flex; gap: var(--gutter-tight); }
+.row-loose { display: flex; gap: var(--gutter-loose); }
+
+.stack { display: flex; flex-direction: column; gap: var(--gutter-tight); }
+.stack-loose { display: flex; flex-direction: column; gap: var(--gutter-loose); }

@@ -1,0 +1,16 @@
+/* site-header — the top-of-page brand and navigation bar.
+ *
+ * Layout: brand on the left, nav on the right, separated by a
+ * hairline rule. Used on every page.
+ */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1rem var(--gutter);
+  border-bottom: 1px solid var(--color-rule);
+  background: var(--color-bg);
+}
+
+.site-header .brand { margin-right: auto; }

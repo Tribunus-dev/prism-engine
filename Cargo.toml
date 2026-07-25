@@ -196,6 +196,9 @@ members = [
     "crates/prism-rocm-runtime",
     "crates/prism-cuda-runtime",
     "crates/prism-amd-npu-runtime",
+    "crates/prism-docs-content",
+    "crates/prism-docs-runtime",
+    "crates/prism-docs-ssg",
 ]
 
 [workspace.package]
@@ -276,6 +279,14 @@ flate2 = "1"
 # Filesystem
 tempfile = "3"
 
+# Docs site ECS
+pulldown-cmark = { version = "0.10", default-features = false, features = ["html"] }
+toml = "0.8"
+walkdir = "2"
+web-sys = { version = "0.3", features = ["Document", "Element", "Window", "Node", "HtmlElement", "console"] }
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+
 # Network
 reqwest = { version = "0.11", features = ["json", "stream"] }
 
@@ -304,6 +315,8 @@ rusqlite = { version = "0.30", features = ["bundled"] }
 
 # Workspace-local path dependencies (not published)
 prism-ecs-core = { path = "crates/prism-ecs-core" }
+prism-docs-content = { path = "crates/prism-docs-content" }
+prism-docs-runtime = { path = "crates/prism-docs-runtime" }
 prism-ecs-runtime = { path = "crates/prism-ecs-runtime" }
 prism-ecs-constitutional = { path = "crates/prism-ecs-constitutional" }
 prism-ecs-source = { path = "crates/prism-ecs-source" }

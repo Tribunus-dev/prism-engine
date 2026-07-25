@@ -1,0 +1,22 @@
+/* toc — the chapter table of contents sidebar.
+ *
+ * Lists every chapter with its order. The link target is the
+ * chapter's id (the slug).
+ */
+
+.chapter-toc {
+  max-width: var(--max-width);
+  margin: 2rem auto;
+  padding: 1rem var(--gutter);
+  border-top: 1px solid var(--color-rule);
+  color: var(--color-muted);
+}
+
+.chapter-toc ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+
+.chapter-toc li {
+  margin: 0.25rem 0;
+}

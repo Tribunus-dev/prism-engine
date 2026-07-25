@@ -302,8 +302,11 @@ impl PatternRewriter {
         Self::swap_in_block(world, target, &new_ops)?;
 
         // Despawn the old target.
-        if !world.despawn(target) {
-            return Err(format!("despawn failed for {:?}", target));
+        let despawned = world
+            .despawn(target)
+            .map_err(|e| format!("despawn failed for {target:?}: {e}"))?;
+        if !despawned {
+            return Err(format!("despawn target was already dead: {:?}", target));
         }
 
         Ok(())
@@ -315,8 +318,11 @@ impl PatternRewriter {
         Self::remove_from_block(world, target)?;
 
         // Despawn the entity and all its values.
-        if !world.despawn(target) {
-            return Err(format!("despawn failed for {:?}", target));
+        let despawned = world
+            .despawn(target)
+            .map_err(|e| format!("despawn failed for {target:?}: {e}"))?;
+        if !despawned {
+            return Err(format!("despawn target was already dead: {:?}", target));
         }
         Ok(())
     }
@@ -582,9 +588,13 @@ impl PatternRewriter {
                     }
                 }
 
-                // Erase b.
+                // Erase b. Fire-and-forget despawn: this is a cleanup step
+                // in a rewriter loop and a stale handle here is unexpected
+                // but should not abort the whole sweep. The result is
+                // converted to Option and discarded; the must_use warning
+                // is satisfied by the `let _ =` binding.
                 Self::remove_from_block(world, b)?;
-                let _ = world.despawn(b);
+                let _ = world.despawn(b).ok();
                 changed = true;
             }
         }

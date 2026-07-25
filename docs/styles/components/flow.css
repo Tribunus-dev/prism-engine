@@ -1,0 +1,45 @@
+/* flow — inline horizontal / vertical flow diagrams.
+ *
+ * Used in chapters for "model → compile → cimage → runtime"
+ * style sequences. No JS, no SVG; pure HTML + CSS.
+ */
+
+.flow-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 2rem 0;
+  flex-wrap: wrap;
+}
+
+.flow-step {
+  flex: 1 1 0;
+  min-width: 12rem;
+  background: var(--color-surface);
+  padding: 1rem 1.25rem;
+  border-top: 2px solid var(--color-accent);
+}
+
+.flow-step + .flow-step {
+  border-left: 1px solid var(--color-rule);
+}
+
+.flow-step-num {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+  margin-bottom: 0.25rem;
+}
+
+.flow-step-title {
+  display: block;
+  font-weight: 700;
+  font-size: var(--font-size-md);
+  margin-bottom: 0.5rem;
+}
+
+.flow-step-body {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+}

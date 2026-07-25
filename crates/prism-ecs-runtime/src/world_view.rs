@@ -128,7 +128,11 @@ mod tests {
         let mut world = World::new();
         let spawned = world.spawn(EntityKind::Node, None).unwrap();
         let entity = spawned.entity;
-        assert!(world.despawn(entity), "despawn should succeed");
+        // Test scope: unwrap/expect are allowed in #[cfg(test)] modules.
+        assert!(
+            world.despawn(entity).expect("despawn should succeed"),
+            "despawn should succeed"
+        );
         let mtx = std::sync::RwLock::new(world);
         let view = WorldViewImpl::new(mtx.read().unwrap());
         assert!(!view.is_alive(entity));

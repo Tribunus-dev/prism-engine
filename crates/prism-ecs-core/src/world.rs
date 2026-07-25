@@ -204,16 +204,18 @@ impl World {
         if !self.mutation_policy.direct_mutations_allowed() {
             return Err(WorldError::DirectMutationDisallowed { operation: "spawn" });
         }
+        // Construct the Occupant with the final name upfront. The previous shape
+        // set `name: None` and then re-borrowed the slot through a chain of
+        // `Option::unwrap` calls to set the name; that produced 9 unwraps the
+        // constitutional no-panic rule rejects. Building once is also clearer.
+        let occupant = Occupant { kind, name };
         let (entity, allocation) = if let Some(free) = self.free_list.pop() {
             let idx = (free - 1) as usize;
             if idx < self.entity_meta.len() {
                 if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
                     let prev_gen = slot.generation;
                     slot.generation += 1;
-                    slot.occupant = Some(Occupant { kind, name: None });
-                    if let Some(n) = name {
-                        slot.occupant.as_mut().unwrap().name = Some(n);
-                    }
+                    slot.occupant = Some(occupant);
                     (
                         Entity::new(free, prev_gen + 1),
                         EntityAllocation::ReusedSlot {
@@ -223,35 +225,15 @@ impl World {
                 } else {
                     self.entity_meta[idx] = Some(EntitySlot {
                         generation: 0,
-                        occupant: Some(Occupant { kind, name: None }),
+                        occupant: Some(occupant),
                     });
-                    if let Some(n) = name {
-                        self.entity_meta[idx]
-                            .as_mut()
-                            .unwrap()
-                            .occupant
-                            .as_mut()
-                            .unwrap()
-                            .name = Some(n);
-                    }
                     (Entity::new(free, 0), EntityAllocation::NewSlot)
                 }
             } else {
                 self.entity_meta.push(Some(EntitySlot {
                     generation: 0,
-                    occupant: Some(Occupant { kind, name: None }),
+                    occupant: Some(occupant),
                 }));
-                if let Some(n) = name {
-                    self.entity_meta
-                        .last_mut()
-                        .unwrap()
-                        .as_mut()
-                        .unwrap()
-                        .occupant
-                        .as_mut()
-                        .unwrap()
-                        .name = Some(n);
-                }
                 (Entity::new(free, 0), EntityAllocation::NewSlot)
             }
         } else {
@@ -259,19 +241,8 @@ impl World {
             self.next_id += 1;
             self.entity_meta.push(Some(EntitySlot {
                 generation: 0,
-                occupant: Some(Occupant { kind, name: None }),
+                occupant: Some(occupant),
             }));
-            if let Some(n) = name {
-                self.entity_meta
-                    .last_mut()
-                    .unwrap()
-                    .as_mut()
-                    .unwrap()
-                    .occupant
-                    .as_mut()
-                    .unwrap()
-                    .name = Some(n);
-            }
             (Entity::new(id, 0), EntityAllocation::NewSlot)
         };
         Ok(SpawnedEntity { entity, allocation })
@@ -348,14 +319,23 @@ impl World {
         Ok(())
     }
 
-    pub fn stage_component<T: Component>(&mut self, entity: impl Into<Entity>, component: T) {
+    /// Stage a component insert to be applied at [`commit_stage`]. Returns
+    /// `WorldError::StaleHandle` if the entity handle is not valid. Constitutional
+    /// code does not panic on a stale handle; the caller decides whether to retry,
+    /// surface the error, or drop the staged operation.
+    pub fn stage_component<T: Component>(
+        &mut self,
+        entity: impl Into<Entity>,
+        component: T,
+    ) -> Result<(), WorldError> {
         let entity: Entity = entity.into();
         self.validate_generation(entity)
-            .expect("stage_component called with stale entity handle");
+            .ok_or(WorldError::StaleHandle { entity })?;
         self.staging
             .push(Box::new(move |store: &mut ComponentStore| {
                 store.insert::<T>(entity, component);
             }));
+        Ok(())
     }
 
     pub fn commit_stage(&mut self) {
@@ -657,22 +637,28 @@ impl World {
     }
 
     /// Despawn an entity: advance generation and release the slot for reuse.
-    /// Returns false if the entity was already dead.
-    pub fn despawn(&mut self, entity: impl Into<Entity>) -> bool {
+    ///
+    /// Returns `Ok(true)` if the entity was despawned by this call, `Ok(false)` if
+    /// the entity was already dead (idempotent), and `Err(WorldError::StaleHandle)`
+    /// if the handle refers to an entity that has never existed or whose generation
+    /// does not match. Constitutional code does not panic on a stale handle.
+    pub fn despawn(&mut self, entity: impl Into<Entity>) -> Result<bool, WorldError> {
         let entity: Entity = entity.into();
         if !self.is_alive(entity) {
-            return false;
+            return Ok(false);
         }
-        // Generation mismatch = caller has a stale handle — panic to catch bugs
+        // Live but generation-mismatched = caller has a stale handle. The handle
+        // resolves to a slot but the slot's generation is past the handle's
+        // generation; the entity has been despawned and possibly re-spawned.
         self.validate_generation(entity)
-            .expect("despawn called with stale entity handle");
+            .ok_or(WorldError::StaleHandle { entity })?;
         let idx = (entity.0 - 1) as usize;
         if let Some(Some(slot)) = self.entity_meta.get_mut(idx) {
             slot.generation += 1;
             slot.occupant = None;
         }
         self.free_list.push(entity.0);
-        true
+        Ok(true)
     }
 
     // ── Queries ───────────────────────────────────────────────────────────────

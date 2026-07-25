@@ -162,12 +162,17 @@ pub use model_manifest::{
     ModelProjectorBinding, ModelRequirements, MultiModelManifest,
 };
 pub mod compiler;
+pub mod plan_apply;
 pub use cimage::{emit_int8_ane_program, CImageError, TensorPayloadEntry, UniversalCImageWriter};
 pub use compiler::{
     compile_ecs_op_to_xdna_cimage, compile_gguf_compat, compile_int8_ane_tile_to_cimage,
-    compile_path, compile_path_with_backend, compile_source, compile_source_ecs,
+    compile_path, compile_path_with_backend, compile_source,
     compile_to_cimage_compat, compile_with_autodetect, detect_source,
 };
+// `compile_source_ecs` lives in `plan_apply` (constitutional decomposition,
+// 2026-07-25). Re-exported from `compiler` for backward compat with callers
+// that still import it from there.
+pub use compiler::compile_source_ecs;
 pub use uop::{
     benchmark_uop_graph_strategies, benchmark_uop_graph_strategies_with_runner,
     benchmark_uop_graph_workloads, benchmark_uop_graph_workloads_with_runner,

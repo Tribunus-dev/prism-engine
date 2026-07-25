@@ -1,0 +1,33 @@
+[package]
+name = "prism-docs-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The Prism docs site ECS — typed components, systems, renderers, and the WASM hydration entry. Depends on prism-ecs-core for the world, WorldTxn, and typed errors; depends on prism-docs-content for the typed entity shapes."
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+ssg = []
+hydrate = ["dep:wasm-bindgen", "dep:web-sys", "dep:js-sys"]
+wasm = ["hydrate"]
+
+[dependencies]
+prism-ecs-core = { workspace = true }
+prism-docs-content = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+pulldown-cmark = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true, optional = true }
+web-sys = { workspace = true, optional = true, features = ["Document", "Element", "Window", "HtmlElement", "NodeList", "console"] }
+js-sys = { workspace = true, optional = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

@@ -1,0 +1,64 @@
+/* chapter — a single chapter section on a page.
+ *
+ * One section per chapter. The header carries the title and
+ * reading time; the body is the rendered markdown.
+ */
+
+.chapter {
+  margin: 3rem 0;
+  padding: 1.5rem 0;
+  border-top: 1px solid var(--color-rule);
+}
+
+.chapter:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.chapter-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.chapter-title {
+  font-size: var(--font-size-2xl);
+  margin: 0;
+}
+
+.chapter-reading {
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.chapter-intent {
+  font-size: 1.05rem;
+  color: var(--color-fg);
+  margin: 0.5rem 0;
+}
+
+.chapter-blurb {
+  color: var(--color-muted);
+  margin: 0.5rem 0;
+}
+
+.chapter-body {
+  margin-top: 1rem;
+}
+
+.chapter-body h2 {
+  font-size: var(--font-size-xl);
+  margin-top: 2rem;
+}
+
+.chapter-body h3 {
+  font-size: var(--font-size-lg);
+  margin-top: 1.5rem;
+}
+
+.chapter-missing-body {
+  color: var(--color-muted);
+  font-style: italic;
+}

@@ -1,0 +1,79 @@
+/* demo — the apple silicon demo workflow visualization.
+ *
+ * Four gates. The hydration JS toggles which gate is active
+ * via the data-active attribute.
+ */
+
+.demo-workflow {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  margin: 2rem 0;
+}
+
+.demo-gate {
+  background: var(--color-surface);
+  padding: 1rem 1.25rem;
+  border-top: 3px solid var(--color-muted);
+  text-align: center;
+}
+
+.demo-gate[data-active="true"] {
+  border-top-color: var(--color-accent);
+  background: var(--color-claim-bg);
+}
+
+.demo-gate-num {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+  margin-bottom: 0.25rem;
+}
+
+.demo-gate-title {
+  display: block;
+  font-weight: 700;
+  font-size: var(--font-size-md);
+  margin-bottom: 0.5rem;
+}
+
+.demo-gate-body {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+}
+
+.demo-controls {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.demo-control {
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  color: var(--color-fg);
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-family: var(--font-mono);
+}
+
+.demo-bands {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.demo-band {
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-muted);
+  padding: 1rem 1.25rem;
+}
+
+.demo-band[data-status="ready"] { border-left-color: #8effa3; }
+.demo-band[data-status="active"] { border-left-color: var(--color-accent); }
+.demo-band[data-status="gated"] { border-left-color: #ffb86c; }

@@ -1,0 +1,101 @@
+/* capability — the capabilities filterable grid.
+ *
+ * A grid of capability cards. Filter buttons toggle visibility
+ * via the data-filter attribute. The hydration JS reads the
+ * data-* attributes and toggles a single class.
+ */
+
+.capability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+
+.capability-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+}
+
+.capability-card[data-class="measured"] {
+  border-left: 3px solid #ffb86c;
+}
+
+.capability-card[data-class="verified"] {
+  border-left: 3px solid var(--color-accent);
+}
+
+.capability-card[data-class="compile-verified"] {
+  border-left: 3px solid #8effa3;
+}
+
+.capability-card[data-class="planned"] {
+  border-left: 3px solid var(--color-muted);
+}
+
+.capability-card[data-class="illustrative"] {
+  border-left: 3px solid var(--color-accent-warm);
+}
+
+.capability-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.5rem;
+}
+
+.capability-card-title {
+  font-size: var(--font-size-md);
+  font-weight: 700;
+  margin: 0;
+}
+
+.capability-card-state {
+  font-size: var(--font-size-sm);
+  color: var(--color-muted);
+}
+
+.capability-card-body {
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+  margin: 0.5rem 0;
+}
+
+.capability-card-source {
+  font-size: 0.75rem;
+  color: var(--color-muted);
+  font-family: var(--font-mono);
+}
+
+.capability-filters {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 1rem 0;
+}
+
+.capability-filter {
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule);
+  color: var(--color-muted);
+  padding: 0.4rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+}
+
+.capability-filter[aria-pressed="true"] {
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border-color: var(--color-accent);
+}
+
+.capability-meta {
+  display: flex;
+  gap: 2rem;
+  margin-top: 1rem;
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}

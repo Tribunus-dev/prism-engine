@@ -12,5 +12,8 @@ bincode = "1"
 uuid = { workspace = true }
 lmdb-rkv = { version = "0.14", optional = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+uuid = { workspace = true, features = ["js"] }
+
 [features]
 lmdb = ["dep:lmdb-rkv"]

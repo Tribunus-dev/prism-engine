@@ -1,0 +1,20 @@
+/* nav — the site navigation list.
+ *
+ * The nav lists every page. A page is the nav entity, not a
+ * hand-rolled <a>. The renderer emits one link per page.
+ */
+
+.site-nav {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.site-nav-link {
+  color: var(--color-muted);
+  font-size: var(--font-size-md);
+}
+
+.site-nav-link[aria-current="page"] {
+  color: var(--color-fg);
+}

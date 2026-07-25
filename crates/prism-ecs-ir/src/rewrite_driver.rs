@@ -132,8 +132,10 @@ impl PatternRewriter for RewriteDriverState {
         let _ = world.remove_component::<OpName>(op);
         let _ = world.remove_component::<Operands>(op);
         let _ = world.remove_component::<Results>(op);
-        // Despawn old op
-        world.despawn(op);
+        // Despawn old op. The handle was just validated by `block_containing_op`
+        // and `op_position`; a StaleHandle here indicates a re-entrant rewrite
+        // bug, so propagate as a String error.
+        world.despawn(op).map_err(|e| format!("despawn failed for {op:?}: {e}"))?;
 
         // Insert new ops at the old position in the block
         if let Some(bops) = world.get_component_mut::<BlockOps>(block) {
@@ -164,8 +166,9 @@ impl PatternRewriter for RewriteDriverState {
         let _ = world.remove_component::<OpName>(op);
         let _ = world.remove_component::<Operands>(op);
         let _ = world.remove_component::<Results>(op);
-        // Despawn the op entity
-        world.despawn(op);
+        // Despawn the op entity. The handle was just validated; a StaleHandle
+        // here indicates a re-entrant rewrite bug, so propagate.
+        world.despawn(op).map_err(|e| format!("despawn failed for {op:?}: {e}"))?;
 
         self.mark_visited(op);
         Ok(())

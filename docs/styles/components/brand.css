@@ -1,0 +1,26 @@
+/* brand — the prism dispersion mark and wordmark.
+ *
+ * The mark is a CSS-only gradient block. The wordmark is the
+ * canonical name. A brand is a single authority.
+ */
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-fg);
+}
+
+.brand:hover { text-decoration: none; }
+
+.brand-mark {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-warm));
+  border-radius: 4px;
+}
+
+.brand-name { font-size: var(--font-size-md); }

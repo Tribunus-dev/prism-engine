@@ -1,0 +1,47 @@
+/* Prism Engine docs — design tokens.
+ *
+ * This is the foundation for every component. Tokens are
+ * stable; component CSS reads them. Editing a token is a
+ * constitutional change because every component depends on
+ * it.
+ */
+
+:root {
+  /* Color palette. The accent is the prism dispersion color;
+   * the muted gray is the observatory ambient. */
+  --color-bg: #0c0c10;
+  --color-fg: #e8e8ee;
+  --color-accent: #6ad4ff;
+  --color-accent-warm: #c56ad4;
+  --color-muted: #8a8a9c;
+  --color-rule: #1c1c24;
+  --color-surface: #11111a;
+  --color-claim-bg: #11111a;
+
+  /* Typography. The system font stack is the default; mono
+   * is for receipts, commands, and identifiers. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --font-size-base: 16px;
+  --font-size-sm: 0.85rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.1rem;
+  --font-size-xl: 1.4rem;
+  --font-size-2xl: 1.8rem;
+  --font-size-3xl: 2.5rem;
+  --line-height-base: 1.55;
+
+  /* Layout. The max-width is the canonical page column. */
+  --max-width: 64rem;
+  --max-width-wide: 80rem;
+  --gutter: 2rem;
+  --gutter-tight: 1rem;
+  --gutter-loose: 3rem;
+
+  /* Z-index scale. Components must read from this scale, not
+   * invent their own. */
+  --z-base: 0;
+  --z-elevated: 10;
+  --z-overlay: 100;
+  --z-modal: 1000;
+}

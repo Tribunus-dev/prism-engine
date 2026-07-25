@@ -1,0 +1,18 @@
+[package]
+name = "prism-docs-content"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Typed content schema for the Prism Engine docs site. Owns the manifest, chapter/ADR/claim entity parsing, and the markdown-to-HTML pipeline. Has no ECS dependency — the typed view is consumed by prism-docs-runtime."
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+pulldown-cmark = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+tempfile = { workspace = true }

@@ -1,0 +1,16 @@
+/* page — the main content column for a page route.
+ *
+ * One page-column per page. Chapters and claims compose into
+ * it. The page blurb sits at the top.
+ */
+
+.page-body {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: var(--gutter-tight) var(--gutter) 4rem;
+}
+
+.page-blurb {
+  font-size: var(--font-size-lg);
+  color: var(--color-muted);
+}

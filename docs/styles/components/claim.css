@@ -1,0 +1,57 @@
+/* claim — a single claim article.
+ *
+ * Claims carry a class and a state in their data attributes.
+ * CSS reveals those classes through visual treatment.
+ */
+
+.claim {
+  border-left: 3px solid var(--color-accent);
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  background: var(--color-claim-bg);
+}
+
+.claim-text {
+  margin: 0;
+}
+
+.claim-sources {
+  margin: 0.5rem 0 0;
+  padding-left: 1rem;
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.claim-source { margin: 0.25rem 0; }
+
+/* Class-specific visual treatment. A claim's class is part of
+ * its typed component. */
+.claim[data-class="measured"] {
+  border-left-color: #ffb86c;
+}
+
+.claim[data-class="illustrative"] {
+  border-left-color: var(--color-accent-warm);
+}
+
+.claim[data-class="repository"] {
+  border-left-color: #8effa3;
+}
+
+.claim[data-class="compile-verified"] {
+  border-left-color: var(--color-accent);
+}
+
+.claim[data-state="measured"] .claim-text::after {
+  content: " · measured";
+  color: var(--color-muted);
+  font-size: var(--font-size-sm);
+}
+
+.claims {
+  margin: 3rem 0;
+}
+
+.claims-title {
+  font-size: var(--font-size-xl);
+}

@@ -1,0 +1,25 @@
+/* hero — the page-level headline and lede.
+ *
+ * The hero is the page's first projection. It uses the
+ * chapter's intent as the headline, the page's blurb as the
+ * lede, and the chapter-toc as a side panel.
+ */
+
+.hero {
+  padding: 4rem var(--gutter) 2rem;
+  max-width: var(--max-width);
+  margin: 0 auto;
+}
+
+.hero-headline {
+  font-size: var(--font-size-3xl);
+  margin: 0 0 1rem;
+  line-height: 1.15;
+}
+
+.hero-blurb {
+  font-size: var(--font-size-lg);
+  color: var(--color-muted);
+  margin: 0;
+  max-width: 48rem;
+}
