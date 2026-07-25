@@ -5,6 +5,13 @@ edition.workspace = true
 license.workspace = true
 description = "Prism ECS constitutional commands — session, work, execution, compilation, multimodal, agent, distributed, and ingress authority systems"
 
+[features]
+# Enable the bridge from prism-ecs-quantization's QuantizationResult
+# into the constitutional QuantizationResultComponent. Disabled by
+# default so the constitutional crate stays free of compiler
+# dependencies.
+quantization-bridge = ["dep:prism-ecs-quantization", "dep:prism-ecs-ir"]
+
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
 serde_json = "1"
@@ -15,3 +22,5 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 strum = { workspace = true }
 parking_lot = { workspace = true }
+prism-ecs-quantization = { path = "../prism-ecs-quantization", optional = true }
+prism-ecs-ir = { path = "../prism-ecs-ir", optional = true }

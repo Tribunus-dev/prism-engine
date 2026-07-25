@@ -22,6 +22,7 @@ pub const SCHEMA_JOB_LIFECYCLE: u64 = 35;
 pub const SCHEMA_VALIDATION_RECEIPT: u64 = 36;
 pub const SCHEMA_QUANTIZATION_PLAN: u64 = 37;
 pub const SCHEMA_CIMAGE_PROMOTION: u64 = 38;
+pub const SCHEMA_QUANTIZATION_RESULT: u64 = 39;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Component Types
@@ -72,6 +73,10 @@ pub struct JobOutput {
 pub enum JobLifecycle {
     Pending,
     Compiling,
+    /// A structured `QuantizationResultComponent` has been attached to
+    /// the job. The per-tensor decisions exist; the artifact has not
+    /// yet been sealed.
+    Planned,
     Validating,
     Failed,
     Sealed,
@@ -83,14 +88,16 @@ impl JobLifecycle {
     ///
     /// Valid transitions:
     /// - Pending → Compiling
-    /// - Compiling → Validating
+    /// - Compiling → Planned
+    /// - Planned → Validating | Failed
     /// - Validating → Failed | Sealed
     /// - Sealed → Promoted
     pub fn can_transition_to(&self, target: Self) -> bool {
         matches!(
             (self, target),
             (Self::Pending, Self::Compiling)
-                | (Self::Compiling, Self::Validating)
+                | (Self::Compiling, Self::Planned)
+                | (Self::Planned, Self::Validating | Self::Failed)
                 | (Self::Validating, Self::Failed | Self::Sealed)
                 | (Self::Sealed, Self::Promoted)
         )
@@ -123,6 +130,55 @@ pub struct CimagePromotion {
     pub promotion_generation: u32,
     pub validation_receipt_ids: Vec<u64>,
     pub promoted_at: Timestamp,
+}
+
+/// Per-tensor result of a quantization pass, attached to a `CompilationJob`.
+///
+/// This is the constitutional counterpart of
+/// `prism_ecs_quantization::QuantizationResult`. It is the structured
+/// evidence that the per-tensor codecs ran and produced specific
+/// representations. The job cannot transition from `Compiling` to
+/// `Validating` without this component attached.
+///
+/// `selections` is the canonical ordered list of decisions. Its digest
+/// is what `CImage` emission later seals.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuantizationResultComponent {
+    /// Content digest of the source model the selections were derived from.
+    pub source_digest: String,
+    /// Target hardware identifier (e.g. "apple-m1", "cpu").
+    pub target_hardware: String,
+    /// Per-tensor selections, in source-graph iteration order.
+    pub selections: Vec<QuantizedTensorSelectionComponent>,
+    /// Default format used for tensors that did not appear in the
+    /// caller-supplied `FormatPlan`. Surfaced explicitly so receipts
+    /// can prove the default policy was applied.
+    pub default_format: String,
+    /// Schema version of the originating `prism_ecs_quantization` plan.
+    /// Bumped if the on-wire shape changes.
+    pub schema_version: u32,
+}
+
+/// A single per-tensor selection — the constitutional counterpart of
+/// `prism_ecs_quantization::QuantizedTensorSelection`. Stores the
+/// payload bytes and the format that was actually applied.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QuantizedTensorSelectionComponent {
+    pub key: String,
+    /// `TensorFormat` discriminant, encoded as a string for
+    /// forward-compatibility. Decoded via
+    /// `prism_ecs_quantization::TensorFormat::discriminant_byte` /
+    /// `from_discriminant_byte` (the latter is added when the
+    /// first version of this component ships).
+    pub format_discriminant: u8,
+    /// CImage-ready payload bytes for the applied codec.
+    pub payload: Vec<u8>,
+    /// `TensorType` discriminant (CImage physical type).
+    pub tensor_type_discriminant: u8,
+    pub dim_m: u32,
+    pub dim_n: u32,
+    pub effective_bpp: f32,
+    pub payload_bytes: u64,
 }
 
 // ── Component Trait impls ────────────────────────────────────────────────────
@@ -223,6 +279,30 @@ impl DurableComponent for CimagePromotion {
     };
 }
 
+impl prism_ecs_core::Component for QuantizationResultComponent {}
+impl ClassifiedComponent for QuantizationResultComponent {
+    type Class = DurableClass;
+}
+impl DurableComponent for QuantizationResultComponent {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 39,
+        version: 1,
+    };
+}
+
+impl prism_ecs_core::Component for QuantizedTensorSelectionComponent {}
+impl ClassifiedComponent for QuantizedTensorSelectionComponent {
+    type Class = DurableClass;
+}
+impl DurableComponent for QuantizedTensorSelectionComponent {
+    const SCHEMA_KEY: SchemaKey = SchemaKey {
+        namespace: "prism.compilation",
+        id: 40,
+        version: 1,
+    };
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Schema Validation
 // ══════════════════════════════════════════════════════════════════════════════
@@ -245,6 +325,8 @@ pub fn validate_compilation_schemas(reg: &SchemaRegistry) -> Result<(), String> 
         .map_err(|e| format!("QuantizationPlan schema: {e}"))?;
     reg.verify_type::<CimagePromotion>(ComponentSchemaId(SCHEMA_CIMAGE_PROMOTION))
         .map_err(|e| format!("CimagePromotion schema: {e}"))?;
+    reg.verify_type::<QuantizationResultComponent>(ComponentSchemaId(SCHEMA_QUANTIZATION_RESULT))
+        .map_err(|e| format!("QuantizationResultComponent schema: {e}"))?;
     Ok(())
 }
 
@@ -431,6 +513,129 @@ impl SubmitValidationReceiptCommand {
 
         Ok((epoch, event))
     }
+}
+
+/// Command to submit a `QuantizationResultComponent` for a compilation
+/// job. This is the chokepoint between per-tensor compilation (which
+/// lives in `prism_ecs_quantization`) and the constitutional
+/// `CompilationJob` entity. After this command, the job has a
+/// `Planned` lifecycle and a structured plan that downstream
+/// validation and emission can read.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubmitQuantizationResultCommand {
+    pub id: MessageId,
+    /// Entity ID of the job receiving the plan. See [`Entity`] for the
+    /// canonical generational entity handle.
+    pub job_entity: u64,
+    /// The structured per-tensor result.
+    pub result: QuantizationResultComponent,
+}
+
+impl SubmitQuantizationResultCommand {
+    /// Preflight: validate schemas and that the job exists in a
+    /// compatible lifecycle (`Compiling` is the only accepted source).
+    pub fn preflight(
+        &self,
+        world: &World,
+        schema_registry: &SchemaRegistry,
+    ) -> Result<(), CompilationError> {
+        validate_compilation_schemas(schema_registry)
+            .map_err(CompilationError::SchemaError)?;
+
+        let entity = Entity::new(self.job_entity, 0);
+        if !world.has_entity(entity) {
+            return Err(CompilationError::JobNotFound(self.job_entity));
+        }
+        let lifecycle = world
+            .get_component::<JobLifecycle>(entity)
+            .ok_or(CompilationError::JobNotFound(self.job_entity))?;
+        if *lifecycle != JobLifecycle::Compiling {
+            return Err(CompilationError::InvalidState {
+                job_id: self.job_entity,
+                expected: JobLifecycle::Compiling,
+                actual: *lifecycle,
+            });
+        }
+        Ok(())
+    }
+
+    /// Execute: attach the result and transition the lifecycle to
+    /// `Planned`.
+    pub fn execute(
+        self,
+        world: &mut World,
+        schema_registry: &SchemaRegistry,
+    ) -> Result<(CommittedEpoch, DomainEvent), CompilationError> {
+        self.preflight(world, schema_registry)?;
+
+        let entity = Entity::new(self.job_entity, 0);
+        let mut txn = WorldTxn::new(world);
+
+        txn.put_durable(entity, self.result.clone());
+        txn.put_durable(entity, JobLifecycle::Planned);
+
+        let event = DomainEvent {
+            id: self.id,
+            kind: "quantization_result_submitted".to_string(),
+            entity_id: Some(EntityKindId(self.job_entity)),
+            payload: serde_json::json!({
+                "job_entity": self.job_entity,
+                "selection_count": self.result.selections.len(),
+                "default_format": self.result.default_format,
+            }),
+        };
+        txn.emit_event(event.clone());
+
+        let epoch = world.transit(txn).map_err(CompilationError::CommitFailed)?;
+
+        Ok((epoch, event))
+    }
+}
+
+/// Convert a `prism_ecs_quantization::QuantizationResult` into the
+/// constitutional `QuantizationResultComponent`.
+///
+/// This lives in the constitutional crate because it is the only
+/// place that knows the wire-format on the ECS side. The
+/// `prism_ecs_quantization` crate stays pure of constitutional
+/// dependencies.
+#[cfg(feature = "quantization-bridge")]
+pub fn quantization_result_to_component(
+    result: &prism_ecs_quantization::QuantizationResult,
+) -> QuantizationResultComponent {
+    use prism_ecs_quantization::cimage::TensorType;
+    use prism_ecs_ir::evolution::mutation_table::TensorFormat;
+
+    fn tensor_type_discriminant(t: &TensorType) -> u8 {
+        t.discriminant_byte()[0]
+    }
+
+    QuantizationResultComponent {
+        source_digest: result.source_digest.clone(),
+        target_hardware: result.target_hardware.clone(),
+        selections: result
+            .selections
+            .iter()
+            .map(|s| QuantizedTensorSelectionComponent {
+                key: s.key.clone(),
+                format_discriminant: s.format.discriminant_byte(),
+                payload: s.payload.clone(),
+                tensor_type_discriminant: tensor_type_discriminant(&s.tensor_type),
+                dim_m: s.dim_m,
+                dim_n: s.dim_n,
+                effective_bpp: s.effective_bpp,
+                payload_bytes: s.payload_bytes,
+            })
+            .collect(),
+        default_format: format!("{:?}", result.default_format),
+        schema_version: 1,
+    }
+}
+
+/// Reference to the default format for runtime use. Re-exported for
+/// code that needs the typed value but cannot import the IR enum.
+pub fn default_format_name() -> &'static str {
+    "Palettized4Bit"
 }
 
 /// Command to promote a compiled CImage to the Sealed state.
@@ -721,6 +926,13 @@ mod tests {
             "CImage promotion record",
             Default::default(),
         );
+        reg.register_for_type::<QuantizationResultComponent>(
+            ComponentSchemaId(SCHEMA_QUANTIZATION_RESULT),
+            SchemaVersion(1),
+            "QuantizationResultComponent",
+            "Per-tensor quantization result attached to a job",
+            Default::default(),
+        );
         reg
     }
 
@@ -730,7 +942,9 @@ mod tests {
     fn test_job_lifecycle_transitions() {
         // Valid transitions
         assert!(JobLifecycle::Pending.can_transition_to(JobLifecycle::Compiling));
-        assert!(JobLifecycle::Compiling.can_transition_to(JobLifecycle::Validating));
+        assert!(JobLifecycle::Compiling.can_transition_to(JobLifecycle::Planned));
+        assert!(JobLifecycle::Planned.can_transition_to(JobLifecycle::Validating));
+        assert!(JobLifecycle::Planned.can_transition_to(JobLifecycle::Failed));
         assert!(JobLifecycle::Validating.can_transition_to(JobLifecycle::Failed));
         assert!(JobLifecycle::Validating.can_transition_to(JobLifecycle::Sealed));
         assert!(JobLifecycle::Sealed.can_transition_to(JobLifecycle::Promoted));
@@ -739,9 +953,13 @@ mod tests {
         assert!(!JobLifecycle::Pending.can_transition_to(JobLifecycle::Sealed));
         assert!(!JobLifecycle::Pending.can_transition_to(JobLifecycle::Promoted));
         assert!(!JobLifecycle::Pending.can_transition_to(JobLifecycle::Failed));
+        assert!(!JobLifecycle::Pending.can_transition_to(JobLifecycle::Planned));
         assert!(!JobLifecycle::Compiling.can_transition_to(JobLifecycle::Pending));
         assert!(!JobLifecycle::Compiling.can_transition_to(JobLifecycle::Sealed));
         assert!(!JobLifecycle::Compiling.can_transition_to(JobLifecycle::Promoted));
+        assert!(!JobLifecycle::Compiling.can_transition_to(JobLifecycle::Validating));
+        assert!(!JobLifecycle::Planned.can_transition_to(JobLifecycle::Compiling));
+        assert!(!JobLifecycle::Planned.can_transition_to(JobLifecycle::Promoted));
         assert!(!JobLifecycle::Validating.can_transition_to(JobLifecycle::Compiling));
         assert!(!JobLifecycle::Sealed.can_transition_to(JobLifecycle::Validating));
         assert!(!JobLifecycle::Sealed.can_transition_to(JobLifecycle::Failed));

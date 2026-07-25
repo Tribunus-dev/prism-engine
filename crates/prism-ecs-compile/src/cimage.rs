@@ -59,6 +59,61 @@ pub enum TensorType {
     Nf8,
 }
 
+impl TensorType {
+    /// Stable single-byte discriminant for content addressing.
+    ///
+    /// **The wire format is the `prism_ecs_quantization::cimage::TensorType`
+    /// discriminant order** — the canonical order used by the
+    /// constitutional `QuantizationResultComponent`. The Rust enum
+    /// order above is preserved for backward compatibility with
+    /// v1-serialized CImage headers; the discriminant method is the
+    /// only thing that crosses the wire.
+    ///
+    /// Do not change the mapping table without bumping the
+    /// `QuantizationResultComponent` `schema_version`.
+    pub fn discriminant_byte(&self) -> [u8; 1] {
+        // Mapping table from the canonical (quantization-crate) order
+        // to this enum. Same byte values as
+        // `prism_ecs_quantization::cimage::TensorType::discriminant_byte`.
+        let n: u8 = match self {
+            TensorType::Bf16 => 0,
+            TensorType::Int8 => 1,
+            TensorType::Nf8 => 2,
+            TensorType::StandardFP16 => 3,
+            TensorType::Palettized4Bit => 4,
+            TensorType::Blob => 5,
+            TensorType::Ternary158 => 6,
+            TensorType::Binary1 => 7,
+            TensorType::NF4 => 8,
+            TensorType::Int4 => 9,
+            TensorType::TernaryTile640 => 10,
+            TensorType::FP8 => 11,
+        };
+        [n]
+    }
+
+    /// Reverse mapping for `discriminant_byte`. Returns `None` for an
+    /// unknown byte so callers can detect stale or corrupted schema
+    /// versions without panicking.
+    pub fn from_discriminant_byte(byte: u8) -> Option<TensorType> {
+        match byte {
+            0 => Some(TensorType::Bf16),
+            1 => Some(TensorType::Int8),
+            2 => Some(TensorType::Nf8),
+            3 => Some(TensorType::StandardFP16),
+            4 => Some(TensorType::Palettized4Bit),
+            5 => Some(TensorType::Blob),
+            6 => Some(TensorType::Ternary158),
+            7 => Some(TensorType::Binary1),
+            8 => Some(TensorType::NF4),
+            9 => Some(TensorType::Int4),
+            10 => Some(TensorType::TernaryTile640),
+            11 => Some(TensorType::FP8),
+            _ => None,
+        }
+    }
+}
+
 /// Versioned physical ternary descriptor. Optional metadata remains backward
 /// compatible with legacy CImages that only carried `TensorType`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -1548,63 +1603,6 @@ impl TensorRecord {
             n_pages,
         ))
     }
-}
-
-/// Append a blob payload to an already-finalized .cimage file.
-pub fn cimage_append_blob(
-    path: &std::path::Path,
-    name: &str,
-    payload: &[u8],
-) -> Result<(), String> {
-    use std::io::{Seek, Write};
-    let reader = CImageReader::open(path)?;
-    let end_offset = reader
-        .header
-        .tensors
-        .values()
-        .map(|r| r.offset + r.size)
-        .max()
-        .unwrap_or(HEADER_PAGES * PAGE_SIZE);
-    let aligned = end_offset.div_ceil(PAGE_SIZE) * PAGE_SIZE;
-    let mut file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .map_err(|e| format!("open: {e}"))?;
-    file.seek(SeekFrom::Start(aligned))
-        .map_err(|e| format!("seek: {e}"))?;
-    file.write_all(payload)
-        .map_err(|e| format!("write blob: {e}"))?;
-    let mut header = reader.header;
-    header.tensors.insert(
-        name.to_string(),
-        TensorRecord {
-            tensor_type: TensorType::Blob,
-            offset: aligned,
-            size: payload.len() as u64,
-            dim_m: 0,
-            dim_n: 0,
-            scale_offset: None,
-            scale_size: None,
-            ternary: None,
-            moe: None,
-            vision: None,
-            semantic_family: None,
-            router_sensitive: false,
-        },
-    );
-    let hdr_json = serde_json::to_string(&header).map_err(|e| format!("serialize: {e}"))?;
-    file.seek(SeekFrom::Start(0))
-        .map_err(|e| format!("seek: {e}"))?;
-    file.write_all(MAGIC)
-        .map_err(|e| format!("write magic: {e}"))?;
-    let hdr_size = hdr_json.len() as u64;
-    file.write_all(&hdr_size.to_le_bytes())
-        .map_err(|e| format!("write size: {e}"))?;
-    file.write_all(hdr_json.as_bytes())
-        .map_err(|e| format!("write json: {e}"))?;
-    file.flush().map_err(|e| format!("flush: {e}"))?;
-    Ok(())
 }
 
 /// Read a named blob payload from a .cimage file.

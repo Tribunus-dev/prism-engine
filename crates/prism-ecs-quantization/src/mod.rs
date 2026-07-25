@@ -88,6 +88,10 @@ pub mod oq;
 pub mod palette;
 /// Per-class precision policy and M1 memory budget admission.
 pub mod precision_policy;
+/// Per-tensor quantization result types — the structured plan that
+/// downstream emission and the constitutional ECS read instead of
+/// recomputing per-tensor policy.
+pub mod quantization_plan;
 /// SafeTensor provider — implements `TensorProvider` for safetensors directories.
 pub mod safetensors_provider;
 /// Internal semantic tensor-family classification and layout candidate planning.
@@ -100,3 +104,9 @@ pub use contract::*;
 pub use validation::*;
 
 pub use substitution::SubstitutionContext;
+
+/// Per-tensor quantization result types. Re-exported so that downstream
+/// callers (the constitutional ECS, the CLI, the dashboard) can
+/// reference the plan by its canonical name without depending on the
+/// module path.
+pub use quantization_plan::{QuantizationResult, QuantizedTensorSelection};

@@ -8,6 +8,7 @@ autotests = false
 
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
+prism-ecs-constitutional = { path = "../prism-ecs-constitutional", features = ["quantization-bridge"] }
 prism-ecs-source = { path = "../prism-ecs-source" }
 prism-ecs-kernel = { path = "../prism-ecs-kernel" }
 prism-ecs-codec = { path = "../prism-ecs-codec" }

@@ -405,18 +405,38 @@ fn pull(repo: &str) {
     eprintln!("{} shard(s)", shard_count);
 
     // 5. Compile to .cimage.
+    //
+    // Constitutional cutover: build a structured quantization plan first,
+    // then write the CImage from the plan. The plan is observable before
+    // any bytes hit disk — a future change can route the plan through
+    // the kernel's `CreateCompilationJob` + `SubmitQuantizationResult`
+    // commands and skip the direct writer call entirely.
     eprintln!("  [4/4] compiling... ");
     let out_cimage = cimage_path(&name);
-    if let Err(e) = prism_ecs_quantization::compiler::compile_to_cimage(
+    let plan = match prism_ecs_quantization::compiler::build_quantization_plan(
         &graph,
         &safetensors_dir,
-        &out_cimage,
         has_metal(),
-        |_, _, _, _, _| {},
         None,
         CompilationBackend::Default,
+        &name,
+        if has_metal() { "apple-m1" } else { "cpu" },
+        |_, _, _, _, _| {},
     ) {
-        eprintln!("Compilation failed: {e}");
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Compilation failed: {e}");
+            std::process::exit(1);
+        }
+    };
+    eprintln!(
+        "[prism:compile] plan ready: {} tensors, {} explicit, {} default",
+        plan.selections.len(),
+        plan.explicit_format_count(),
+        plan.default_format_count(),
+    );
+    if let Err(e) = prism_ecs_quantization::compiler::write_cimage_from_plan(&plan, &out_cimage) {
+        eprintln!("CImage emission failed: {e}");
         std::process::exit(1);
     }
 

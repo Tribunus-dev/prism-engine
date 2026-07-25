@@ -1,0 +1,211 @@
+# ============================================================================
+# Prism constitutional Rust — strict clippy configuration ("angry PM")
+#
+# Install at the project root. The file is split into two parts:
+#
+#   Part 1: this file. Copy verbatim to <repo>/clippy.toml.
+#   Part 2: the Cargo.toml block at the bottom. Copy into <repo>/Cargo.toml
+#           under [workspace.lints.rust] and [workspace.lints.clippy].
+#   Part 3: the per-crate opt-in (also at the bottom). Copy into each
+#           constitutional crate's Cargo.toml.
+#   Part 4: the test-module allows (also at the bottom). Paste at the top
+#           of any `#[cfg(test)]` module that needs unwrap/expect/panic.
+#
+# CI gate (deny warnings as errors):
+#   cargo clippy --workspace --all-targets --all-features -- -D warnings
+#
+# Rationale and per-rule justification: references/rust-quality.md
+# Override mechanism: WAIVER comments + Completion report entries
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Part 1: clippy.toml — thresholds and disallowed items
+# ----------------------------------------------------------------------------
+
+# Function complexity. Above this threshold, a function is hiding authority
+# boundaries. (Type-level invariants don't help if the function is too tangled
+# to read.)
+cognitive-complexity-threshold = 30
+
+# Argument count. More than this is a fanout smell — usually a godfunction in
+# disguise. If a function genuinely needs 6+ args, the args are usually a
+# struct that should be a typed input.
+too-many-arguments-threshold = 5
+
+# Function length. Catches copy-paste godfunctions and accidental godfiles
+# written as one giant function. Decompose by authority, not by line.
+too-many-lines-threshold = 80
+
+# Type complexity. A type that needs a comment to parse is hiding structure.
+# Type-level invariants help when the types are legible.
+type-complexity-threshold = 250
+
+# Struct bool count. A struct with this many bools is a state machine in
+# disguise. Promote the bools to an enum with named variants.
+max-struct-bools = 2
+
+# Single-char binding names. Only `i`, `j`, `k` for indices in short loops.
+# Beyond this, the name should say what the value is.
+single-char-binding-names-threshold = 4
+
+# Enum variant name prefix threshold. e.g. Status::StatusActive is bad —
+# the prefix repeats the type name.
+enum-variant-name-threshold = 3
+
+# ----------------------------------------------------------------------------
+# Disallowed methods. Override per-site with #[allow] + WAIVER comment.
+# clippy's disallowed-methods covers std::* paths. For crate-local bans,
+# add `#![deny(...)]` at the crate root or extend this list.
+# ----------------------------------------------------------------------------
+
+[[disallowed-methods]]
+path = "std::option::Option::unwrap"
+reason = "Constitutional code never panics. Use ? or match. See references/rust-quality.md §No-panic discipline."
+
+[[disallowed-methods]]
+path = "std::result::Result::unwrap"
+reason = "Constitutional code never panics. Use ? or handle the error. See references/rust-quality.md §No-panic discipline."
+
+[[disallowed-methods]]
+path = "std::option::Option::expect"
+reason = "Constitutional code never panics. Type the precondition instead. See references/rust-quality.md §No-panic discipline."
+
+[[disallowed-methods]]
+path = "std::result::Result::expect"
+reason = "Constitutional code never panics. Use ? or handle the error. See references/rust-quality.md §Error design."
+
+[[disallowed-methods]]
+path = "std::sync::OnceLock"
+reason = "No global state in constitutional crates. Inject state through dependencies. See SKILL.md §Non-negotiable invariants."
+
+# ----------------------------------------------------------------------------
+# Part 2: workspace Cargo.toml block. Copy the two tables below into
+# <repo>/Cargo.toml under [workspace.lints.*]. Then in each constitutional
+# crate's Cargo.toml, add:
+#
+#   [lints]
+#   workspace = true
+# ----------------------------------------------------------------------------
+#
+# [workspace.lints.rust]
+# # unsafe_code is "deny" by default; lift to "warn" only in
+# # prism-ecs-core, prism-ecs-kernel, and hardware crates by adding an
+# # explicit [lints.rust] table in those crates' Cargo.toml.
+# unsafe_code = "deny"
+# missing_docs = "warn"           # elevate to "deny" in prism-ecs-constitutional, -runtime, -kernel
+# unused = "warn"
+# rust_2018_idioms = "deny"
+# exported_private_dependencies = "deny"
+# unreachable_pub = "deny"
+# non_ascii_idents = "warn"
+#
+# [workspace.lints.clippy]
+# # --- No-panic discipline (constitutional code never panics) ---
+# unwrap_used = "deny"
+# expect_used = "deny"
+# panic = "deny"
+# unreachable_used = "deny"
+# todo = "deny"
+# unimplemented = "deny"
+#
+# # --- Allocation and iteration discipline ---
+# indexing_slicing = "deny"
+# float_cmp = "deny"
+# redundant_clone = "deny"
+# large_types_passed_by_value = "deny"
+# or_fun_call = "deny"
+# vec_box = "warn"
+# useless_vec = "warn"
+#
+# # --- Surface hygiene ---
+# print_stdout = "deny"
+# print_stderr = "deny"
+# dbg_macro = "deny"
+# rc_mutex = "deny"
+# wildcard_imports = "deny"
+# string_add = "deny"
+# string_add_assign = "deny"
+# multiple_crate_versions = "warn"
+#
+# # --- Documentation as contract ---
+# missing_errors_doc = "deny"
+# missing_panics_doc = "deny"
+#
+# # --- Unsafe boundaries ---
+# undocumented_unsafe_blocks = "deny"
+#
+# # --- Sub-lints worth catching early ---
+# module_name_repetitions = "warn"
+# result_large_err = "warn"
+# must_use_candidate = "warn"
+# needless_pass_by_value = "warn"
+# semicolon_if_nothing_returned = "warn"
+#
+# # --- Strictness groups (opt in if you want maximum PM anger) ---
+# # pedantic = { level = "warn", priority = -1 }   # ~80 stylistic lints; enable in waves
+# # nursery = { level = "warn", priority = -1 }    # unstable lints; review individually
+#
+# ----------------------------------------------------------------------------
+# Part 3: per-constitutional-crate Cargo.toml addition.
+# ----------------------------------------------------------------------------
+#
+# In every crate that holds authority (prism-ecs-core, prism-ecs-constitutional,
+# prism-ecs-runtime, prism-ecs-kernel, all backend crates):
+#
+# [lints]
+# workspace = true
+#
+# If the crate owns `unsafe` (core, kernel, hardware crates), override the
+# workspace deny:
+#
+# [lints.rust]
+# unsafe_code = "warn"   # not deny; each unsafe block is reviewed under the Rust quality gate
+#
+# If the crate is the public constitutional surface (constitutional, runtime,
+# kernel) and you want missing_docs escalated to deny:
+#
+# [lints.rust]
+# missing_docs = "deny"
+#
+# ----------------------------------------------------------------------------
+# Part 4: test-module allows. Paste at the top of any `#[cfg(test)]` module
+# that legitimately needs unwrap/expect/panic/println.
+# ----------------------------------------------------------------------------
+#
+# #[cfg(test)]
+# mod tests {
+#     // Tests may use unwrap/expect/panic/println — they are part of the test
+#     // contract, not production paths. The constitutional rules still apply:
+#     // tests use constitutional commands, not direct world mutation.
+#     #![allow(clippy::unwrap_used)]
+#     #![allow(clippy::expect_used)]
+#     #![allow(clippy::panic)]
+#     #![allow(clippy::print_stdout)]
+#     #![allow(clippy::print_stderr)]
+#     #![allow(clippy::dbg_macro)]
+#     #![allow(clippy::indexing_slicing)]
+#
+#     use super::*;
+#
+#     // ...
+# }
+#
+# ----------------------------------------------------------------------------
+# CI command — the gate. Run on every PR; the build fails on any warning.
+# ----------------------------------------------------------------------------
+#
+# cargo clippy --workspace --all-targets --all-features -- -D warnings
+#
+# ----------------------------------------------------------------------------
+# Waiver shape. A deliberate exception to a deny has a fixed shape. The
+# waiver is part of the change's Completion report.
+# ----------------------------------------------------------------------------
+#
+# // WAIVER: <one-sentence reason, with the invariant or test that justifies it>
+# #[allow(clippy::unwrap_used)]
+# fn specific_function() -> T {
+#     // ...
+# }
+#
+# Waivers do not accumulate. A function with three stacked #[allow(...)]
+# is a function that should be redesigned.

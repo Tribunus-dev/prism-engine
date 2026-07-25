@@ -51,6 +51,52 @@ pub enum TensorType {
     FP8,
 }
 
+impl TensorType {
+    /// Stable single-byte discriminant for content addressing.
+    ///
+    /// The order of variants in this enum is part of the public ABI of
+    /// the CImage format. Do not reorder existing variants — append new
+    /// variants at the end with a fresh discriminant byte.
+    pub fn discriminant_byte(&self) -> [u8; 1] {
+        let n: u8 = match self {
+            TensorType::Bf16 => 0,
+            TensorType::Int8 => 1,
+            TensorType::Nf8 => 2,
+            TensorType::StandardFP16 => 3,
+            TensorType::Palettized4Bit => 4,
+            TensorType::Blob => 5,
+            TensorType::Ternary158 => 6,
+            TensorType::Binary1 => 7,
+            TensorType::NF4 => 8,
+            TensorType::Int4 => 9,
+            TensorType::TernaryTile640 => 10,
+            TensorType::FP8 => 11,
+        };
+        [n]
+    }
+
+    /// Reverse mapping for `discriminant_byte`. Returns `None` for an
+    /// unknown byte so callers can detect stale or corrupted schema
+    /// versions without panicking.
+    pub fn from_discriminant_byte(byte: u8) -> Option<TensorType> {
+        match byte {
+            0 => Some(TensorType::Bf16),
+            1 => Some(TensorType::Int8),
+            2 => Some(TensorType::Nf8),
+            3 => Some(TensorType::StandardFP16),
+            4 => Some(TensorType::Palettized4Bit),
+            5 => Some(TensorType::Blob),
+            6 => Some(TensorType::Ternary158),
+            7 => Some(TensorType::Binary1),
+            8 => Some(TensorType::NF4),
+            9 => Some(TensorType::Int4),
+            10 => Some(TensorType::TernaryTile640),
+            11 => Some(TensorType::FP8),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TensorRecord {
     pub tensor_type: TensorType,

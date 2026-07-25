@@ -40,6 +40,62 @@ pub enum TensorFormat {
 }
 
 impl TensorFormat {
+    /// Stable single-byte discriminant for content addressing.
+    ///
+    /// The order of variants in this enum is part of the public ABI of
+    /// the CImage format. Do not reorder existing variants — append new
+    /// variants at the end with a fresh discriminant byte.
+    pub fn discriminant_byte(&self) -> u8 {
+        match self {
+            TensorFormat::Fp16 => 0,
+            TensorFormat::Bf16 => 1,
+            TensorFormat::Int8 => 2,
+            TensorFormat::Int4 => 3,
+            TensorFormat::Nf4 => 4,
+            TensorFormat::Nf8 => 5,
+            TensorFormat::Palettized4Bit => 6,
+            TensorFormat::Ternary158 => 7,
+            TensorFormat::Binary1 => 8,
+        }
+    }
+
+    /// Reverse mapping for `discriminant_byte`. Returns `None` for an
+    /// unknown byte so callers can detect stale or corrupted schema
+    /// versions without panicking.
+    pub fn from_discriminant_byte(byte: u8) -> Option<TensorFormat> {
+        match byte {
+            0 => Some(TensorFormat::Fp16),
+            1 => Some(TensorFormat::Bf16),
+            2 => Some(TensorFormat::Int8),
+            3 => Some(TensorFormat::Int4),
+            4 => Some(TensorFormat::Nf4),
+            5 => Some(TensorFormat::Nf8),
+            6 => Some(TensorFormat::Palettized4Bit),
+            7 => Some(TensorFormat::Ternary158),
+            8 => Some(TensorFormat::Binary1),
+            _ => None,
+        }
+    }
+
+    /// Lookup a format by its `Debug` name. Used to parse the
+    /// `default_format` field on the constitutional
+    /// `QuantizationResultComponent`, which is stored as a string for
+    /// forward compatibility.
+    pub fn from_name(name: &str) -> Option<TensorFormat> {
+        match name {
+            "Fp16" => Some(TensorFormat::Fp16),
+            "Bf16" => Some(TensorFormat::Bf16),
+            "Int8" => Some(TensorFormat::Int8),
+            "Int4" => Some(TensorFormat::Int4),
+            "Nf4" => Some(TensorFormat::Nf4),
+            "Nf8" => Some(TensorFormat::Nf8),
+            "Palettized4Bit" => Some(TensorFormat::Palettized4Bit),
+            "Ternary158" => Some(TensorFormat::Ternary158),
+            "Binary1" => Some(TensorFormat::Binary1),
+            _ => None,
+        }
+    }
+
     /// All available formats.
     pub fn all() -> &'static [TensorFormat] {
         &[

@@ -1315,6 +1315,13 @@ pub fn compile_source_ecs(
     }
     system_transition_evaluate_to_legalize(world)?;
 
+    // 3.5 Build a constitutional `QuantizationResultComponent` from
+    // the search's `format_plan` (or the default policy). The emit
+    // stage requires this component; legacy code paths that did not
+    // produce one were emitting source bytes under the source dtype
+    // regardless of what the search selected.
+    system_build_quantization_result(world)?;
+
     // 4. Legalization
     system_legalize(world)?;
     system_transition_legalize_to_compile(world)?;

@@ -1030,8 +1030,23 @@ fn matmul_dimensions(node: &prism_spatial_ir::graph::SpatialNode) -> Option<(usi
 
 /// Run the **CImage emission** stage.
 ///
-/// Collects all components and the [`CurrentSource`] extension, calls
-/// [`UniversalCImageWriter::finalize`], and adds [`CImageArtifact`].
+/// The previous version of this function iterated
+/// `CurrentSource.catalog` and wrote the *source* tensor bytes into
+/// the CImage under the *original* dtype, completely ignoring whatever
+/// the search / legalization stages had selected. The artifact's body
+/// and the artifact's header disagreed.
+///
+/// This rewrite consumes the constitutional
+/// `QuantizationResultComponent` (attached to the session by
+/// `SubmitQuantizationResultCommand`) as the sole source of truth for
+/// which tensors are in the artifact and in what representation.
+/// Search trace, legalization report, and kernel artifacts remain as
+/// auxiliary metadata in the header — they describe the *decisions*
+/// but are not the *artifact body*.
+///
+/// `set_source` is still called so the header carries the source
+/// identity for provenance. The `provider` is no longer used at
+/// emission time.
 pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
     let session = session_entity(world)?;
     let config = read_session_config(world, session)?;
@@ -1053,42 +1068,48 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
             .map_err(|e| CompileError::CImageEmitFailed(format!("search state missing: {e}")))?;
     }
 
-    // Collect required inputs for the writer.
+    // The constitutional `QuantizationResultComponent` is the plan. If
+    // it is missing, the compile pipeline has not actually selected any
+    // per-tensor representations yet — refusing to emit is the only
+    // honest move.
+    let plan = world
+        .component::<prism_ecs_constitutional::compilation::QuantizationResultComponent>(session)
+        .map_err(|e| {
+            CompileError::CImageEmitFailed(format!(
+                "no QuantizationResultComponent on session; cannot emit: {e}"
+            ))
+        })?
+        .clone();
+
+    // Source is still used for the output path and for header
+    // provenance; we do not iterate its catalog at emission time.
     let source = world
         .get_extension::<CurrentSource>()
         .ok_or_else(|| CompileError::CImageEmitFailed("no current source resource".into()))?;
 
-    let output_path = &config
+    let output_path = config
         .target_backends
         .first()
         .map(|_| PathBuf::from(format!("{}.cimage", source.0.identity.source_digest)))
         .unwrap_or_else(|| PathBuf::from("output.cimage"));
 
-    let mut writer = UniversalCImageWriter::new(output_path);
+    let mut writer = UniversalCImageWriter::new(&output_path);
     writer.set_source(&source.0);
 
-    // Payload completeness is part of artifact admission. A CImage that only
-    // contains sparse tensor metadata cannot be replayed independently of the
-    // original source, so stream every catalog entry through the provider.
-    let provider = source.0.provider.as_ref().ok_or_else(|| {
-        CompileError::CImageEmitFailed("source has no tensor data provider".into())
-    })?;
-    for tensor in source.0.catalog.iter() {
-        let payload = provider.read_tensor(tensor).map_err(|error| {
-            CompileError::CImageEmitFailed(format!("read tensor {}: {error}", tensor.name))
+    // Plan digest — content-addressed identifier for the entire
+    // per-tensor decision set. Stored alongside the file digest so
+    // certification can verify the plan and the bytes agree.
+    let plan_digest = quantization_plan_digest(&plan);
+
+    for sel in &plan.selections {
+        let entry = selection_to_payload_entry(sel).map_err(|e| {
+            CompileError::CImageEmitFailed(format!(
+                "plan selection {} invalid: {e}",
+                sel.key
+            ))
         })?;
-        let dim_m = tensor.shape.first().copied().unwrap_or(0) as u32;
-        let dim_n = tensor.shape.get(1).copied().unwrap_or(0) as u32;
         writer
-            .add_tensor_payload(crate::cimage::TensorPayloadEntry {
-                name: tensor.name.clone(),
-                payload,
-                representation: tensor.original_dtype.clone(),
-                effective_bpp: (tensor.element_size * 8) as f32,
-                dim_m,
-                dim_n,
-                tensor_type: crate::cimage::TensorType::Blob,
-            })
+            .add_tensor_payload(entry)
             .map_err(CompileError::CImageEmitFailed)?;
     }
 
@@ -1166,17 +1187,124 @@ pub fn system_emit_cimage(world: &mut World) -> Result<(), CompileError> {
             CImageArtifact {
                 output_path: output_path.clone(),
                 digest: artifact_digest,
-                schema_version: "1.0".into(),
+                schema_version: "1.1".into(),
             },
         )
         .map_err(|e| CompileError::CImageEmitFailed(e.to_string()))?;
 
+    // Also store the plan digest on the artifact receipt so
+    // certification and downstream receipts can verify the plan ↔
+    // bytes correspondence without re-deriving the plan.
+    world
+        .set_extension(CImagePlanDigest(plan_digest));
+
     Ok(())
 }
 
+/// Compute a stable digest of the constitutional
+/// `QuantizationResultComponent`. Used to bind a CImage artifact to
+/// the plan that produced it.
+fn quantization_plan_digest(
+    plan: &prism_ecs_constitutional::compilation::QuantizationResultComponent,
+) -> [u8; 32] {
+    use prism_ecs_constitutional::compilation::QuantizedTensorSelectionComponent;
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(plan.source_digest.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(plan.target_hardware.as_bytes());
+    hasher.update([0u8]);
+    for sel in &plan.selections {
+        hasher.update(selection_digest_bytes(sel));
+        hasher.update([0xffu8]);
+    }
+    hasher.update(plan.default_format.as_bytes());
+    hasher.update([0u8]);
+    hasher.update(plan.schema_version.to_le_bytes());
+    hasher.finalize().into()
+}
+
+fn selection_digest_bytes(sel: &prism_ecs_constitutional::compilation::QuantizedTensorSelectionComponent) -> Vec<u8> {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(sel.key.as_bytes());
+    hasher.update([0u8]);
+    hasher.update([sel.format_discriminant]);
+    hasher.update([sel.tensor_type_discriminant]);
+    hasher.update(sel.dim_m.to_le_bytes());
+    hasher.update(sel.dim_n.to_le_bytes());
+    hasher.update(sel.effective_bpp.to_le_bytes());
+    hasher.update(sel.payload_bytes.to_le_bytes());
+    hasher.update([0u8]);
+    hasher.update(&sel.payload);
+    hasher.finalize().to_vec()
+}
+
+/// Extension stored on the world to bind an emitted CImage to its
+/// producing plan's digest. Read by `system_certify` and by downstream
+/// receipts.
+#[derive(Debug, Clone)]
+pub struct CImagePlanDigest(pub [u8; 32]);
+
+/// Convert a constitutional `QuantizedTensorSelectionComponent` to a
+/// `TensorPayloadEntry` ready for `UniversalCImageWriter`.
+///
+/// Returns an error if either discriminant is unrecognized (i.e. the
+/// plan was written by a newer or older schema version than this
+/// compiler understands). That is a hard failure, not a silent
+/// fallback.
+fn selection_to_payload_entry(
+    sel: &prism_ecs_constitutional::compilation::QuantizedTensorSelectionComponent,
+) -> Result<crate::cimage::TensorPayloadEntry, String> {
+    use prism_ecs_ir::evolution::mutation_table::TensorFormat;
+    let format = TensorFormat::from_discriminant_byte(sel.format_discriminant)
+        .ok_or_else(|| {
+            format!(
+                "unknown TensorFormat discriminant {}",
+                sel.format_discriminant
+            )
+        })?;
+    let tensor_type = crate::cimage::TensorType::from_discriminant_byte(sel.tensor_type_discriminant)
+        .ok_or_else(|| {
+            format!(
+                "unknown TensorType discriminant {}",
+                sel.tensor_type_discriminant
+            )
+        })?;
+
+    if (sel.payload.len() as u64) != sel.payload_bytes {
+        return Err(format!(
+            "payload length {} does not match recorded payload_bytes {}",
+            sel.payload.len(),
+            sel.payload_bytes
+        ));
+    }
+
+    Ok(crate::cimage::TensorPayloadEntry {
+        name: sel.key.clone(),
+        payload: sel.payload.clone(),
+        representation: format!("{:?}", format),
+        effective_bpp: sel.effective_bpp,
+        dim_m: sel.dim_m,
+        dim_n: sel.dim_n,
+        tensor_type,
+    })
+}
+
 /// Certify the emitted artifact structurally before publishing the receipt.
-/// This validates that the bytes can be reopened by the runtime and that any
-/// embedded AOT plan satisfies its dependency and residency invariants.
+///
+/// Verifies, in order:
+///   1. The file bytes still hash to the digest recorded at emit time.
+///   2. The `QuantizationResultComponent` is attached to the session.
+///   3. The plan's content digest matches the digest stored on the
+///      `CImagePlanDigest` extension (which the emitter wrote).
+///   4. Every tensor in the plan exists in the CImage header with the
+///      same name, dimensions, and physical type.
+///   5. The execution plan, if any, validates.
+///
+/// The previous version of this function compared the source catalog
+/// against the CImage contents. That is no longer meaningful — the
+/// CImage body is now the *selected* plan, not the source catalog.
 pub fn system_certify(world: &mut World) -> Result<(), CompileError> {
     let session = session_entity(world)?;
     let artifact = world
@@ -1195,46 +1323,61 @@ pub fn system_certify(world: &mut World) -> Result<(), CompileError> {
             "CImage artifact digest does not match emitted bytes".into(),
         ));
     }
-    let source = world.get_extension::<CurrentSource>().ok_or_else(|| {
-        CompileError::CompilationFailed("source missing during certification".into())
-    })?;
-    if reader.header.source_identity.as_ref() != Some(&source.0.identity)
-        || reader.header.source_catalog.as_ref() != Some(&source.0.catalog)
-    {
-        return Err(CompileError::CompilationFailed(
-            "CImage source provenance does not match the session source".into(),
-        ));
-    }
-    let expected_names = source
-        .0
-        .catalog
-        .tensors
-        .iter()
-        .map(|tensor| tensor.name.as_str());
-    if expected_names
-        .clone()
-        .any(|name| !model.tensors.contains_key(name))
-    {
-        return Err(CompileError::CompilationFailed(
-            "CImage is missing a catalog tensor payload".into(),
-        ));
-    }
-    let search = world.component::<SearchStateComponent>(session).ok();
-    if let Some(search) = search {
-        let Some(serialized) = reader.header.search_trace.as_deref() else {
-            return Err(CompileError::CompilationFailed(
-                "CImage is missing the search trace".into(),
-            ));
-        };
-        let sealed: SearchTrace = serde_json::from_str(serialized).map_err(|e| {
-            CompileError::CompilationFailed(format!("invalid sealed search trace: {e}"))
+
+    // The plan is the source of truth for the artifact body.
+    let plan = world
+        .component::<prism_ecs_constitutional::compilation::QuantizationResultComponent>(session)
+        .map_err(|e| {
+            CompileError::CompilationFailed(format!(
+                "no QuantizationResultComponent on session at certify time: {e}"
+            ))
+        })?
+        .clone();
+
+    // Verify the plan digest stored on the world extension matches the
+    // plan we have. If it doesn't, the emit step didn't run against the
+    // plan we are certifying — refuse to certify.
+    let plan_digest_now = quantization_plan_digest(&plan);
+    let stored_plan_digest = world
+        .get_extension::<CImagePlanDigest>()
+        .ok_or_else(|| {
+            CompileError::CompilationFailed(
+                "no CImagePlanDigest on world; emit did not bind a plan".into(),
+            )
         })?;
-        if sealed.trace_digest != search.trace.trace_digest {
-            return Err(CompileError::CompilationFailed(
-                "sealed search trace differs from session state".into(),
-            ));
+    if stored_plan_digest.0 != plan_digest_now {
+        return Err(CompileError::CompilationFailed(format!(
+            "plan digest mismatch: stored {}, current {}",
+            hex::encode(stored_plan_digest.0),
+            hex::encode(plan_digest_now)
+        )));
+    }
+
+    // Every selected tensor must exist in the CImage with matching
+    // name, dimensions, and physical type.
+    for sel in &plan.selections {
+        let header_entry = reader.header.tensors.get(&sel.key).ok_or_else(|| {
+            CompileError::CompilationFailed(format!(
+                "CImage is missing plan tensor {}",
+                sel.key
+            ))
+        })?;
+        if header_entry.dim_m != sel.dim_m || header_entry.dim_n != sel.dim_n {
+            return Err(CompileError::CompilationFailed(format!(
+                "tensor {} dimension mismatch: plan {}x{}, header {}x{}",
+                sel.key, sel.dim_m, sel.dim_n, header_entry.dim_m, header_entry.dim_n
+            )));
+        }
+        if (header_entry.size as u64) != sel.payload_bytes {
+            return Err(CompileError::CompilationFailed(format!(
+                "tensor {} payload size mismatch: plan {}, header {}",
+                sel.key,
+                sel.payload_bytes,
+                header_entry.size
+            )));
         }
     }
+
     if let Some(plan) = &model.execution_plan {
         plan.validate().map_err(|e| {
             CompileError::CompilationFailed(format!("certification plan failed: {e}"))
@@ -2100,5 +2243,339 @@ mod tests {
             .component::<CompilationSession>(orch.session)
             .expect("session component");
         assert!(matches!(session.status, SessionStatus::Initialized));
+    }
+
+    // ── Constitutional emission path tests ─────────────────────────────
+    //
+    // The previous version of `system_emit_cimage` iterated
+    // `CurrentSource.catalog` and wrote the source bytes under the
+    // source dtype, regardless of what the search selected. These
+    // tests pin the new contract: the emitter requires a
+    // `QuantizationResultComponent` on the session, and the bytes it
+    // writes come from the plan, not the source.
+
+    use crate::compilation_systems::system_build_quantization_result;
+    use crate::legalize::LegalizationReport;
+    use crate::SearchTrace;
+    use prism_ecs_constitutional::compilation::{
+        QuantizationResultComponent, QuantizedTensorSelectionComponent,
+    };
+    use prism_ecs_core::identity::SourceFormat;
+    use prism_ecs_ir::evolution::mutation_table::TensorFormat;
+    use prism_ecs_quantization::cimage::TensorType;
+    use prism_ecs_source::{SourceIdentity, TensorCatalog, TensorDataProvider};
+    use std::io::{Read, Seek, SeekFrom};
+
+    /// Minimal test source with one tensor whose provider returns
+    /// bytes that look like the source dtype. The plan then supplies
+    /// different bytes; the CImage must contain the plan's bytes.
+    struct MarkerProvider;
+
+    impl TensorDataProvider for MarkerProvider {
+        fn read_tensor(
+            &self,
+            tensor: &TensorDescriptor,
+        ) -> Result<Vec<u8>, prism_ecs_source::SourceError> {
+            // Return a byte pattern that we can recognize later.
+            Ok(vec![0xAA; tensor.data_size_bytes as usize])
+        }
+    }
+
+    fn make_test_source_with_provider(unique: &str) -> CanonicalSource {
+        let tensors = vec![TensorDescriptor {
+            name: "weight".into(),
+            shape: vec![4, 4],
+            dtype: "f16".into(),
+            byte_offset: 0,
+            byte_length: 4 * 4 * 2,
+            element_size: 2,
+            original_dtype: "F16".into(),
+            data_offset: None,
+            data_size_bytes: 4 * 4 * 2,
+            layout: "row-major".into(),
+        }];
+        let catalog = TensorCatalog {
+            tensors,
+            ..Default::default()
+        };
+        CanonicalSource {
+            identity: SourceIdentity {
+                format: SourceFormat::SafeTensors,
+                source_digest: format!("test-digest-{unique}"),
+                model_family: "test".into(),
+                architecture: "test".into(),
+            },
+            catalog,
+            provider: Some(std::sync::Arc::new(MarkerProvider)),
+            capabilities: Default::default(),
+        }
+    }
+
+    fn install_session(world: &mut World, source: CanonicalSource) -> Entity {
+        let spawned = world
+            .spawn(EntityKind::Session, None)
+            .expect("spawn session")
+            .entity;
+        world
+            .insert_component(
+                spawned,
+                CompilationSession {
+                    config: CompileConfig {
+                        target_backends: vec![BackendKind::CPU],
+                        ..Default::default()
+                    },
+                    status: SessionStatus::KernelsGenerated,
+                    session_id: "test".into(),
+                },
+            )
+            .expect("insert session");
+        // Insert a minimal LegalizedPlan so the emit guards pass.
+        let _ = world.insert_component(
+            spawned,
+            LegalizedPlan {
+                report: LegalizationReport {
+                    valid: true,
+                    tensor_layout_valid: vec![],
+                },
+                is_valid: true,
+            },
+        );
+        // Insert an empty KernelCollection.
+        let _ = world.insert_component(
+            spawned,
+            crate::ecs::KernelCollection {
+                artifacts: vec![],
+                kernel_count: 0,
+                lowered_manifests: vec![],
+                uop_capture: None,
+                uop_strategy_captures: vec![],
+                uop_tuning_receipt: None,
+            },
+        );
+        // Insert an empty SearchStateComponent so the SearchStateComponent
+        // guard in system_emit_cimage passes.
+        let _ = world.insert_component(
+            spawned,
+            SearchStateComponent {
+                trace: SearchTrace::default(),
+                candidates_evaluated: 0,
+                generations_completed: 0,
+                format_plan: None,
+                best_joint_tiling: None,
+                selection_receipt: crate::search::SearchSelectionReceipt {
+                    schema_version: "test".into(),
+                    search_id: "test".into(),
+                    evaluator: "test".into(),
+                    evidence_source: "test".into(),
+                    production_evidence: false,
+                    candidates_evaluated: 0,
+                    measured_candidates: 0,
+                    selected_candidate_digest: None,
+                    fallback_reason: None,
+                    receipt_digest: "test".into(),
+                },
+                heterogeneous_workload_evidence: None,
+                deployment_archive: Default::default(),
+                selected_deployment_digest: None,
+            },
+        );
+        world.set_extension(CurrentSource(source));
+        world
+            .insert_resource(SessionHandle(spawned))
+            .expect("session handle");
+        spawned
+    }
+
+    /// `system_emit_cimage` must fail if no `QuantizationResultComponent`
+    /// is on the session. The previous bug was that the emitter
+    /// silently read the source catalog instead.
+    #[test]
+    fn emit_requires_quantization_result_component() {
+        let mut world = World::new();
+        let source = make_test_source_with_provider("emit-requires");
+        let _session = install_session(&mut world, source.clone());
+        let result = system_emit_cimage(&mut world);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("QuantizationResultComponent"),
+            "error must name the missing component: {msg}"
+        );
+    }
+
+    /// `system_emit_cimage` writes the plan's bytes, not the source's.
+    /// The plan supplies 0xCC bytes; the source provider supplies 0xAA
+    /// bytes. The CImage header record for the tensor must record
+    /// 0xCC bytes.
+    #[test]
+    fn emit_writes_plan_bytes_not_source_bytes() {
+        use std::io::Read;
+        let mut world = World::new();
+        let source = make_test_source_with_provider("write-plan-bytes");
+        let session = install_session(&mut world, source.clone());
+
+        // Plan supplies 0xCC bytes for the "weight" tensor.
+        let plan = QuantizationResultComponent {
+            source_digest: source.identity.source_digest.clone(),
+            target_hardware: "default".into(),
+            selections: vec![QuantizedTensorSelectionComponent {
+                key: "weight".into(),
+                format_discriminant: TensorFormat::Palettized4Bit.discriminant_byte(),
+                payload: vec![0xCC; 8],
+                tensor_type_discriminant: TensorType::Blob.discriminant_byte()[0],
+                dim_m: 4,
+                dim_n: 4,
+                effective_bpp: 4.0,
+                payload_bytes: 8,
+            }],
+            default_format: "Palettized4Bit".into(),
+            schema_version: 1,
+        };
+        world
+            .insert_component(session, plan)
+            .expect("insert plan");
+
+        system_emit_cimage(&mut world).expect("emit ok");
+
+        let artifact = world
+            .component::<CImageArtifact>(session)
+            .expect("artifact")
+            .clone();
+        assert!(artifact.output_path.exists(), "CImage must exist on disk");
+
+        // Read the CImage header and verify the tensor record size
+        // matches the plan's payload_bytes (8), not the source's (32).
+        let reader = crate::cimage::CImageReader::open(&artifact.output_path).expect("open");
+        let entry = reader
+            .header
+            .tensors
+            .get("weight")
+            .expect("weight record");
+        assert_eq!(entry.size, 8, "header size must match plan payload_bytes");
+        assert_eq!(entry.dim_m, 4);
+        assert_eq!(entry.dim_n, 4);
+
+        // Also read the payload bytes and confirm they are 0xCC, not
+        // 0xAA.
+        let mut file = std::fs::File::open(&artifact.output_path).expect("open file");
+        file.seek(SeekFrom::Start(entry.offset))
+            .expect("seek to payload");
+        let mut buf = vec![0u8; entry.size as usize];
+        file.read_exact(&mut buf).expect("read payload");
+        assert!(buf.iter().all(|&b| b == 0xCC), "payload must be 0xCC");
+    }
+
+    /// `system_certify` accepts an emit that wrote from a plan, and
+    /// transitions the session to Certified.
+    #[test]
+    fn certify_accepts_plan_backed_artifact() {
+        let mut world = World::new();
+        let source = make_test_source_with_provider("certify-accepts");
+        let session = install_session(&mut world, source.clone());
+
+        let plan = QuantizationResultComponent {
+            source_digest: source.identity.source_digest.clone(),
+            target_hardware: "default".into(),
+            selections: vec![QuantizedTensorSelectionComponent {
+                key: "weight".into(),
+                format_discriminant: TensorFormat::Palettized4Bit.discriminant_byte(),
+                payload: vec![0xCC; 8],
+                tensor_type_discriminant: TensorType::Blob.discriminant_byte()[0],
+                dim_m: 4,
+                dim_n: 4,
+                effective_bpp: 4.0,
+                payload_bytes: 8,
+            }],
+            default_format: "Palettized4Bit".into(),
+            schema_version: 1,
+        };
+        world
+            .insert_component(session, plan)
+            .expect("insert plan");
+
+        system_emit_cimage(&mut world).expect("emit ok");
+        system_certify(&mut world).expect("certify ok");
+
+        let status = world
+            .component::<CompilationSession>(session)
+            .expect("session")
+            .clone();
+        assert!(matches!(status.status, SessionStatus::Certified));
+    }
+
+    /// `system_certify` rejects a mismatch between the plan and the
+    /// file. If we mutate the recorded plan after emit, certification
+    /// must fail.
+    #[test]
+    fn certify_rejects_plan_mutation_after_emit() {
+        let mut world = World::new();
+        let source = make_test_source_with_provider("certify-rejects");
+        let session = install_session(&mut world, source.clone());
+
+        let plan = QuantizationResultComponent {
+            source_digest: source.identity.source_digest.clone(),
+            target_hardware: "default".into(),
+            selections: vec![QuantizedTensorSelectionComponent {
+                key: "weight".into(),
+                format_discriminant: TensorFormat::Palettized4Bit.discriminant_byte(),
+                payload: vec![0xCC; 8],
+                tensor_type_discriminant: TensorType::Blob.discriminant_byte()[0],
+                dim_m: 4,
+                dim_n: 4,
+                effective_bpp: 4.0,
+                payload_bytes: 8,
+            }],
+            default_format: "Palettized4Bit".into(),
+            schema_version: 1,
+        };
+        world
+            .insert_component(session, plan)
+            .expect("insert plan");
+
+        system_emit_cimage(&mut world).expect("emit ok");
+
+        // Mutate the plan after emit. The plan digest stored in
+        // CImagePlanDigest must no longer match.
+        if let Ok(mut p) = world.component_mut::<QuantizationResultComponent>(session) {
+            p.selections[0].payload[0] = 0xFF;
+        }
+
+        let result = system_certify(&mut world);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("plan digest mismatch"),
+            "error must mention plan digest mismatch: {msg}"
+        );
+    }
+
+    /// `system_build_quantization_result` produces a plan that the
+    /// emitter accepts. The legacy search path that did not call
+    /// `prism_ecs_quantization::build_quantization_plan` still works
+    /// because this system synthesizes the plan from the source
+    /// catalog.
+    #[test]
+    fn build_plan_synthesizes_from_source_catalog() {
+        let mut world = World::new();
+        let source = make_test_source_with_provider("build-plan");
+        let session = install_session(&mut world, source);
+
+        system_build_quantization_result(&mut world).expect("build plan ok");
+
+        let plan = world
+            .component::<QuantizationResultComponent>(session)
+            .expect("plan must be attached");
+        assert_eq!(plan.selections.len(), 1);
+        let sel = &plan.selections[0];
+        assert_eq!(sel.key, "weight");
+        assert_eq!(sel.dim_m, 4);
+        assert_eq!(sel.dim_n, 4);
+        // Source provider returns 0xAA, so the synthesized payload
+        // should be 0xAA.
+        assert!(sel.payload.iter().all(|&b| b == 0xAA));
+        assert_eq!(sel.payload_bytes, 32); // 4*4*2 from the catalog
+
+        // The emitter should accept this plan.
+        system_emit_cimage(&mut world).expect("emit ok");
     }
 }

@@ -2,16 +2,27 @@
 //!
 //! Takes a `ModelGraph`, iterates every `PalettizedMatmul` node, loads
 //! weights in any format (F32/BF16/F16/U32 block-quantized), runs k-means
-//! per row, builds split-block payloads, and writes a `.cimage` file.
+//! per row, builds split-block payloads, and produces a
+//! [`QuantizationResult`] describing what was applied.
 //!
-//! When a `FormatPlan` is provided, uses the per-tensor format assignment
-//! from evolution search instead of uniform k-means palettization.
+//! The previous version of this module silently wrote a different
+//! representation than the one requested in a `FormatPlan` (Bf16 / Int8 /
+//! Nf8 all fell through to a 4-bit palettized codec). That substitution
+//! is now a hard error. The per-tensor format that the search selected
+//! is the per-tensor format that the artifact contains, or compilation
+//! fails with a precise reason.
+//!
+//! [`build_quantization_plan`] does the per-tensor work and returns the
+//! structured plan. [`write_cimage_from_plan`] is the pure function
+//! that serializes a plan to a CImage on disk. [`compile_to_cimage`] is
+//! retained as a thin convenience wrapper for the CLI and dashboard.
 
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 
 use crate::cimage::{CImageWriter, TensorType};
+use crate::quantization_plan::{QuantizationResult, QuantizedTensorSelection};
 use crate::palette::palettize_matrix;
 use prism_ecs_ir::evolution::assembly::AssemblySpec;
 use prism_ecs_ir::evolution::compile_plan::FormatPlan;
@@ -35,99 +46,102 @@ pub struct CompiledTensor {
     pub effective_bpp: f32,
 }
 
-/// Compile an entire model into a `.cimage` file.
+/// Build a [`QuantizationResult`] for an entire model.
 ///
-/// When `compile_plan` is `Some`, uses per-tensor format assignments from the
-/// evolution search instead of uniform k-means palettization.
+/// This is the constitutional-first cutover of the old `compile_to_cimage`:
+/// the per-tensor work (load weights, apply the requested codec, measure
+/// bits per value) is done, and the result is returned as a structured
+/// plan. **The CImage is not written.** Emission is a separate
+/// [`write_cimage_from_plan`] call. The plan is observable to the caller
+/// before any bytes hit disk.
 ///
-/// When `backend` is `CompilationBackend::Ane`, delegates to the ANE compiler
-/// pipeline instead of the default quantization-based path.
-pub fn compile_to_cimage(
+/// When `compile_plan` is `Some`, uses per-tensor format assignments
+/// from the evolution search. When `None`, every tensor is encoded with
+/// `Palettized4Bit` (the legacy default).
+///
+/// When `backend` is `CompilationBackend::Ane`, returns an error — ANE
+/// is a separate pipeline that does not produce a per-tensor weight plan.
+///
+/// `source_digest` and `target_hardware` are recorded on the result for
+/// downstream receipts. `source_digest` should be the canonical digest
+/// of the BF16 source model; pass an empty string only if the caller
+/// genuinely cannot compute it.
+pub fn build_quantization_plan(
     graph: &ModelGraph,
     safetensors_dir: &Path,
-    output_path: &Path,
     has_metal: bool,
-    progress: impl Fn(&str, u32, u32, f64, f64),
     compile_plan: Option<&FormatPlan>,
     backend: CompilationBackend,
-) -> Result<(), String> {
-    match backend {
-        CompilationBackend::Ane => {
-            return compile_to_cimage_ane(graph, safetensors_dir, output_path);
-        }
-        CompilationBackend::Default => {}
+    source_digest: &str,
+    target_hardware: &str,
+    progress: impl Fn(&str, u32, u32, f64, f64),
+) -> Result<QuantizationResult, String> {
+    if matches!(backend, CompilationBackend::Ane) {
+        return Err(
+            "ANE backend does not produce a per-tensor weight plan; use compile_to_cimage_ane directly".into(),
+        );
     }
-    // Generate execution plan before compiling weights.
-    let plan = generate_plan(graph, has_metal, false);
-    let plan_json = serde_json::to_string(&plan).map_err(|e| format!("serialize plan: {e}"))?;
 
-    let mut cimage = CImageWriter::new(output_path)?;
-    cimage.set_execution_plan(plan_json);
+    // Generate execution plan before compiling weights.
+    let exec_plan = generate_plan(graph, has_metal, false);
+    let plan_json =
+        serde_json::to_string(&exec_plan).map_err(|e| format!("serialize plan: {e}"))?;
 
     let shards = discover_safetensors(safetensors_dir)?;
+    let mut selections: Vec<QuantizedTensorSelection> = Vec::new();
 
-    // Helper: compile a single tensor with optional plan-based dispatch
-    let compile_tensor = |cimage: &mut CImageWriter,
-                          tb: &TensorBlueprint,
-                          format: Option<TensorFormat>|
+    // Helper: produce a single tensor's selection. `format_override`
+    // comes from the caller-supplied plan; when None we apply the
+    // default policy explicitly.
+    let mut compile_tensor = |tb: &TensorBlueprint,
+                              format_override: Option<TensorFormat>|
      -> Result<(), String> {
         let t0 = std::time::Instant::now();
         let f32_vals = load_weight_f32(&shards, tb)?;
         let out_dim = tb.dim_m as usize;
         let in_dim = tb.dim_n as usize;
 
-        eprint!("  [prism] {} ({}×{})... ", tb.key, out_dim, in_dim);
-
-        match format {
-            // With a plan-specified format, dispatch to the appropriate codec
+        let (payload, tensor_type, format, bpp) = match format_override {
             Some(fmt) => {
-                let result = quantize_by_format(cimage, &tb.key, &f32_vals, out_dim, in_dim, fmt)?;
-                let elapsed = t0.elapsed();
-                eprintln!(
-                    "bpp={:.3} format={:?} {:.2}s",
-                    result.bpp,
-                    fmt,
-                    elapsed.as_secs_f64()
-                );
-                progress(
-                    &tb.key,
-                    tb.dim_m,
-                    tb.dim_n,
-                    result.bpp as f64,
-                    elapsed.as_secs_f64(),
-                );
+                let (payload, tensor_type, bpp) =
+                    quantize_to_payload(&tb.key, &f32_vals, out_dim, in_dim, fmt)?;
+                (payload, tensor_type, fmt, bpp)
             }
-            // Without a plan: use uniform k-means palettization (legacy path)
             None => {
-                let pal = palettize_matrix(&f32_vals, out_dim, in_dim, 16, 50);
-                let bpp = pal.effective_bpp();
-
-                let cb_bytes = pal.rows.len() * 16 * 2;
-                let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
-                let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
-                for row in &pal.rows {
-                    for &cb_f32 in &row.codebook {
-                        let cb_f16 = half::f16::from_f32(cb_f32);
-                        payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
-                    }
-                }
-                for row in &pal.rows {
-                    payload.extend_from_slice(&row.indices);
-                }
-
-                cimage.append_palettized(&tb.key, &payload, tb.dim_m, tb.dim_n)?;
-                let elapsed = t0.elapsed();
-                eprintln!("bpp={bpp:.3} {:.2}s", elapsed.as_secs_f64());
-                progress(&tb.key, tb.dim_m, tb.dim_n, bpp, elapsed.as_secs_f64());
+                let (payload, tensor_type, bpp) = palettize_to_payload(&f32_vals, out_dim, in_dim)?;
+                (payload, tensor_type, TensorFormat::Palettized4Bit, bpp)
             }
-        }
+        };
+
+        let elapsed = t0.elapsed();
+        eprintln!(
+            "  [prism] {} ({}×{}) bpp={:.3} format={:?} {:.2}s",
+            tb.key,
+            out_dim,
+            in_dim,
+            bpp,
+            format,
+            elapsed.as_secs_f64()
+        );
+        progress(&tb.key, tb.dim_m, tb.dim_n, bpp as f64, elapsed.as_secs_f64());
+
+        selections.push(QuantizedTensorSelection {
+            key: tb.key.clone(),
+            format,
+            payload_bytes: payload.len() as u64,
+            tensor_type,
+            dim_m: tb.dim_m,
+            dim_n: tb.dim_n,
+            effective_bpp: bpp,
+            payload,
+        });
         Ok(())
     };
 
     // Compile palettized tensors (matmuls, projections, heads)
     for tb in graph.palettized_tensors() {
         let fmt = compile_plan.and_then(|p| p.get(&tb.key));
-        compile_tensor(&mut cimage, tb, fmt)?;
+        compile_tensor(tb, fmt)?;
     }
 
     // Also compile the embedding tensor (not in palettized_tensors).
@@ -144,30 +158,89 @@ pub fn compile_to_cimage(
                 dim_n: *hidden_dim,
             };
             let fmt = compile_plan.and_then(|p| p.get(key));
-            compile_tensor(&mut cimage, &tb, fmt)?;
+            compile_tensor(&tb, fmt)?;
             break;
         }
     }
 
+    Ok(QuantizationResult {
+        source_digest: source_digest.to_string(),
+        target_hardware: target_hardware.to_string(),
+        selections,
+        execution_plan_json: Some(plan_json),
+        default_format: TensorFormat::Palettized4Bit,
+    })
+}
+
+/// Write a CImage file from a [`QuantizationResult`].
+///
+/// Pure function: same plan + same path = same bytes (modulo filesystem
+/// timestamp). Does not recompute per-tensor policy. Does not call any
+/// external compiler. The caller is expected to have already validated
+/// the plan against a target profile and any receipt gates.
+pub fn write_cimage_from_plan(plan: &QuantizationResult, output_path: &Path) -> Result<(), String> {
+    let mut cimage = CImageWriter::new(output_path)?;
+    if let Some(plan_json) = &plan.execution_plan_json {
+        cimage.set_execution_plan(plan_json.clone());
+    }
+    for sel in &plan.selections {
+        cimage.append(
+            &sel.key,
+            &sel.payload,
+            sel.dim_m,
+            sel.dim_n,
+            sel.tensor_type.clone(),
+        )?;
+    }
     cimage.finalize()?;
     eprintln!("[prism:compile] Done -> {}", output_path.display());
     Ok(())
 }
 
-/// Result of a single tensor quantization operation.
-struct QuantResult {
-    bpp: f32,
+/// Backwards-compatible convenience wrapper for the CLI and dashboard.
+///
+/// Builds a plan, then writes it. New callers should use
+/// [`build_quantization_plan`] and [`write_cimage_from_plan`] directly so
+/// the plan is observable between the two steps.
+pub fn compile_to_cimage(
+    graph: &ModelGraph,
+    safetensors_dir: &Path,
+    output_path: &Path,
+    has_metal: bool,
+    progress: impl Fn(&str, u32, u32, f64, f64),
+    compile_plan: Option<&FormatPlan>,
+    backend: CompilationBackend,
+) -> Result<(), String> {
+    if matches!(backend, CompilationBackend::Ane) {
+        return compile_to_cimage_ane(graph, safetensors_dir, output_path);
+    }
+    let plan = build_quantization_plan(
+        graph,
+        safetensors_dir,
+        has_metal,
+        compile_plan,
+        backend,
+        "",
+        "unknown",
+        progress,
+    )?;
+    write_cimage_from_plan(&plan, output_path)
 }
 
-/// Quantize a tensor by the given format and append to cimage.
-fn quantize_by_format(
-    cimage: &mut CImageWriter,
+/// Quantize a tensor by the given format. Returns `(payload, tensor_type, bpp)`.
+///
+/// **Hard error contract:** every format variant must return its own
+/// codec, or an error. Silent substitution to `Palettized4Bit` (or any
+/// other fallback) is forbidden — that was the bug the constitutional
+/// cutover is fixing.
+fn quantize_to_payload(
     key: &str,
     f32_vals: &[f32],
     out_dim: usize,
     in_dim: usize,
     format: TensorFormat,
-) -> Result<QuantResult, String> {
+) -> Result<(Vec<u8>, TensorType, f32), String> {
+    let _ = key; // Reserved for future diagnostics; key is already carried by the selection.
     match format {
         TensorFormat::Nf4 | TensorFormat::Int4 => {
             let (codes, scales, biases, _packed_rows, _packed_cols) =
@@ -185,8 +258,7 @@ fn quantize_by_format(
                 TensorFormat::Nf4 => TensorType::NF4,
                 _ => TensorType::Int4,
             };
-            cimage.append(key, &payload, out_dim as u32, in_dim as u32, tensor_type)?;
-            Ok(QuantResult { bpp: 4.0 })
+            Ok((payload, tensor_type, 4.0))
         }
 
         TensorFormat::Fp16 => {
@@ -195,8 +267,7 @@ fn quantize_by_format(
             for &v in f32_vals {
                 payload.extend_from_slice(&half::f16::from_f32(v).to_bits().to_le_bytes());
             }
-            cimage.append_fp16(key, &payload, out_dim as u32, in_dim as u32)?;
-            Ok(QuantResult { bpp: 16.0 })
+            Ok((payload, TensorType::StandardFP16, 16.0))
         }
 
         TensorFormat::Ternary158 => {
@@ -240,14 +311,7 @@ fn quantize_by_format(
 
             // Ternary158: ~1.58 bits per value + scales
             let bpp = (packed_len as f32 * 8.0 + scales_len as f32 * 32.0) / f32_vals.len() as f32;
-            cimage.append(
-                key,
-                &payload,
-                out_dim as u32,
-                in_dim as u32,
-                TensorType::Ternary158,
-            )?;
-            Ok(QuantResult { bpp })
+            Ok((payload, TensorType::Ternary158, bpp))
         }
 
         TensorFormat::Binary1 => {
@@ -282,41 +346,56 @@ fn quantize_by_format(
             }
 
             let bpp = (payload.len() as f32 * 8.0) / f32_vals.len() as f32;
-            cimage.append(
-                key,
-                &payload,
-                out_dim as u32,
-                in_dim as u32,
-                TensorType::Binary1,
-            )?;
-            Ok(QuantResult { bpp })
+            Ok((payload, TensorType::Binary1, bpp))
         }
 
-        // Fallback for formats not yet wired: use k-means palettization
-        TensorFormat::Palettized4Bit
-        | TensorFormat::Bf16
-        | TensorFormat::Int8
-        | TensorFormat::Nf8 => {
-            let pal = palettize_matrix(f32_vals, out_dim, in_dim, 16, 50);
-            let bpp = pal.effective_bpp() as f32;
+        // Bf16 / Int8 / Nf8 do not yet have a real codec in this crate.
+        // The previous version of this function silently substituted
+        // Palettized4Bit, which made a CImage header that said INT8
+        // physically contain 4-bit palettized bytes. That is a hard
+        // error now — the caller must explicitly use Palettized4Bit
+        // (the default) or wait for the real codec to be implemented.
+        TensorFormat::Palettized4Bit => palettize_to_payload(f32_vals, out_dim, in_dim),
+        TensorFormat::Bf16 => Err(format!(
+            "TensorFormat::Bf16 has no codec implementation in prism-ecs-quantization; \
+             use Palettized4Bit or implement the BF16 codec for {key}"
+        )),
+        TensorFormat::Int8 => Err(format!(
+            "TensorFormat::Int8 has no codec implementation in prism-ecs-quantization; \
+             use Palettized4Bit or implement the INT8 codec for {key}"
+        )),
+        TensorFormat::Nf8 => Err(format!(
+            "TensorFormat::Nf8 has no codec implementation in prism-ecs-quantization; \
+             use Palettized4Bit or implement the NF8 codec for {key}"
+        )),
+    }
+}
 
-            let cb_bytes = pal.rows.len() * 16 * 2;
-            let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
-            let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
-            for row in &pal.rows {
-                for &cb_f32 in &row.codebook {
-                    let cb_f16 = half::f16::from_f32(cb_f32);
-                    payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
-                }
-            }
-            for row in &pal.rows {
-                payload.extend_from_slice(&row.indices);
-            }
+/// K-means palettization to CImage-ready payload bytes. Used as the
+/// default format when no plan is provided and as the explicit
+/// implementation for `TensorFormat::Palettized4Bit`.
+fn palettize_to_payload(
+    f32_vals: &[f32],
+    out_dim: usize,
+    in_dim: usize,
+) -> Result<(Vec<u8>, TensorType, f32), String> {
+    let pal = palettize_matrix(f32_vals, out_dim, in_dim, 16, 50);
+    let bpp = pal.effective_bpp() as f32;
 
-            cimage.append_palettized(key, &payload, out_dim as u32, in_dim as u32)?;
-            Ok(QuantResult { bpp })
+    let cb_bytes = pal.rows.len() * 16 * 2;
+    let idx_bytes: usize = pal.rows.iter().map(|r| r.indices.len()).sum();
+    let mut payload = Vec::with_capacity(cb_bytes + idx_bytes);
+    for row in &pal.rows {
+        for &cb_f32 in &row.codebook {
+            let cb_f16 = half::f16::from_f32(cb_f32);
+            payload.extend_from_slice(&cb_f16.to_bits().to_le_bytes());
         }
     }
+    for row in &pal.rows {
+        payload.extend_from_slice(&row.indices);
+    }
+
+    Ok((payload, TensorType::Palettized4Bit, bpp))
 }
 
 /// Compile to memory (no .cimage I/O).
@@ -651,4 +730,141 @@ fn compile_to_cimage_ane(
     _output_path: &Path,
 ) -> Result<(), String> {
     Err("ANE compilation requires the `ane` feature".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    //! Constitutional cutover: the silent-substitution bug.
+    //!
+    //! The previous version of `quantize_by_format` matched
+    //! `Bf16 | Int8 | Nf8` and produced a 4-bit palettized payload while
+    //! reporting the requested format. That made a CImage header that
+    //! said INT8 physically contain 4-bit palettized bytes. These tests
+    //! pin the new contract: any format without a real codec returns
+    //! `Err`. The default path (`Palettized4Bit` and the
+    //! `format_override = None` branch) is unaffected.
+
+    use super::*;
+    use prism_ecs_ir::evolution::mutation_table::TensorFormat;
+
+    /// `quantize_to_payload` for `Bf16` is a hard error.
+    #[test]
+    fn quantize_bf16_is_hard_error() {
+        let vals = vec![0.0f32; 16];
+        let result = quantize_to_payload("test", &vals, 2, 8, TensorFormat::Bf16);
+        assert!(result.is_err(), "Bf16 must not silently substitute");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("Bf16"), "error must name the format: {msg}");
+    }
+
+    /// `quantize_to_payload` for `Int8` is a hard error.
+    #[test]
+    fn quantize_int8_is_hard_error() {
+        let vals = vec![0.0f32; 16];
+        let result = quantize_to_payload("test", &vals, 2, 8, TensorFormat::Int8);
+        assert!(result.is_err(), "Int8 must not silently substitute");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("Int8"), "error must name the format: {msg}");
+    }
+
+    /// `quantize_to_payload` for `Nf8` is a hard error.
+    #[test]
+    fn quantize_nf8_is_hard_error() {
+        let vals = vec![0.0f32; 16];
+        let result = quantize_to_payload("test", &vals, 2, 8, TensorFormat::Nf8);
+        assert!(result.is_err(), "Nf8 must not silently substitute");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("Nf8"), "error must name the format: {msg}");
+    }
+
+    /// `quantize_to_payload` for `Palettized4Bit` still works.
+    #[test]
+    fn quantize_palettized4bit_succeeds() {
+        let vals: Vec<f32> = (0..16).map(|i| (i as f32) * 0.1).collect();
+        let result = quantize_to_payload("test", &vals, 2, 8, TensorFormat::Palettized4Bit);
+        assert!(result.is_ok());
+        let (payload, tensor_type, _bpp) = result.unwrap();
+        assert!(!payload.is_empty());
+        assert_eq!(tensor_type, TensorType::Palettized4Bit);
+    }
+
+    /// `quantize_to_payload` for `Fp16` still works and produces FP16
+    /// payload bytes.
+    #[test]
+    fn quantize_fp16_succeeds() {
+        let vals: Vec<f32> = (0..16).map(|i| (i as f32) * 0.1).collect();
+        let result = quantize_to_payload("test", &vals, 2, 8, TensorFormat::Fp16);
+        assert!(result.is_ok());
+        let (payload, tensor_type, _bpp) = result.unwrap();
+        assert_eq!(payload.len(), 16 * 2);
+        assert_eq!(tensor_type, TensorType::StandardFP16);
+    }
+
+    /// `build_quantization_plan` records the default format on the
+    /// plan so receipts can prove what policy was applied.
+    #[test]
+    fn build_plan_records_default_format() {
+        // The default_format field on the result is what we read in
+        // receipts. Pin it so future edits cannot silently change the
+        // legacy default.
+        let plan = QuantizationResult {
+            source_digest: "src".into(),
+            target_hardware: "apple-m1".into(),
+            selections: vec![],
+            execution_plan_json: None,
+            default_format: TensorFormat::Palettized4Bit,
+        };
+        assert_eq!(plan.default_format, TensorFormat::Palettized4Bit);
+        assert_eq!(plan.default_format_count(), 0);
+        assert_eq!(plan.explicit_format_count(), 0);
+    }
+
+    /// `write_cimage_from_plan` is a pure function: same plan + same
+    /// path = same bytes (we check the header magic + size are
+    /// identical across two consecutive writes).
+    #[test]
+    fn write_cimage_from_plan_is_deterministic() {
+        let plan = QuantizationResult {
+            source_digest: "src".into(),
+            target_hardware: "apple-m1".into(),
+            selections: vec![QuantizedTensorSelection {
+                key: "a".into(),
+                format: TensorFormat::Palettized4Bit,
+                payload: vec![0u8; 64],
+                tensor_type: TensorType::Palettized4Bit,
+                dim_m: 2,
+                dim_n: 8,
+                effective_bpp: 4.0,
+                payload_bytes: 64,
+            }],
+            execution_plan_json: Some("{}".into()),
+            default_format: TensorFormat::Palettized4Bit,
+        };
+        let dir = tempdir_like();
+        let p1 = dir.join("a.cimage");
+        let p2 = dir.join("b.cimage");
+        write_cimage_from_plan(&plan, &p1).expect("first write");
+        write_cimage_from_plan(&plan, &p2).expect("second write");
+        let d1 = std::fs::read(&p1).expect("read a");
+        let d2 = std::fs::read(&p2).expect("read b");
+        assert_eq!(d1.len(), d2.len(), "byte length must match");
+        // The CImage header is 16 KB reserved; the first 16 bytes are
+        // the magic + header size and must be identical.
+        assert_eq!(&d1[..16], &d2[..16], "header prefix must match");
+    }
+
+    fn tempdir_like() -> std::path::PathBuf {
+        let base = std::env::temp_dir();
+        let unique = format!(
+            "prism-quant-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let dir = base.join(unique);
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
 }

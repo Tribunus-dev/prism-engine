@@ -21,6 +21,10 @@ use prism_ecs_constitutional::lifecycle_command::{
     RequestCancellationCommand, ENVELOPE_SCHEMA_VERSION,
 };
 use prism_ecs_constitutional::work::WorkState;
+use prism_ecs_constitutional::compilation::{
+    CompilationJob, JobConfig, JobInput, JobLifecycle,
+};
+use prism_ecs_constitutional::types::Timestamp;
 #[derive(Debug, Clone, Copy)]
 pub struct PlannedMarker;
 impl prism_ecs_core::Component for PlannedMarker {}
@@ -1325,15 +1329,66 @@ fn execute_create_work(
 
 fn execute_create_compilation_job(
     world: &mut World,
-    _cmd: &CreateCompilationJobCommand,
+    cmd: &CreateCompilationJobCommand,
 ) -> Result<CommandResult, RuntimeError> {
+    // The previous version of this handler was a no-op that returned a
+    // fresh entity ID and dropped every field of the command. The
+    // constitutional `compilation` module's
+    // `CreateCompilationJobCommand::execute` is the canonical
+    // implementation, but it requires a `SchemaRegistry` that the
+    // kernel does not yet own. Until that lands, this handler performs
+    // the equivalent inserts directly: spawn the job entity, attach
+    // `CompilationJob` / `JobInput` / `JobConfig` / `JobLifecycle`, and
+    // surface the same data the no-op was silently discarding.
+    //
+    // The audit's rule is "no naked u64 IDs"; the spawned entity
+    // carries a real generation, which is what we attach components to.
     let spawned = world
         .spawn(EntityKind::Executable, None)
         .map_err(|e| RuntimeError::Entity(format!("spawn job failed: {e}")))?;
-    let job_entity = spawned.entity.id();
+    let job_entity = spawned.entity;
+
+    world
+        .insert_component(
+            job_entity,
+            CompilationJob {
+                job_id: cmd.job_id,
+                target_artifact: cmd.model_artifact,
+                target_device_profile: cmd.target_profile.clone(),
+                created_at: Timestamp::now(),
+            },
+        )
+        .map_err(|e| RuntimeError::Entity(format!("insert CompilationJob: {e}")))?;
+
+    world
+        .insert_component(
+            job_entity,
+            JobInput {
+                model_artifact: cmd.model_artifact,
+                source_format: String::new(),
+                quantization_profile: None,
+            },
+        )
+        .map_err(|e| RuntimeError::Entity(format!("insert JobInput: {e}")))?;
+
+    world
+        .insert_component(
+            job_entity,
+            JobConfig {
+                target_format: cmd.target_format.clone(),
+                optimization_level: cmd.optimization_level,
+                enable_validation: cmd.enable_validation,
+            },
+        )
+        .map_err(|e| RuntimeError::Entity(format!("insert JobConfig: {e}")))?;
+
+    world
+        .insert_component(job_entity, JobLifecycle::Pending)
+        .map_err(|e| RuntimeError::Entity(format!("insert JobLifecycle: {e}")))?;
+
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::CompilationJobCreated {
-            entity: job_entity,
+            entity: job_entity.id(),
             sequence: 0,
             world_epoch: world.current_epoch().0,
         },

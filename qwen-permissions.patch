@@ -1,0 +1,17 @@
+diff --git a/.qwen/settings.json b/.qwen/settings.json
+new file mode 100644
+--- /dev/null
++++ b/.qwen/settings.json
+@@ -0,0 +1,12 @@
++{
++  "tools": {
++    "approvalMode": "auto-edit",
++    "sandbox": false
++  },
++  "permissions": {
++    "allow": [
++      "Bash(git *)",
++      "Bash(gh *)"
++    ]
++  }
++}

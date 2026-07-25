@@ -12,6 +12,27 @@ No legacy map, registry, manager, cache, or database table can independently con
 - **LegacyRemoved** — Legacy write path deleted
 - **ReplayVerified** — Restart recovery, replay determinism, stale rejection proven
 
+## Methodology Status
+
+The Cutover Protocol status describes whether the canonical path is authoritative. The
+methodology status describes whether the code implementing the canonical path is clean.
+A subsystem can be `Canonical` and still carry methodology debt; that debt blocks the
+next cutover step until it is paid or formally waived. The methodology is owned by the
+`prism-constitutional-rust-ecs` skill (`references/module-discipline.md`,
+`references/rust-quality.md`, `references/project-absorption.md`,
+`SKILL.md` §Propagation verification).
+
+- **Clean** — passes all four methodology gates (Module cohesion, Rust quality, Project
+  absorption, Propagation). Eligible to advance to the next state. Subsystem's
+  Cutover Protocol status is unblocked.
+- **Migrate** — has known methodology debt in one or more areas. A migration entry
+  exists in the Methodology Migration Backlog below. Cannot advance to the next state
+  until the debt is paid (the migration is part of the change) or formally waived.
+- **Waived** — has known methodology debt that is explicitly waived for the current
+  cutover. The waiver is recorded in the change's `Completion report`, names the
+  invariant or test that justifies the waiver, and expires at the next major version.
+  A waiver on a public API fails the Rust quality gate at review.
+
 ## Subsystem Registry
 
 | # | Subsystem | Status | Entity Kinds | Schemas | Owner |
@@ -63,6 +84,203 @@ in shadow mode.
 
 8. **Verify** — Prove restart recovery, replay determinism, stale-outcome
    rejection, failure atomicity, and projection rebuilding.
+
+### Methodology promotion gates
+
+The 8 cutover steps are necessary but not sufficient. Each transition between states
+also requires satisfying the methodology gates below. A subsystem that has not paid its
+methodology debt cannot advance, even if the constitutional path is correct. The
+methodology status of each subsystem is recorded above (`Methodology Status`) and the
+work to clear each gate is tracked in the `Methodology Migration Backlog` below.
+
+**Inventory → Design** requires:
+- **Module cohesion inventory.** All files in the subsystem's crates are identified,
+  with their single-authority statement (or decomposition plan if the file owns more
+  than one authority). New files in this transition are subject to the
+  `references/module-discipline.md` thresholds.
+- **Project absorption inventory.** Any file named after an external project is
+  classified as `format adapter`, `hardware backend`, `vendored dependency`, or
+  `absorbed pattern`. The first three categories keep their external name; the last
+  is a migration entry in the Methodology Migration Backlog with a re-implementation
+  target.
+
+**Design → Shadow** requires the above plus:
+- **Rust quality.** The constitutional path uses typed errors (`thiserror`-derived
+  enums, no `anyhow::Error` in `prism-ecs-constitutional`, `prism-ecs-runtime`, or
+  `prism-ecs-kernel`), encodes authority-bearing values as newtypes
+  (`IdempotencyKey`, `Generation`, `Epoch`, `LeaseToken`, `ArtifactDigest`,
+  `SchemaKey`, `CommandId`), and has no `unwrap` / `expect` / `panic!` / `unreachable!`
+  / `todo!` / `unimplemented!` in production paths.
+- **Propagation chain documented.** Every state-bearing change in the constitutional
+  path has a named propagation chain (durable event → event store → replay applier →
+  projection rebuild → read path → downstream consumer) and at least one
+  projection-rebuild test.
+
+**Shadow → Canonical** requires the above plus:
+- **Module cohesion.** No file added to the subsystem during the Shadow run exceeds
+  the hard thresholds (900 LOC or 35 public items) without a decomposition plan in
+  the change's `Completion report`. Existing files above the threshold have a
+  backlog entry in the Methodology Migration Backlog with a target decomposition.
+- **Project absorption.** No `absorbed pattern` file remains in the subsystem
+  without a re-implementation target in the Methodology Migration Backlog. A
+  subsystem that contains an absorbed-pattern file cannot advance to `Canonical`
+  until the file is re-implemented natively, re-exported as a deprecation shim, and
+  scheduled for removal at the next minor version.
+- **Propagation tests.** Every state-bearing change has a replay test in addition
+  to the projection-rebuild test. The replay test re-derives state from durable
+  events without rerunning effects and verifies identical committed state.
+- **No `unsafe` outside the allowed crates.** If the subsystem is in a crate where
+  `unsafe` is forbidden (constitutional, runtime, server, protocol), the
+  Shadow run must produce zero `unsafe` blocks.
+
+**Canonical → LegacyRemoved** requires the above plus:
+- No legacy write path can independently contradict the world. The change that
+  moves the subsystem to `LegacyRemoved` includes the deletion of the legacy
+  writer, not just the deprecation flag.
+- No `legacy_mutations` feature or equivalent escape hatch is reachable from the
+  default build. The default `cargo build` produces a build with no legacy
+  mutation path.
+
+**LegacyRemoved → ReplayVerified** requires the above plus:
+- Restart recovery integration test passes (a process restart reconciles or
+  expires process-local resources and orphaned leases).
+- Replay determinism test passes (live execution and replay produce identical
+  committed state from the same durable events).
+- Stale-outcome rejection test passes (a result produced before a fencing
+  generation change is rejected; no canonical mutation follows).
+- Failure atomicity test passes (a failed preflight or effect leaves zero
+  canonical residue; rollback is complete).
+- Projection rebuild test passes (delete the projection, rebuild from durable
+  events, verify observable equivalence).
+
+## Methodology Migration Backlog
+
+The methodology gates above require subsystem hygiene. The backlog below is the
+workspace-level work that must be paid before subsystems can advance through the
+Cutover Protocol. Subsystem-specific rows in the `Current Migration State` section
+reference these entries.
+
+### How to regenerate the numbers
+
+```bash
+# Module cohesion (godfile candidates by LOC and pub-item count)
+bash $SKILL_DIR/scripts/audit_authority.sh . --module-cohesion
+
+# Rust quality (unwraps, expects, denied methods, lint warnings)
+cargo clippy --workspace --all-targets 2>&1 | tee /tmp/clippy-baseline.log
+
+# Project absorption (files named after external projects)
+rg -l 'tinygrad|burn|candle|jax|bonsai|uop|tinyrun|fastai' crates/ 2>/dev/null
+```
+
+The baseline below is the current snapshot under default features, all targets.
+Re-run before any state transition.
+
+### Workspace Baseline (snapshot)
+
+- **Module cohesion.** 38 files over the hard threshold (900 LOC or 35 public items).
+  Top entries by combined LOC + pub count: `tinygrad_core.rs` (6762 LOC, 103 pub),
+  `uop.rs` (6407, 76), `runtime.rs` (4746, 143), `cimage.rs` (3285, 194),
+  `search.rs` (2775, 92), `schedule.rs` (2646, 84), `ecs.rs` (2581, 61).
+- **Rust quality.** 89 `unwrap` / `expect` calls in production paths (the new
+  constitutional `disallowed_methods` rule). Top hot files: `prism-mcp-core/src/protocol.rs`
+  (33), `crates/prism-ecs-core/src/world.rs` (11), `crates/prism-gguf/src/lib.rs` (9),
+  `crates/prism-plugin/src/lib.rs` (8), `prism-mcp-core/src/scheduler.rs` (5).
+  128 total clippy warnings, 3 errors (pre-existing `not_unsafe_ptr_arg_deref` in
+  `prism-plugin`, not from the constitutional config).
+- **Project absorption.** 5 absorbed-pattern files in the canonical paths:
+  `tinygrad_core.rs`, `uop.rs`, `bonsai_ternary.rs`, `bonsai_cimage.rs`,
+  `turboquant_kv.rs`. All in canonical paths; none under a vendored exception.
+- **Propagation.** All currently `Shadow` and `Canonical` subsystems have replay
+  appliers registered in the ReplayRegistry (16 appliers in total per
+  `Persistence & Projections` row below). The propagation gate is satisfied at
+  the design level; replay tests at the Shadow → Canonical transition are the
+  per-change evidence.
+
+### Module Cohesion Backlog
+
+Files over the hard threshold (900 LOC or 35 public items) in canonical paths.
+The full list regenerates from the audit script. The migration plan for each file
+is in `references/module-discipline.md` §Concrete decomposition patterns for Prism.
+
+| File | LOC | Pub | Migration target |
+|---|---:|---:|---|
+| `crates/prism-spatial-ir/src/tinygrad_core.rs` | 6762 | 103 | `phase_graph/` directory (also project absorption) |
+| `crates/prism-ecs-compile/src/uop.rs` | 6407 | 76 | `ir_value.rs` + `ir_op.rs` (also project absorption) |
+| `crates/prism-ecs-compile/src/runtime.rs` | 4746 | 143 | Decompose by entity kind |
+| `crates/prism-ecs-compile/src/cimage.rs` | 3285 | 194 | Decompose by authority |
+| `crates/prism-ecs-compile/src/search.rs` | 2775 | 92 | Decompose by authority |
+| `crates/prism-ecs-runtime/src/schedule.rs` | 2646 | 84 | One file per schedule stage |
+| `crates/prism-ecs-compile/src/ecs.rs` | 2581 | 61 | Split per `EntityKind` |
+| `crates/prism-ecs-server/src/runtime/server.rs` | 2284 | 7 | Split by ingress / router / serve / observe |
+| `crates/prism-ecs-server/src/engine/bpe_tokenizer.rs` | 2256 | 38 | Split by tokenizer responsibility |
+| `crates/prism-ecs-quantization/src/bonsai_ternary.rs` | 1995 | 54 | `ternary_quantization/` (also project absorption) |
+| `crates/prism-ecs-quantization/src/bonsai_cimage.rs` | 1958 | 59 | `cimage_quantization/` (also project absorption) |
+| `crates/prism-ecs-runtime/src/kernel.rs` | 1939 | 63 | One file per schedule stage |
+| `crates/prism-ecs-kernel/src/cpu_backend.rs` | 1894 | 1 | Decompose by target path |
+| `crates/prism-ecs-kernel/src/metal_dispatch.rs` | 1821 | 10 | Decompose by dispatch shape |
+| `crates/prism-ecs-compile/src/evaluator.rs` | 1784 | 32 | Decompose by evaluation phase |
+| `crates/prism-ecs-compile/src/compiler.rs` | 1777 | 11 | `ir_build.rs` + `plan_apply.rs` (build vs apply) |
+| `crates/prism-spatial-ir/src/execution_plan.rs` | 1583 | 72 | Decompose by plan element |
+| `crates/prism-ecs-quantization/src/turboquant_kv.rs` | 1566 | 33 | `kv_quantization/` (also project absorption) |
+| `crates/prism-amd-npu-runtime/src/codegen.rs` | 1553 | 10 | Split by codegen phase |
+| `crates/prism-spatial-ir/src/evolution.rs` | 1535 | 44 | Decompose by evolution operator |
+
+The remaining ~18 files in the full audit output are not listed here; they are
+recoverable from a single `audit_authority.sh --module-cohesion` run. The table
+above is the priority queue, ordered by LOC.
+
+### Project Absorption Backlog
+
+| File | Target name | Target authority |
+|---|---|---|
+| `crates/prism-spatial-ir/src/tinygrad_core.rs` | `phase_graph/` directory (`value.rs`, `op.rs`, `phase.rs`, `spatial.rs`, `abi.rs`) | Phase graph semantics in the spatial IR |
+| `crates/prism-ecs-compile/src/uop.rs` | `ir_value.rs` + `ir_op.rs` | IR value and operation types in the compile path |
+| `crates/prism-ecs-quantization/src/bonsai_ternary.rs` | `ternary_quantization/` directory | Ternary quantization in Prism |
+| `crates/prism-ecs-quantization/src/bonsai_cimage.rs` | `cimage_quantization/` directory | CImage-targeted quantization in Prism |
+| `crates/prism-ecs-quantization/src/turboquant_kv.rs` | `kv_quantization/` directory | KV-cache quantization in Prism |
+
+The re-implementation pattern, the exception categories (format adapters, hardware
+backends, vendored dependencies — all exempt), and the migration sequence are in
+`references/project-absorption.md`.
+
+### Rust Quality Backlog
+
+89 `unwrap` / `expect` calls in production paths. The migration target is zero;
+each violation either becomes `?` propagation, a typed error, or a `// WAIVER`
+with a justification. Per-file priority queue, top entries first:
+
+| File | Count | Plan |
+|---|---:|---|
+| `prism-mcp-core/src/protocol.rs` | 33 | Migrate to `?` and typed errors; this is the ingress layer, no `anyhow` constraint but no-panic still applies |
+| `crates/prism-ecs-core/src/world.rs` | 11 | Public API surface; change `add_component` / `remove_component` / `get_component_mut` to return `Result` so the no-panic discipline holds at the foundation |
+| `crates/prism-gguf/src/lib.rs` | 9 | Format adapter; typed errors via `thiserror`, no `unwrap` in parser hot path |
+| `crates/prism-plugin/src/lib.rs` | 8 | FFI boundary; the `unsafe` constraint already forces typed error handling — extend to the rest of the file |
+| `prism-mcp-core/src/scheduler.rs` | 5 | Same as protocol.rs |
+| `crates/prism-multimodal/src/multimodal/vision_encoder.rs` | 4 | Subsystem-internal; migrate as part of `Multimodal Pipelines` cutover |
+| `crates/prism-ecs-core/src/column.rs` | 4 | Internal storage primitive; `Result` on the column-mutation API |
+| `crates/prism-video/src/lib.rs` | 3 | Subsystem-internal; migrate as part of `Multimodal Pipelines` cutover |
+| `crates/prism-ecs-codec/src/lib.rs` | 3 | Serialization layer; typed errors per codec format |
+| `crates/prism-multimodal/src/lib.rs` | 2 | Subsystem-internal |
+| `prism-mcp-core/src/subprocess.rs` | 2 | Subprocess management; `Result` with `io::Error` propagation |
+| `build.rs` | 1 | Build script; this category is acceptable per the rust-quality `#[allow(clippy::unwrap_used)]` test convention if scoped to the build path only |
+| `crates/prism-audio/src/lib.rs` | 1 | Subsystem-internal |
+| `crates/prism-gguf/src/writer.rs` | 1 | Format adapter |
+| `crates/prism-ecs-core/src/query.rs` | 1 | Internal storage primitive |
+
+The full per-violation list regenerates from the audit script. The table above is
+the priority queue, ordered by file-level violation count. Subsystem ownership is
+indicated in the right column where it is unambiguous; cross-cutting violations
+(scheduler, world) are the highest leverage because they touch every caller.
+
+### Propagation Backlog
+
+No subsystem is currently blocked on a missing propagation chain — every
+`Shadow` and `Canonical` subsystem has its replay applier registered in
+`ReplayRegistry`. The propagation gate's per-change evidence (projection-rebuild
+test + replay test) is collected at the change level, not the subsystem level.
+A change that fails to provide the evidence fails the propagation gate at review,
+independent of CAMPAIGN state.
 
 ## Current Migration State
 
