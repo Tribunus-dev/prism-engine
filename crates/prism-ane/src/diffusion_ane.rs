@@ -13,9 +13,10 @@ pub fn build_lut_gemv(
     // %palette_indices = @gather(%input, %indices)
     // %output = @reduce_sum(%palette_indices)
 
-    // In actual implementation, this will use ANE's gather and reduce operations
+    // In actual implementation, this will use ANE's gather and reduce operations.
+    // The axis is 0 because the LUT palette is indexed by token id.
     builder
-        .gather(_input, _indices)
+        .gather(_input, _indices, 0)
         .reduce_sum("gather_0")
         .output("reduce_sum_0")
 }

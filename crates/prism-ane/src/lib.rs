@@ -14,6 +14,8 @@ pub mod mil_gen_full;
 #[cfg(feature = "ane")]
 pub mod mil_helpers;
 #[cfg(feature = "ane")]
+pub mod mil_layer_programs;
+#[cfg(feature = "ane")]
 pub mod mlpackage;
 #[cfg(feature = "ane")]
 pub mod planar;

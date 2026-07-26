@@ -19,6 +19,13 @@ prism-ecs-constitutional = { path = "../crates/prism-ecs-constitutional" }
 prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
 prism-kv-cache = { path = "../crates/prism-kv-cache" }
 prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
+# Prism ANE crate — canonical home for the MIL builder and the two
+# high-level ANE program constructors. The engine used to have its
+# own parallel MIL builder (now absorbed); this dependency routes
+# all engine callers through the canonical re-export at
+# `crate::ecs::mil_builder::MilBuilder` (see
+# `compute-core/src/ecs/core/mil_builder.rs`).
+prism-ane = { path = "../crates/prism-ane", optional = true }
 block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
@@ -89,6 +96,8 @@ prism-backend = [
     "metal-dispatch",
     "backend-metal",
     "dep:image",
+    "dep:prism-ane",
+    "prism-ane/ane",
 ]
 # Explicit production/compiler bundle. Keep LLVM/MLIR out of ordinary backend
 # tests unless the caller is qualifying the compiler path itself.

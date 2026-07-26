@@ -7,7 +7,9 @@
 use coreml_proto::proto::mil_spec::{self, argument, dimension, tensor_value, value};
 use std::collections::HashMap;
 
-/// Error returned by [`MilBuilder::build`] when SSA validation fails.
+/// Error returned by [`MilBuilder::build`] when SSA validation fails,
+/// or by the high-level program constructors in
+/// [`crate::mil_layer_programs`] when protobuf encoding fails.
 #[derive(Debug, Clone)]
 pub enum MilBuildError {
     UndefinedValue { operation: String, name: String },
@@ -15,6 +17,11 @@ pub enum MilBuildError {
     MissingOperationName { op_type: String },
     UnknownType { name: String },
     UnsupportedUnaryOpMode { mode: String },
+    /// The constructed program could not be serialised to protobuf.
+    /// Returned by the high-level program constructors
+    /// ([`crate::mil_layer_programs::build_full_ane_layer_program`]
+    /// and [`crate::mil_layer_programs::build_batched_matmul_program`]).
+    ProgramEncodeFailed(String),
 }
 
 impl std::fmt::Display for MilBuildError {
@@ -44,6 +51,9 @@ impl std::fmt::Display for MilBuildError {
             MilBuildError::UnsupportedUnaryOpMode { mode } => {
                 write!(f, "unsupported unary op mode: {mode}")
             }
+            MilBuildError::ProgramEncodeFailed(msg) => {
+                write!(f, "failed to encode MIL program to protobuf: {msg}")
+            }
         }
     }
 }
@@ -60,6 +70,10 @@ pub struct MilBuilder {
     counter: u64,
     value_types: HashMap<String, mil_spec::ValueType>,
     weights: HashMap<String, Vec<u8>>,
+    /// Batch size for fused MIL programs. When `> 1`, matmul broadcasts the
+    /// weight across the batch dimension, processing all items in a single
+    /// ANE invocation. Must be a power of 2 (1, 2, 4) for the ANE path.
+    pub batch_size: u32,
 }
 
 impl Default for MilBuilder {
@@ -79,7 +93,19 @@ impl MilBuilder {
             counter: 0,
             value_types: HashMap::new(),
             weights: HashMap::new(),
+            batch_size: 1,
         }
+    }
+
+    /// Set the batch size for this MIL program.
+    ///
+    /// When > 1 (power of 2: 1, 2, 4), the first dimension of inputs is
+    /// scaled accordingly and matmul broadcasts the weight across the
+    /// batch dimension, processing all items in a single ANE invocation.
+    /// Default is 1 (no batching).
+    pub fn batch_size(mut self, n: u32) -> Self {
+        self.batch_size = n;
+        self
     }
 
     pub fn input(mut self, name: &str, dtype: mil_spec::DataType, shape: &[i64]) -> Self {
@@ -524,15 +550,77 @@ impl MilBuilder {
         self
     }
 
-    pub fn gather(mut self, x: &str, indices: &str) -> Self {
+    /// Add a `gather` operation — index into `params` along `axis` using `indices`.
+    ///
+    /// Used by the ANE Planar Engine LUT expansion: `params=[81,4]` LUT,
+    /// `indices=swizzled u8 byte`, `axis=0` → gathers one row of the LUT.
+    /// The output shape is the params prefix dims, then the indices dims,
+    /// then the params suffix dims after `axis`. This is the canonical
+    /// MIL gather output shape.
+    pub fn gather(mut self, params: &str, indices: &str, axis: i64) -> Self {
         let name = self.fresh_name("gather");
-        let dtype = self.require_dtype(x).expect("SSA: unknown value");
-        let output_dims = vec![1, 1];
-        let vt = value_type_tensor(tensor_type(dtype, &output_dims));
-        let mut inputs_map = HashMap::new();
-        inputs_map.insert("x".to_string(), named_arg(x));
-        inputs_map.insert("indices".to_string(), named_arg(indices));
-        let op = make_operation("gather", &name, inputs_map, &[(&name, &vt)], HashMap::new());
+        let dtype = self
+            .require_dtype(params)
+            .expect("SSA: unknown params type");
+
+        // Resolve the param and index dim lists to plain i64 vectors so the
+        // output shape calculation is straightforward.
+        let params_dims: Vec<i64> = self
+            .value_types
+            .get(params)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(
+                    tt.dimensions
+                        .iter()
+                        .filter_map(|d| match d.dimension.as_ref()? {
+                            dimension::Dimension::Constant(c) => Some(c.size as i64),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let indices_dims: Vec<i64> = self
+            .value_types
+            .get(indices)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(
+                    tt.dimensions
+                        .iter()
+                        .filter_map(|d| match d.dimension.as_ref()? {
+                            dimension::Dimension::Constant(c) => Some(c.size as i64),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+
+        // Negative axis counts from the end of `params_dims`.
+        let axis_index = if axis < 0 {
+            (params_dims.len() as i64 + axis).max(0) as usize
+        } else {
+            axis as usize
+        };
+        let mut out_dims = Vec::new();
+        if axis_index <= params_dims.len() {
+            out_dims.extend_from_slice(&params_dims[..axis_index.min(params_dims.len())]);
+            out_dims.extend_from_slice(&indices_dims);
+            if axis_index < params_dims.len() {
+                out_dims.extend_from_slice(&params_dims[axis_index + 1..]);
+            }
+        }
+        let vt = value_type_tensor(tensor_type(dtype, &out_dims));
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x".to_string(), named_arg(params));
+        inputs.insert("indices".to_string(), named_arg(indices));
+        inputs.insert("axis".to_string(), int32_arg(axis as i32));
+        inputs.insert("validate_indices".to_string(), bool_arg(false));
+
+        let op = make_operation("gather", &name, inputs, &[(&name, &vt)], HashMap::new());
         self.value_types.insert(name.clone(), vt);
         self.ops.push(op);
         self
@@ -611,6 +699,417 @@ impl MilBuilder {
         let op = make_operation("mul", &name, inputs_map, &[(&name, &vt)], HashMap::new());
         self.value_types.insert(name.clone(), vt);
         self.ops.push(op);
+        self
+    }
+
+    /// Add a `topk` operation — returns the values and indices of the top-k
+    /// elements along `axis`.  Used for KV compaction: selects the
+    /// most-attended token positions directly from the attention scores
+    /// the ANE just computed.
+    ///
+    /// Two outputs are produced:
+    /// - `<name>_values`: the same shape as `x`
+    /// - `<name>_indices`: int32 indices along the chosen axis
+    pub fn topk(mut self, x: &str, k: i64, axis: i64) -> Self {
+        let name = self.fresh_name("topk");
+        let dtype = self.require_dtype(x).expect("SSA: unknown type");
+
+        // The values output has the same type as `x`; the indices output is
+        // a 1-D int32 tensor (the rank is the input's rank; coremlcompiler
+        // decides the exact shape).
+        let vt_values = self.value_types.get(x).cloned().unwrap_or_else(|| {
+            value_type_tensor(mil_spec::TensorType {
+                data_type: dtype as i32,
+                rank: 2,
+                dimensions: vec![],
+                attributes: HashMap::new(),
+            })
+        });
+        let vt_indices = value_type_tensor(mil_spec::TensorType {
+            data_type: mil_spec::DataType::Int32 as i32,
+            rank: 1,
+            dimensions: vec![],
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x".to_string(), named_arg(x));
+        // `k` and `axis` are constant attributes embedded in the op, not
+        // input tensors. MIL accepts both forms; we use attributes.
+
+        let values_name = format!("{name}_values");
+        let indices_name = format!("{name}_indices");
+
+        let mut attrs = HashMap::new();
+        attrs.insert("axis".to_string(), int_attr(axis));
+        attrs.insert("k".to_string(), int_attr(k));
+
+        let op = make_operation(
+            "topk",
+            &name,
+            inputs,
+            &[(&values_name, &vt_values), (&indices_name, &vt_indices)],
+            attrs,
+        );
+
+        self.value_types.insert(values_name, vt_values);
+        self.value_types.insert(indices_name, vt_indices);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a SiLU (sigmoid linear unit) element-wise activation.
+    ///
+    /// SiLU is a primitive MIL op; this wraps the composite
+    /// `op_composite_silu` helper into a single self-returning call.
+    pub fn silu(mut self, name_hint: &str, input: &str) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown value");
+
+        // Clone dimensions from the input — silu is element-wise.
+        let dimensions = self
+            .value_types
+            .get(input)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(tt.dimensions.clone()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let rank = dimensions.len() as i64;
+
+        let vt = value_type_tensor(mil_spec::TensorType {
+            data_type: dtype as i32,
+            rank,
+            dimensions,
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(input));
+
+        let op = make_operation("silu", &name, inputs_map, &[(&name, &vt)], HashMap::new());
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a `softmax` operation along the given axis.
+    pub fn softmax(mut self, input: &str, axis: i64) -> Self {
+        let name = self.fresh_name("softmax");
+        let dtype = self.require_dtype(input).expect("SSA: unknown type");
+        // Softmax is element-wise along `axis`; the output has the same
+        // shape as the input.
+        let vt = self.value_types.get(input).cloned().unwrap_or_else(|| {
+            value_type_tensor(mil_spec::TensorType {
+                data_type: dtype as i32,
+                rank: 4,
+                dimensions: vec![],
+                attributes: HashMap::new(),
+            })
+        });
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x".to_string(), named_arg(input));
+
+        let mut attrs = HashMap::new();
+        attrs.insert("axis".to_string(), int_attr(axis));
+
+        let op = make_operation("softmax", &name, inputs, &[(&name, &vt)], attrs);
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a matmul with `transpose_y=true`.
+    /// A is `[M, K]`, B is `[N, K]` (transposed to `[K, N]` internally).
+    /// Output is `[M, N]`.
+    pub fn matmul_transpose_y(mut self, a: &str, b: &str) -> Self {
+        let name = self.fresh_name("matmul");
+        let dtype = self.require_dtype(a).expect("SSA: unknown value");
+        let _ = self.require_dtype(b).expect("SSA: unknown value");
+
+        // With `transpose_y=true`: A[M,K] × B^T[K,N] where K = B.cols, N = B.rows.
+        // B is declared as [N, K], so B.rows = N, B.cols = K.
+        // Output dims are [A.rows, B.rows] = [M, N].
+        let get_dims = |types: &HashMap<String, mil_spec::ValueType>, key: &str| {
+            let vt = types.get(key)?;
+            let tt = vt.r#type.as_ref()?;
+            if let mil_spec::value_type::Type::TensorType(ref tensor) = tt {
+                let dims: Vec<i64> = tensor
+                    .dimensions
+                    .iter()
+                    .filter_map(|d| match d.dimension.as_ref()? {
+                        dimension::Dimension::Constant(c) => Some(c.size as i64),
+                        _ => None,
+                    })
+                    .collect();
+                if dims.len() >= 2 {
+                    Some((dims[0], dims[1]))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        let output_dims = match (get_dims(&self.value_types, a), get_dims(&self.value_types, b)) {
+            (Some((m, _)), Some((n, _))) => vec![m, n],
+            _ => vec![1, 1],
+        };
+        let vt = value_type_tensor(tensor_type(dtype, &output_dims));
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(a));
+        inputs_map.insert("y".to_string(), named_arg(b));
+        inputs_map.insert("transpose_x".to_string(), bool_arg(false));
+        inputs_map.insert("transpose_y".to_string(), bool_arg(true));
+
+        let op = make_operation("matmul", &name, inputs_map, &[(&name, &vt)], HashMap::new());
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Concatenate tensors along a given axis.
+    ///
+    /// `inputs` — list of SSA value names to concatenate.
+    /// `axis` — axis along which to concatenate (0-based).
+    /// `_use_sequence_length` — placeholder for MIL spec compatibility (unused).
+    pub fn concat(
+        mut self,
+        name_hint: &str,
+        inputs: &[&str],
+        axis: i64,
+        _use_sequence_length: bool,
+    ) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self
+            .require_dtype(inputs[0])
+            .expect("SSA: unknown type");
+
+        // Infer the output shape from the first input; zero the concat axis
+        // because the actual sum is computed at compile time by
+        // coremlcompiler.
+        let dimensions = self
+            .value_types
+            .get(inputs[0])
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => {
+                    let mut dims = tt.dimensions.clone();
+                    if let Some(d) = dims.get_mut(axis as usize) {
+                        d.dimension = Some(dimension::Dimension::Constant(
+                            dimension::ConstantDimension { size: 0 },
+                        ));
+                    }
+                    Some(dims)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let rank = dimensions.len() as i64;
+
+        let vt = value_type_tensor(mil_spec::TensorType {
+            data_type: dtype as i32,
+            rank,
+            dimensions,
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("values".to_string(), multi_named_arg(inputs));
+
+        let mut extra = HashMap::new();
+        extra.insert("axis".to_string(), int_attr(axis));
+
+        let op = make_operation("concat", &name, inputs_map, &[(&name, &vt)], extra);
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a 2D convolution operation.
+    ///
+    /// `kernel_size` is the spatial kernel dimensions (e.g. `[1, 1]`).
+    /// `padding` is the padding mode (`"valid"`, `"same"`, or `"custom"`).
+    pub fn conv(
+        mut self,
+        name_hint: &str,
+        input: &str,
+        weight: &str,
+        kernel_size: &[i64],
+        padding: &str,
+    ) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown value");
+
+        // Output shape: [B, C_out, H_out, W_out]. C_out is unknown; spatial
+        // dims come from the input. For a 1x1 valid conv: [B, C, 1, S] →
+        // [B, ?, 1, S].
+        let out_dims = self
+            .value_types
+            .get(input)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => {
+                    let mut dims = tt.dimensions.clone();
+                    if dims.len() >= 2 {
+                        // Replace the channel dim with an unknown (C_out).
+                        dims[1] = mil_spec::Dimension {
+                            dimension: Some(dimension::Dimension::Unknown(
+                                dimension::UnknownDimension { variadic: false },
+                            )),
+                        };
+                    }
+                    Some(dims)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                vec![
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                    mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Unknown(
+                            dimension::UnknownDimension { variadic: false },
+                        )),
+                    },
+                ]
+            });
+        let rank = out_dims.len() as i64;
+
+        let vt = value_type_tensor(mil_spec::TensorType {
+            data_type: dtype as i32,
+            rank,
+            dimensions: out_dims,
+            attributes: HashMap::new(),
+        });
+
+        let mut inputs_map = HashMap::new();
+        inputs_map.insert("x".to_string(), named_arg(input));
+        inputs_map.insert("weight".to_string(), named_arg(weight));
+
+        let kernel_vals: Vec<i64> = kernel_size.to_vec();
+        let stride_vals: Vec<i64> = vec![1, 1];
+        let pad_vals: Vec<i64> = vec![0, 0];
+
+        let mut attrs: HashMap<String, mil_spec::Value> = HashMap::new();
+        attrs.insert("kernel_size".to_string(), ints_attr(&kernel_vals));
+        attrs.insert("stride".to_string(), ints_attr(&stride_vals));
+        attrs.insert("dilatation".to_string(), ints_attr(&stride_vals));
+        attrs.insert("pad_type".to_string(), string_attr(padding));
+        attrs.insert("pad".to_string(), ints_attr(&pad_vals));
+        attrs.insert("groups".to_string(), int_attr(1));
+
+        let op = make_operation("convolution", &name, inputs_map, &[(&name, &vt)], attrs);
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Reshape a tensor to a new static shape.
+    pub fn reshape(mut self, name_hint: &str, input: &str, shape: &[i64]) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown type");
+        let vt = value_type_tensor(tensor_type(dtype, shape));
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x".to_string(), named_arg(input));
+        inputs.insert("shape".to_string(), ints32_arg(shape));
+
+        let op = make_operation("reshape", &name, inputs, &[(&name, &vt)], HashMap::new());
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Permute tensor dimensions using a static axis order.
+    pub fn transpose(mut self, name_hint: &str, input: &str, perm: &[i64]) -> Self {
+        let name = self.fresh_name(name_hint);
+        let dtype = self.require_dtype(input).expect("SSA: unknown type");
+        let input_dims: Vec<i64> = self
+            .value_types
+            .get(input)
+            .and_then(|vt| match &vt.r#type {
+                Some(mil_spec::value_type::Type::TensorType(tt)) => Some(
+                    tt.dimensions
+                        .iter()
+                        .filter_map(|d| match d.dimension.as_ref()? {
+                            dimension::Dimension::Constant(c) => Some(c.size as i64),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let mut output_shape = Vec::with_capacity(perm.len());
+        for &axis in perm {
+            let axis_usize = axis as usize;
+            output_shape.push(*input_dims.get(axis_usize).unwrap_or(&1));
+        }
+        let vt = value_type_tensor(tensor_type(dtype, &output_shape));
+
+        let mut inputs = HashMap::new();
+        inputs.insert("x".to_string(), named_arg(input));
+        inputs.insert("perm".to_string(), ints32_arg(perm));
+
+        let op = make_operation("transpose", &name, inputs, &[(&name, &vt)], HashMap::new());
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Add a const operation with `i32` immediate values.
+    pub fn const_i32(mut self, name_hint: &str, values: &[i32], shape: &[i64]) -> Self {
+        let name = self.fresh_name(name_hint);
+        let tensor_type = tensor_type(mil_spec::DataType::Int32, shape);
+        let vt = value_type_tensor(tensor_type);
+
+        let tv = mil_spec::TensorValue {
+            value: Some(tensor_value::Value::Ints(tensor_value::RepeatedInts {
+                values: values.to_vec(),
+            })),
+        };
+        let v = mil_spec::Value {
+            doc_string: String::new(),
+            r#type: Some(vt.clone()),
+            value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+                value: Some(value::immediate_value::Value::Tensor(tv)),
+            })),
+        };
+
+        let mut attrs = HashMap::new();
+        attrs.insert("name".to_string(), string_attr(&name));
+        attrs.insert("val".to_string(), v);
+
+        let op = make_operation("const", &name, HashMap::new(), &[(&name, &vt)], attrs);
+
+        self.value_types.insert(name.clone(), vt);
+        self.ops.push(op);
+        self
+    }
+
+    /// Bump the SSA counter by `count` without creating any operation.
+    /// Used when `input()` replaces `const_f32()` (stateless weights) but
+    /// downstream SSA names must stay stable.
+    pub fn reserve_names(mut self, count: u64) -> Self {
+        self.counter += count;
         self
     }
 
@@ -1119,6 +1618,133 @@ fn string_attr(val: &str) -> mil_spec::Value {
     }
 }
 
+/// Build an [`Argument`] that carries a literal `i32` value (no SSA name).
+fn int32_arg(val: i32) -> mil_spec::Argument {
+    mil_spec::Argument {
+        arguments: vec![argument::Binding {
+            binding: Some(argument::binding::Binding::Value(int32_attr(val))),
+        }],
+    }
+}
+
+/// Build an [`Argument`] that carries a literal `[i64]` shape, encoded as
+/// `i32` (the MIL spec's default shape encoding). Used for static shape
+/// inputs to ops like `reshape` and `transpose`.
+fn ints32_arg(vals: &[i64]) -> mil_spec::Argument {
+    mil_spec::Argument {
+        arguments: vec![argument::Binding {
+            binding: Some(argument::binding::Binding::Value(ints32_attr(vals))),
+        }],
+    }
+}
+
+/// Build an [`Argument`] that references multiple SSA names (e.g. for
+/// `concat`). Each name becomes a separate `Binding::Name` entry.
+fn multi_named_arg(names: &[&str]) -> mil_spec::Argument {
+    mil_spec::Argument {
+        arguments: names
+            .iter()
+            .map(|n| argument::Binding {
+                binding: Some(argument::binding::Binding::Name((*n).to_string())),
+            })
+            .collect(),
+    }
+}
+
+/// `Int32` attribute with a single value. The MIL spec's default integer
+/// encoding for op attributes.
+fn int32_attr(val: i32) -> mil_spec::Value {
+    let int_tensor = mil_spec::TensorValue {
+        value: Some(tensor_value::Value::Ints(tensor_value::RepeatedInts {
+            values: vec![val],
+        })),
+    };
+    mil_spec::Value {
+        doc_string: String::new(),
+        r#type: Some(mil_spec::ValueType {
+            r#type: Some(mil_spec::value_type::Type::TensorType(
+                mil_spec::TensorType {
+                    data_type: mil_spec::DataType::Int32 as i32,
+                    rank: 0,
+                    dimensions: vec![],
+                    attributes: HashMap::new(),
+                },
+            )),
+        }),
+        value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+            value: Some(value::immediate_value::Value::Tensor(int_tensor)),
+        })),
+    }
+}
+
+/// `Int64` array attribute — used by ops like `conv` whose integer-array
+/// attributes (e.g. `kernel_size`, `stride`) expect 64-bit integers.
+fn ints_attr(vals: &[i64]) -> mil_spec::Value {
+    let int_tensor = mil_spec::TensorValue {
+        value: Some(tensor_value::Value::LongInts(
+            tensor_value::RepeatedLongInts {
+                values: vals.to_vec(),
+            },
+        )),
+    };
+    mil_spec::Value {
+        doc_string: String::new(),
+        r#type: Some(mil_spec::ValueType {
+            r#type: Some(mil_spec::value_type::Type::TensorType(
+                mil_spec::TensorType {
+                    data_type: mil_spec::DataType::Int64 as i32,
+                    rank: 1,
+                    dimensions: vec![mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Constant(
+                            dimension::ConstantDimension {
+                                size: vals.len() as u64,
+                            },
+                        )),
+                    }],
+                    attributes: HashMap::new(),
+                },
+            )),
+        }),
+        value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+            value: Some(value::immediate_value::Value::Tensor(int_tensor)),
+        })),
+    }
+}
+
+/// `Int32` array attribute — the truncated form of [`ints_attr`]. The MIL
+/// spec's `kernel_size`, `stride`, and `pad` attributes accept either
+/// 32- or 64-bit integers; we use 32-bit because that is what coremlcompiler
+/// emits when targeting the ANE.
+fn ints32_attr(vals: &[i64]) -> mil_spec::Value {
+    let int_tensor = mil_spec::TensorValue {
+        value: Some(tensor_value::Value::Ints(tensor_value::RepeatedInts {
+            values: vals.iter().map(|&v| v as i32).collect(),
+        })),
+    };
+    mil_spec::Value {
+        doc_string: String::new(),
+        r#type: Some(mil_spec::ValueType {
+            r#type: Some(mil_spec::value_type::Type::TensorType(
+                mil_spec::TensorType {
+                    data_type: mil_spec::DataType::Int32 as i32,
+                    rank: 1,
+                    dimensions: vec![mil_spec::Dimension {
+                        dimension: Some(dimension::Dimension::Constant(
+                            dimension::ConstantDimension {
+                                size: vals.len() as u64,
+                            },
+                        )),
+                    }],
+                    attributes: HashMap::new(),
+                },
+            )),
+        }),
+        value: Some(value::Value::ImmediateValue(value::ImmediateValue {
+            value: Some(value::immediate_value::Value::Tensor(int_tensor)),
+        })),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1208,5 +1834,375 @@ mod tests {
         let text = builder.to_mil_text();
         assert!(text.contains("func main<coreml9>"));
         assert!(text.contains("-> (matmul_1)"));
+    }
+
+    // ── Tests for the methods absorbed from the engine's mil_builder ────
+
+    #[test]
+    fn default_batch_size_is_one() {
+        let b = MilBuilder::new("main");
+        assert_eq!(b.batch_size, 1);
+    }
+
+    #[test]
+    fn batch_size_setter_updates_field() {
+        let b = MilBuilder::new("main").batch_size(4);
+        assert_eq!(b.batch_size, 4);
+    }
+
+    #[test]
+    fn gather_with_axis_infers_output_shape() {
+        // params is [81, 4], indices is [N], axis=0 → output is [N, 4].
+        let prog = MilBuilder::new("main")
+            .input("params", mil_spec::DataType::Float32, &[81, 4])
+            .input("indices", mil_spec::DataType::Int32, &[5])
+            .gather("params", "indices", 0)
+            .output("gather_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        // The gather op's output type should have the inferred shape.
+        let gather_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "gather")
+            .expect("gather op present");
+        let gather_output = &gather_op.outputs[0];
+        let output_type = gather_output.r#type.as_ref().unwrap();
+        let tt = match &output_type.r#type {
+            Some(mil_spec::value_type::Type::TensorType(t)) => t,
+            _ => panic!("expected tensor type"),
+        };
+        let dims: Vec<i64> = tt
+            .dimensions
+            .iter()
+            .filter_map(|d| match d.dimension.as_ref()? {
+                dimension::Dimension::Constant(c) => Some(c.size as i64),
+                _ => None,
+            })
+            .collect();
+        // [N, 4] = [5, 4].
+        assert_eq!(dims, vec![5, 4]);
+    }
+
+    #[test]
+    fn gather_with_negative_axis() {
+        // Negative axis counts from the end. params is [10, 20, 30], axis=-1
+        // (which is 2) → output is [10, 20, N].
+        let prog = MilBuilder::new("main")
+            .input("params", mil_spec::DataType::Float32, &[10, 20, 30])
+            .input("indices", mil_spec::DataType::Int32, &[7])
+            .gather("params", "indices", -1)
+            .output("gather_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let gather_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "gather")
+            .expect("gather op present");
+        let tt = match &gather_op.outputs[0].r#type.as_ref().unwrap().r#type {
+            Some(mil_spec::value_type::Type::TensorType(t)) => t,
+            _ => panic!("expected tensor type"),
+        };
+        let dims: Vec<i64> = tt
+            .dimensions
+            .iter()
+            .filter_map(|d| match d.dimension.as_ref()? {
+                dimension::Dimension::Constant(c) => Some(c.size as i64),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dims, vec![10, 20, 7]);
+    }
+
+    #[test]
+    fn topk_produces_values_and_indices_outputs() {
+        let prog = MilBuilder::new("main")
+            .input("x", mil_spec::DataType::Float32, &[32, 64])
+            .topk("x", 4, -1)
+            .output("topk_0_values")
+            .output("topk_0_indices")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let topk_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "topk")
+            .expect("topk op present");
+        assert_eq!(topk_op.outputs.len(), 2);
+        assert_eq!(topk_op.outputs[0].name, "topk_0_values");
+        assert_eq!(topk_op.outputs[1].name, "topk_0_indices");
+        // The k and axis attributes are present.
+        assert!(topk_op.attributes.contains_key("k"));
+        assert!(topk_op.attributes.contains_key("axis"));
+    }
+
+    #[test]
+    fn silu_is_a_primitive_op() {
+        let prog = MilBuilder::new("main")
+            .input("x", mil_spec::DataType::Float32, &[1, 4])
+            .silu("y", "x")
+            .output("y_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let silu_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "silu")
+            .expect("silu op present");
+        assert_eq!(silu_op.outputs[0].name, "y_0");
+    }
+
+    #[test]
+    fn softmax_carries_axis_attribute() {
+        let prog = MilBuilder::new("main")
+            .input("x", mil_spec::DataType::Float32, &[1, 4])
+            .softmax("x", -1)
+            .output("softmax_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let softmax_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "softmax")
+            .expect("softmax op present");
+        assert!(softmax_op.attributes.contains_key("axis"));
+    }
+
+    #[test]
+    fn reshape_sets_static_shape() {
+        let prog = MilBuilder::new("main")
+            .input("x", mil_spec::DataType::Float32, &[1, 16])
+            .reshape("y", "x", &[4, 4])
+            .output("y_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let reshape_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "reshape")
+            .expect("reshape op present");
+        let tt = match &reshape_op.outputs[0].r#type.as_ref().unwrap().r#type {
+            Some(mil_spec::value_type::Type::TensorType(t)) => t,
+            _ => panic!("expected tensor type"),
+        };
+        let dims: Vec<i64> = tt
+            .dimensions
+            .iter()
+            .filter_map(|d| match d.dimension.as_ref()? {
+                dimension::Dimension::Constant(c) => Some(c.size as i64),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dims, vec![4, 4]);
+    }
+
+    #[test]
+    fn transpose_permutes_dims() {
+        // [2, 3, 4] transposed by [2, 0, 1] → [4, 2, 3].
+        let prog = MilBuilder::new("main")
+            .input("x", mil_spec::DataType::Float32, &[2, 3, 4])
+            .transpose("y", "x", &[2, 0, 1])
+            .output("y_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let transpose_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "transpose")
+            .expect("transpose op present");
+        let tt = match &transpose_op.outputs[0].r#type.as_ref().unwrap().r#type {
+            Some(mil_spec::value_type::Type::TensorType(t)) => t,
+            _ => panic!("expected tensor type"),
+        };
+        let dims: Vec<i64> = tt
+            .dimensions
+            .iter()
+            .filter_map(|d| match d.dimension.as_ref()? {
+                dimension::Dimension::Constant(c) => Some(c.size as i64),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(dims, vec![4, 2, 3]);
+    }
+
+    #[test]
+    fn const_i32_emits_const_op() {
+        let prog = MilBuilder::new("main")
+            .const_i32("idx", &[1, 2, 3, 4], &[4])
+            .output("idx_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let const_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "const")
+            .expect("const op present");
+        let tt = match &const_op.outputs[0].r#type.as_ref().unwrap().r#type {
+            Some(mil_spec::value_type::Type::TensorType(t)) => t,
+            _ => panic!("expected tensor type"),
+        };
+        assert_eq!(tt.data_type, mil_spec::DataType::Int32 as i32);
+    }
+
+    #[test]
+    fn matmul_transpose_y_sets_transpose_y_true() {
+        let prog = MilBuilder::new("main")
+            .input("a", mil_spec::DataType::Float32, &[2, 4])
+            .input("b", mil_spec::DataType::Float32, &[8, 4]) // B = [N, K]
+            .matmul_transpose_y("a", "b")
+            .output("matmul_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let matmul_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "matmul")
+            .expect("matmul op present");
+        // The `y` argument is an SSA name binding (the input tensor).
+        let y_arg = matmul_op.inputs.get("y").expect("y arg present");
+        match &y_arg.arguments[0].binding {
+            Some(argument::binding::Binding::Name(n)) => assert_eq!(n, "b"),
+            other => panic!("expected Name binding for y, got {other:?}"),
+        }
+        // The `transpose_y` argument is a literal bool true.
+        let transpose_y_arg = matmul_op.inputs.get("transpose_y").expect("transpose_y arg");
+        let transpose_y_value = match &transpose_y_arg.arguments[0].binding {
+            Some(argument::binding::Binding::Value(v)) => v,
+            _ => panic!("expected Value binding for transpose_y"),
+        };
+        // The bool value is wrapped in a Bool tensor.
+        if let Some(mil_spec::value::Value::ImmediateValue(iv)) = &transpose_y_value.value {
+            if let Some(mil_spec::value::immediate_value::Value::Tensor(tv)) = &iv.value {
+                if let Some(tensor_value::Value::Bools(b)) = &tv.value {
+                    assert_eq!(b.values, vec![true]);
+                    return;
+                }
+            }
+        }
+        panic!("transpose_y was not a bool true");
+    }
+
+    #[test]
+    fn concat_takes_multiple_inputs() {
+        let prog = MilBuilder::new("main")
+            .input("a", mil_spec::DataType::Float32, &[2, 4])
+            .input("b", mil_spec::DataType::Float32, &[2, 4])
+            .concat("c", &["a", "b"], 0, false)
+            .output("c_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let concat_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "concat")
+            .expect("concat op present");
+        // The `values` argument references both `a` and `b` as SSA names.
+        let values_arg = concat_op.inputs.get("values").expect("values arg present");
+        assert_eq!(values_arg.arguments.len(), 2);
+    }
+
+    #[test]
+    fn conv_emits_convolution_op_with_attrs() {
+        let prog = MilBuilder::new("main")
+            .input("x", mil_spec::DataType::Float32, &[1, 4, 1, 8])
+            .input("w", mil_spec::DataType::Float32, &[8, 4, 1, 1])
+            .conv("y", "x", "w", &[1, 1], "valid")
+            .output("y_0")
+            .build()
+            .expect("build");
+        let block = prog
+            .functions
+            .get("main")
+            .unwrap()
+            .block_specializations
+            .get("CoreML9")
+            .unwrap();
+        let conv_op = block
+            .operations
+            .iter()
+            .find(|op| op.r#type == "convolution")
+            .expect("conv op present");
+        assert!(conv_op.attributes.contains_key("kernel_size"));
+        assert!(conv_op.attributes.contains_key("stride"));
+        assert!(conv_op.attributes.contains_key("pad_type"));
+    }
+
+    #[test]
+    fn reserve_names_bumps_counter() {
+        // After `reserve_names(5)`, the next fresh_name should yield `_5`.
+        let mut b = MilBuilder::new("main").reserve_names(5);
+        assert_eq!(b.fresh_name("x"), "x_5");
+        assert_eq!(b.fresh_name("y"), "y_6");
     }
 }
