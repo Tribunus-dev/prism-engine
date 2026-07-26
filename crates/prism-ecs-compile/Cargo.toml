@@ -7,6 +7,7 @@ description = "Canonical compiler orchestration — format-independent compilati
 autotests = false
 
 [dependencies]
+blake3 = "1"
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-constitutional = { path = "../prism-ecs-constitutional", features = ["quantization-bridge"] }
 prism-ecs-source = { path = "../prism-ecs-source" }

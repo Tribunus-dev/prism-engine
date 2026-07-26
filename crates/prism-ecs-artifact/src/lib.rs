@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+pub mod text_architecture_extract;
 #[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
     #[error("artifact is not sealed")]

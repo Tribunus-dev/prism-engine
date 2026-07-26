@@ -11,6 +11,7 @@ hex = { workspace = true }
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 

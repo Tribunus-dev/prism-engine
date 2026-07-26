@@ -1,6 +1,7 @@
 //! Prism ECS constitutional commands — session, work, execution, compilation,
 //! multimodal, agent, distributed, and ingress authority systems.
 
+pub mod admission_gates;
 pub mod agent_exec;
 pub mod agent_plan;
 pub mod agent_reflection;

@@ -498,12 +498,13 @@ mod tests {
         let expander = TemplateExpander::new();
         let r = expander
             .expand(
-                "kernel void {{ENTRY}}() { /* body */ }",
+                "kernel void main() {\n  uint x = {{TILE_WIDTH}};\n  /* body */\n}",
                 "test",
                 &sample_params(),
             )
             .expect("expand succeeds");
-        assert!(r.contains("kernel void {{ENTRY}}()"));
+        assert!(r.contains("kernel void main()"));
+        assert!(r.contains("uint x = 640;"));
     }
 
     #[test]

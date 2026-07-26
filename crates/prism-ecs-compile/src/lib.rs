@@ -35,9 +35,14 @@ pub use qwen3_6_moe::{
 pub mod active_window;
 pub mod adapter_training;
 pub mod agentic_workload;
+pub mod compile_pipeline;
+pub mod compile_planning;
 pub mod engram_learning;
 pub mod evaluator;
 pub mod execution_graph_evolution;
+pub mod fusion_analysis;
+pub mod fusion_scheduling;
+pub mod hardware_tuning;
 pub mod knowledge_correction;
 pub mod kv_cache_compaction;
 pub mod kv_cache_evolution;

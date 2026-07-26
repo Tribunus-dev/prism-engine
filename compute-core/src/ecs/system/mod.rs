@@ -4,39 +4,20 @@ pub mod backend_dispatch;
 pub mod backend_eval;
 pub mod backend_residency;
 pub mod backpressure_tick;
-pub mod buffer_lifetime;
 pub mod capability_registry_sys;
 pub mod catalog_validation;
 pub mod compiler_systems;
 pub mod completion_ingest;
 pub mod download;
 pub mod draft_model;
-pub mod engine_systems;
 pub mod execution_graph;
 pub mod fusion;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod gates;
 pub mod int4_pack;
 pub mod kernel_catalog;
-pub mod kernel_gen;
 pub mod memory_plan;
-pub mod model_load;
 pub mod moe_budget;
 pub mod package;
 pub mod phase_engine;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod pipeline_core;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub mod planning_core;
 pub mod portfolio;
 pub mod profile;
 pub mod quant_plan;
@@ -45,7 +26,6 @@ pub mod source_load;
 pub mod ternary_pipeline;
 pub mod token_budget_tick;
 pub mod tts;
-pub mod tuning;
 pub mod validation;
 pub mod validation_matrix;
 pub mod variant_gen;
