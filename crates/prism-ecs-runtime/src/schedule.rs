@@ -1,9 +1,9 @@
 use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use crate::backend::KernelArtifactBinding;
+use crate::backend::{parse_backend, KernelArtifactBinding};
 use crate::inference::{InferenceAdmissionPolicy, InferencePhase, InferenceWorkMetadata};
 use crate::kernel::{
     AdmittedMarker, Command, CommandEnvelope, KernelHandle, PlannedMarker, PublishedMarker,
@@ -17,16 +17,19 @@ use prism_ecs_constitutional::lifecycle_command::{
     AcquireWorkLeaseCommand, AdmitWorkCommand, LifecycleCommand, MarkObservedCommand,
     RecordDispatchIntentCommand, RecordWorkPlanCommand, RequestCancellationCommand,
 };
+use prism_ecs_constitutional::types::{
+    Config, Epoch, FilePath, Format, Generation, RejectionReason,
+};
 use prism_ecs_constitutional::work::{WorkInputPath, WorkOutputPath};
 use prism_ecs_constitutional::work::{WorkItemComponent, WorkState};
 use prism_ecs_core::Entity;
 
 /// Stable system identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub struct SystemId(pub u64);
 
 /// Canonical stage names for the execution schedule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 pub enum SystemStage {
     Observe,
     Plan,
@@ -166,15 +169,38 @@ pub struct TickReceipt {
 // ── RuntimeSchedule ────────────────────────────────────────────────────────
 
 /// A validated, ready-to-execute schedule.
+///
+/// The canonical fields (`systems`, `stage_order`) are `BTreeMap`: the
+/// schedule topology is part of the constitutional runtime authority
+/// and the iteration order over registered systems is observable to
+/// schedule validation, dispatch, and projection rebuilds. See
+/// AGENTS.md "no HashMap/HashSet for canonical collections whose order
+/// is observable."
+///
+/// The `system_map` field is **execution-plane state** — the trait-object
+/// systems are looked up by `SystemId` during schedule execution but
+/// their iteration order is not observed externally. Per
+/// `references/rust-quality.md`, `HashMap` is allowed for
+/// execution-plane state.
 pub struct RuntimeSchedule {
     pub stages: Vec<SystemStage>,
     /// Spec-level metadata for each registered system.
-    pub systems: HashMap<SystemId, SystemSpec>,
+    ///
+    /// BTreeMap: the schedule topology is canonical; iteration over
+    /// the system set is observable to validation and dispatch.
+    pub systems: BTreeMap<SystemId, SystemSpec>,
     /// Stage → ordered system ids.
-    pub stage_order: HashMap<SystemStage, Vec<SystemId>>,
+    ///
+    /// BTreeMap: the stage order is canonical; iteration order is
+    /// observable to the schedule executor and to the topological sort.
+    pub stage_order: BTreeMap<SystemStage, Vec<SystemId>>,
     /// Deterministic hash of the schedule topology.
     pub schedule_hash: [u8; 32],
     /// Trait-object system instances indexed by id, used during execution.
+    ///
+    /// HashMap is allowed here: this is execution-plane state, not
+    /// canonical. The systems are looked up by id but not iterated in
+    /// a canonical order.
     pub system_map: HashMap<SystemId, Box<dyn System>>,
     /// Monotonically increasing tick counter (shared across threads).
     pub tick_count: AtomicU64,
@@ -219,8 +245,8 @@ impl RuntimeSchedule {
                 SystemStage::Publish,
                 SystemStage::Cleanup,
             ],
-            systems: HashMap::new(),
-            stage_order: HashMap::new(),
+            systems: BTreeMap::new(),
+            stage_order: BTreeMap::new(),
             schedule_hash: [0u8; 32],
             system_map: HashMap::new(),
             tick_count: AtomicU64::new(0),
@@ -400,8 +426,8 @@ impl RuntimeSchedule {
 
     /// Compute a topological ordering per stage, respecting intra-stage
     /// dependencies. Returns a map from stage to ordered system ids.
-    pub fn topological_order(&self) -> Result<HashMap<SystemStage, Vec<SystemId>>, RuntimeError> {
-        let mut result: HashMap<SystemStage, Vec<SystemId>> = HashMap::new();
+    pub fn topological_order(&self) -> Result<BTreeMap<SystemStage, Vec<SystemId>>, RuntimeError> {
+        let mut result: BTreeMap<SystemStage, Vec<SystemId>> = BTreeMap::new();
         for stage in &self.stages {
             let ids: Vec<SystemId> = self.stage_order.get(stage).cloned().unwrap_or_default();
             let sorted = self.kahn_sort(ids, *stage)?;
@@ -664,8 +690,8 @@ impl System for ObserveSystem {
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::MarkObserved(MarkObservedCommand {
-                        entity: entity.id(),
-                        observed_epoch: epoch,
+                        entity,
+                        observed_epoch: Epoch(epoch),
                     }),
                 )));
         }
@@ -729,9 +755,9 @@ impl System for PlanSystem {
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::RecordWorkPlan(RecordWorkPlanCommand {
-                        entity: entity.id(),
-                        backend: "auto".to_string(),
-                        output_format: "cimage".to_string(),
+                        entity,
+                        backend: parse_backend("auto")?,
+                        output_format: Format("cimage".to_string()),
                         resource_estimate_bytes: resource_estimate,
                         timeout_ms: 30000,
                     }),
@@ -832,8 +858,10 @@ impl System for AdmitSystem {
                     ctx.command_buffer
                         .emit(CommandEnvelope::new(Command::Lifecycle(
                             LifecycleCommand::RequestCancellation(RequestCancellationCommand {
-                                entity: entity.id(),
-                                reason: "inference deadline expired before admission".to_string(),
+                                entity,
+                                reason: RejectionReason(
+                                    "inference deadline expired before admission".to_string(),
+                                ),
                             }),
                         )));
                     continue;
@@ -848,9 +876,7 @@ impl System for AdmitSystem {
             }
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
-                    LifecycleCommand::AdmitWork(AdmitWorkCommand {
-                        entity: entity.id(),
-                    }),
+                    LifecycleCommand::AdmitWork(AdmitWorkCommand { entity }),
                 )));
             admitted += 1;
         }
@@ -910,8 +936,10 @@ impl System for LeaseSystem {
                     ctx.command_buffer
                         .emit(CommandEnvelope::new(Command::Lifecycle(
                             LifecycleCommand::RequestCancellation(RequestCancellationCommand {
-                                entity: entity.id(),
-                                reason: "inference deadline expired before lease".to_string(),
+                                entity,
+                                reason: RejectionReason(
+                                    "inference deadline expired before lease".to_string(),
+                                ),
                             }),
                         )));
                     continue;
@@ -926,9 +954,9 @@ impl System for LeaseSystem {
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::AcquireWorkLease(AcquireWorkLeaseCommand {
-                        work_entity: entity.id(),
+                        work_entity: entity,
                         ttl_ms,
-                        lease_generation: 1,
+                        lease_generation: Generation(1),
                     }),
                 )));
         }
@@ -979,7 +1007,7 @@ impl System for DispatchSystem {
             .collect();
         leased.sort_by_key(|entity| entity.id());
         leased.truncate(MAX_DISPATCH);
-        for entity in &leased {
+        for &entity in leased.iter() {
             if ctx.should_stop() {
                 break;
             }
@@ -997,14 +1025,16 @@ impl System for DispatchSystem {
             }
             let now_ms = ctx.now_ms();
             let (config, deadline_ms) = if let Some(metadata) =
-                ctx.world_view.get::<InferenceWorkMetadata>(*entity)
+                ctx.world_view.get::<InferenceWorkMetadata>(entity)
             {
                 if metadata.deadline_expired(now_ms) {
                     ctx.command_buffer
                         .emit(CommandEnvelope::new(Command::Lifecycle(
                             LifecycleCommand::RequestCancellation(RequestCancellationCommand {
-                                entity: entity.id(),
-                                reason: "inference deadline expired before dispatch".to_string(),
+                                entity,
+                                reason: RejectionReason(
+                                    "inference deadline expired before dispatch".to_string(),
+                                ),
                             }),
                         )));
                     continue;
@@ -1056,12 +1086,12 @@ impl System for DispatchSystem {
                     .emit(CommandEnvelope::new(Command::Lifecycle(
                         LifecycleCommand::FailWork(
                             prism_ecs_constitutional::lifecycle_command::FailWorkCommand {
-                                work_entity: entity.id(),
-                                error: format!(
+                                work_entity: entity,
+                                error: RejectionReason(format!(
                                     "provider selection failed: {:?}",
                                     selection.fallback_reason
-                                ),
-                                lease_generation: 1,
+                                )),
+                                lease_generation: Generation(1),
                                 retryable: true,
                             },
                         ),
@@ -1076,7 +1106,7 @@ impl System for DispatchSystem {
             };
             let artifact_binding = ctx
                 .world_view
-                .get::<KernelArtifactBinding>(*entity)
+                .get::<KernelArtifactBinding>(entity)
                 .cloned();
             if let Some(binding) = &artifact_binding {
                 if let Err(error) = ctx
@@ -1088,9 +1118,11 @@ impl System for DispatchSystem {
                         .emit(CommandEnvelope::new(Command::Lifecycle(
                             LifecycleCommand::FailWork(
                                 prism_ecs_constitutional::lifecycle_command::FailWorkCommand {
-                                    work_entity: entity.id(),
-                                    error: format!("artifact dispatch validation failed: {error}"),
-                                    lease_generation: 1,
+                                    work_entity: entity,
+                                    error: RejectionReason(format!(
+                                        "artifact dispatch validation failed: {error}"
+                                    )),
+                                    lease_generation: Generation(1),
                                     retryable: false,
                                 },
                             ),
@@ -1105,9 +1137,9 @@ impl System for DispatchSystem {
             ctx.command_buffer
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::RecordDispatchIntent(RecordDispatchIntentCommand {
-                        work_entity: entity.id(),
-                        backend: backend.clone(),
-                        config: effective_config.clone(),
+                        work_entity: entity,
+                        backend: parse_backend(&backend)?,
+                        config: Config(effective_config.clone()),
                         deadline_ms,
                     }),
                 )));
@@ -1119,12 +1151,12 @@ impl System for DispatchSystem {
             if let Some(dispatcher) = dispatcher {
                 let output_path = ctx
                     .world_view
-                    .get::<WorkOutputPath>(*entity)
+                    .get::<WorkOutputPath>(entity)
                     .map(|p| p.0.clone())
                     .unwrap_or_default();
                 let input_path = ctx
                     .world_view
-                    .get::<WorkInputPath>(*entity)
+                    .get::<WorkInputPath>(entity)
                     .map(|p| p.0.clone())
                     .unwrap_or_default();
                 let request = DispatchRequest {
@@ -1149,9 +1181,9 @@ impl System for DispatchSystem {
                             .emit(CommandEnvelope::new(Command::Lifecycle(
                                 LifecycleCommand::FailWork(
                                     prism_ecs_constitutional::lifecycle_command::FailWorkCommand {
-                                        work_entity: entity.id(),
-                                        error: format!("dispatch start failed: {e}"),
-                                        lease_generation: 1,
+                                        work_entity: entity,
+                                        error: RejectionReason(format!("dispatch start failed: {e}")),
+                                        lease_generation: Generation(1),
                                         retryable: true,
                                     },
                                 ),
@@ -1218,9 +1250,11 @@ impl System for CollectSystem {
                                 .emit(CommandEnvelope::new(Command::Lifecycle(
                                     LifecycleCommand::RequestCancellation(
                                         RequestCancellationCommand {
-                                            entity: handle.work_entity,
-                                            reason: "inference deadline expired during dispatch"
-                                                .to_string(),
+                                            entity: Entity::new(handle.work_entity, 0),
+                                            reason: RejectionReason(
+                                                "inference deadline expired during dispatch"
+                                                    .to_string(),
+                                            ),
                                         },
                                     ),
                                 )));
@@ -1256,10 +1290,10 @@ impl System for CollectSystem {
                                             Command::Lifecycle(
                                                 LifecycleCommand::CompleteWork(
                                                     prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
-                                                        work_entity: handle.work_entity,
+                                                        work_entity: Entity::new(handle.work_entity, 0),
                                                         output,
-                                                        output_path: String::new(),
-                                                        lease_generation: handle.attempt,
+                                                        output_path: FilePath(String::new()),
+                                                        lease_generation: Generation(handle.attempt),
                                                     },
                                                 ),
                                             ),
@@ -1284,10 +1318,10 @@ impl System for CollectSystem {
                                     Command::Lifecycle(
                                         LifecycleCommand::CompleteWork(
                                             prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
-                                                work_entity: handle.work_entity,
+                                                work_entity: Entity::new(handle.work_entity, 0),
                                                 output,
-                                                output_path: String::new(),
-                                                lease_generation: handle.attempt,
+                                                output_path: FilePath(String::new()),
+                                                lease_generation: Generation(handle.attempt),
                                             },
                                         ),
                                     ),
@@ -1300,9 +1334,9 @@ impl System for CollectSystem {
                                 .emit(CommandEnvelope::new(Command::Lifecycle(
                                 LifecycleCommand::FailWork(
                                     prism_ecs_constitutional::lifecycle_command::FailWorkCommand {
-                                        work_entity: handle.work_entity,
-                                        error: e,
-                                        lease_generation: handle.attempt,
+                                        work_entity: Entity::new(handle.work_entity, 0),
+                                        error: RejectionReason(e),
+                                        lease_generation: Generation(handle.attempt),
                                         retryable: false,
                                     },
                                 ),
@@ -1416,8 +1450,8 @@ impl System for PublishSystem {
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::PublishResult(
                         prism_ecs_constitutional::lifecycle_command::PublishResultCommand {
-                            entity: entity_id,
-                            result_type: "compilation".to_string(),
+                            entity: Entity::new(entity_id, 0),
+                            result_type: Format("compilation".to_string()),
                             result: result_payload,
                         },
                     ),
@@ -1475,7 +1509,7 @@ impl System for CleanupSystem {
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::ReleaseWorkLease(
                         prism_ecs_constitutional::lifecycle_command::ReleaseWorkLeaseCommand {
-                            work_entity: entity.id(),
+                            work_entity: entity,
                         },
                     ),
                 )));
@@ -1483,7 +1517,7 @@ impl System for CleanupSystem {
                 .emit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::ExpireTransientState(
                         prism_ecs_constitutional::lifecycle_command::ExpireTransientCommand {
-                            entity: entity.id(),
+                            entity,
                         },
                     ),
                 )));
@@ -1504,10 +1538,33 @@ mod tests {
         LifecycleCommandResult, MarkObservedCommand, RecordDispatchIntentCommand,
         RecordWorkPlanCommand, RequestCancellationCommand,
     };
+    use prism_ecs_constitutional::scheduler::{InferenceHint, Priority, ResourceClaim};
+    use prism_ecs_constitutional::types::{Epoch, FilePath, Format, Generation, RejectionReason};
     use prism_ecs_kernel::{
         BackendKind, CpuBackend, DispatchGeometry, KernelBackend, KernelCompileRequest,
         KernelDescriptor, KernelVariant,
     };
+
+    /// Map a u32 priority to the typed `Priority` enum used by `ResourceClaim`.
+    /// 0 = Low, 1 = Normal, 2 = High, 3+ = Critical. The exact mapping is
+    /// not externally observable — tests just need a stable order so that
+    /// higher numeric priority wins the admission race.
+    fn priority_to_priority(p: u32) -> Priority {
+        match p {
+            0 => Priority::Low,
+            1 => Priority::Normal,
+            2 => Priority::High,
+            _ => Priority::Critical,
+        }
+    }
+
+    /// Build a default empty `ResourceClaim` for tests. The original tests
+    /// passed arbitrary JSON strings for inference metadata; the typed
+    /// claim now carries only scheduler fields. Inference hints land in
+    /// a separate path (not exercised by these tests).
+    fn default_claim() -> ResourceClaim {
+        ResourceClaim::default()
+    }
 
     fn test_cpu_artifact() -> prism_ecs_kernel::KernelArtifact {
         CpuBackend
@@ -1550,12 +1607,12 @@ mod tests {
         let outcome = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "compile".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: "".to_string(),
-                    input_path: "".to_string(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("compile".to_string()),
+                    resource_claim: default_claim(),
+                    output_path: FilePath("".to_string()),
+                    input_path: FilePath("".to_string()),
                 }),
             )))
             .expect("create");
@@ -1565,7 +1622,7 @@ mod tests {
             }) => work_entity,
             _ => panic!("expected WorkCreated"),
         };
-        assert!(work_entity > 0, "positive ID");
+        assert!(work_entity.id() > 0, "positive ID");
         let tick0 = kernel.run_tick().expect("tick 0");
         assert_eq!(tick0.tick_number, 0);
         let total: usize = tick0.emitted_commands.iter().map(|c| c.len()).sum();
@@ -1605,12 +1662,12 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "compile".into(),
-                    resource_claim: "{}".into(),
-                    output_path: String::new(),
-                    input_path: String::new(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("compile".to_string()),
+                    resource_claim: default_claim(),
+                    output_path: FilePath(String::new()),
+                    input_path: FilePath(String::new()),
                 }),
             )))
             .expect("create work");
@@ -1621,14 +1678,14 @@ mod tests {
             other => panic!("expected work creation, got {other:?}"),
         };
         handle
-            .bind_kernel_artifact(work_entity, binding)
+            .bind_kernel_artifact(work_entity.id(), binding)
             .expect("bind artifact to work");
 
         for _ in 0..5 {
             kernel.run_tick().expect("run ECS tick");
             if handle
                 .lock_world()
-                .get_component::<WorkState>(Entity::new(work_entity, 0))
+                .get_component::<WorkState>(work_entity)
                 .is_some_and(|state| state.is_terminal())
             {
                 break;
@@ -1636,11 +1693,11 @@ mod tests {
         }
         let world = handle.lock_world();
         assert_eq!(
-            world.get_component::<WorkState>(Entity::new(work_entity, 0)),
+            world.get_component::<WorkState>(work_entity),
             Some(&WorkState::Completed)
         );
         let payload = world
-            .get_component::<crate::ports::ResultPayload>(Entity::new(work_entity, 0))
+            .get_component::<crate::ports::ResultPayload>(work_entity)
             .expect("backend output receipt");
         eprintln!("result bytes {:?}", payload.result.as_bytes());
         assert!(
@@ -1668,12 +1725,12 @@ mod tests {
             handle
                 .submit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::CreateWork(CreateWorkCommand {
-                        entity: 0,
-                        target_entity: 0,
-                        kind: "inference".to_string(),
-                        resource_claim: "{\"max_tokens\":32}".to_string(),
-                        output_path: String::new(),
-                        input_path: String::new(),
+                        entity: Entity::new(0, 0),
+                        target_entity: Entity::new(0, 0),
+                        kind: Format("inference".to_string()),
+                        resource_claim: default_claim(),
+                        output_path: FilePath(String::new()),
+                        input_path: FilePath(String::new()),
                     }),
                 )))
                 .expect("create inference work");
@@ -1727,12 +1784,12 @@ mod tests {
         let work_entity = match handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "inference".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: String::new(),
-                    input_path: String::new(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("inference".to_string()),
+                    resource_claim: default_claim(),
+                    output_path: FilePath(String::new()),
+                    input_path: FilePath(String::new()),
                 }),
             )))
             .expect("create inference work")
@@ -1748,7 +1805,7 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::MarkObserved(MarkObservedCommand {
                     entity: work_entity,
-                    observed_epoch: 0,
+                    observed_epoch: Epoch(0),
                 }),
             )))
             .expect("observe work");
@@ -1756,8 +1813,8 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RecordWorkPlan(RecordWorkPlanCommand {
                     entity: work_entity,
-                    backend: "auto".to_string(),
-                    output_format: "tokens".to_string(),
+                    backend: parse_backend("auto").unwrap(),
+                    output_format: Format("tokens".to_string()),
                     resource_estimate_bytes: 1024,
                     timeout_ms: 30000,
                 }),
@@ -1767,7 +1824,7 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RequestCancellation(RequestCancellationCommand {
                     entity: work_entity,
-                    reason: "client disconnected".to_string(),
+                    reason: RejectionReason("client disconnected".to_string()),
                 }),
             )))
             .expect("cancel work");
@@ -1819,14 +1876,26 @@ mod tests {
             handle
                 .submit(CommandEnvelope::new(Command::Lifecycle(
                     LifecycleCommand::CreateWork(CreateWorkCommand {
-                        entity: 0,
-                        target_entity: 0,
-                        kind: "inference".to_string(),
-                        resource_claim: format!(
-                            r#"{{"prompt_tokens":8,"max_new_tokens":4,"kv_epoch":9,"kv_capacity_tokens":32,"priority":{priority}}}"#
-                        ),
-                        output_path: String::new(),
-                        input_path: String::new(),
+                        entity: Entity::new(0, 0),
+                        target_entity: Entity::new(0, 0),
+                        kind: Format("inference".to_string()),
+                        resource_claim: ResourceClaim {
+                            memory_bytes: 0,
+                            compute_units: 0,
+                            priority: priority_to_priority(priority),
+                            inference_hint: Some(InferenceHint {
+                                prompt_tokens: 8,
+                                max_new_tokens: 4,
+                                prefill_chunk_tokens: 1,
+                                kv_epoch: 9,
+                                kv_tokens: 0,
+                                kv_capacity_tokens: 32,
+                                deadline_ms: 0,
+                                priority,
+                            }),
+                        },
+                        output_path: FilePath(String::new()),
+                        input_path: FilePath(String::new()),
                     }),
                 )))
                 .unwrap()
@@ -1849,13 +1918,13 @@ mod tests {
         let world = handle.lock_world();
         assert!(
             world
-                .get_component::<AdmittedMarker>(Entity::new(second, 0))
+                .get_component::<AdmittedMarker>(second)
                 .is_some(),
             "higher priority request must win the deterministic token budget"
         );
         assert!(
             world
-                .get_component::<AdmittedMarker>(Entity::new(first, 0))
+                .get_component::<AdmittedMarker>(first)
                 .is_none(),
             "the second request cannot exceed the global token budget"
         );
@@ -1889,12 +1958,26 @@ mod tests {
         let entity = match handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "inference".to_string(),
-                    resource_claim: r#"{"prompt_tokens":5,"max_new_tokens":2,"prefill_chunk_tokens":2,"kv_epoch":17,"kv_capacity_tokens":32}"#.to_string(),
-                    output_path: String::new(),
-                    input_path: String::new(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("inference".to_string()),
+                    resource_claim: ResourceClaim {
+                        memory_bytes: 0,
+                        compute_units: 0,
+                        priority: Priority::Normal,
+                        inference_hint: Some(InferenceHint {
+                            prompt_tokens: 5,
+                            max_new_tokens: 2,
+                            prefill_chunk_tokens: 2,
+                            kv_epoch: 17,
+                            kv_tokens: 0,
+                            kv_capacity_tokens: 32,
+                            deadline_ms: 0,
+                            priority: 0,
+                        }),
+                    },
+                    output_path: FilePath(String::new()),
+                    input_path: FilePath(String::new()),
                 }),
             )))
             .unwrap()
@@ -1917,7 +2000,7 @@ mod tests {
             );
             let world = handle.lock_world();
             let metadata = world
-                .get_component::<InferenceWorkMetadata>(Entity::new(entity, 0))
+                .get_component::<InferenceWorkMetadata>(entity)
                 .copied()
                 .unwrap();
             assert_eq!(metadata.prefilled_tokens, expected_prefilled);
@@ -1926,7 +2009,7 @@ mod tests {
         let decode_tick = kernel.run_tick().unwrap();
         let world = handle.lock_world();
         let metadata = world
-            .get_component::<InferenceWorkMetadata>(Entity::new(entity, 0))
+            .get_component::<InferenceWorkMetadata>(entity)
             .copied()
             .unwrap();
         assert_eq!(metadata.generated_tokens, 1);
@@ -1942,6 +2025,7 @@ mod tests {
 
     #[test]
     fn inference_deadline_cancels_before_admission() {
+        use prism_ecs_constitutional::scheduler::InferenceHint;
         let kernel = crate::kernel::RuntimeKernel::new();
         let handle = kernel.handle();
         let mut schedule = RuntimeSchedule::new();
@@ -1955,13 +2039,27 @@ mod tests {
         let entity = match handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "inference".to_string(),
-                    resource_claim: r#"{"prompt_tokens":4,"max_new_tokens":1,"deadline_ms":1}"#
-                        .to_string(),
-                    output_path: String::new(),
-                    input_path: String::new(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("inference".to_string()),
+                    resource_claim: ResourceClaim {
+                        memory_bytes: 0,
+                        compute_units: 0,
+                        priority: Priority::Normal,
+                        inference_hint: Some(InferenceHint {
+                            prompt_tokens: 4,
+                            max_new_tokens: 1,
+                            prefill_chunk_tokens: 1,
+                            kv_epoch: 0,
+                            kv_tokens: 0,
+                            kv_capacity_tokens: 0,
+                            // deadline already passed: 1 ms (immediately expired)
+                            deadline_ms: 1,
+                            priority: 0,
+                        }),
+                    },
+                    output_path: FilePath(String::new()),
+                    input_path: FilePath(String::new()),
                 }),
             )))
             .unwrap()
@@ -1976,7 +2074,7 @@ mod tests {
         let tick = kernel.run_tick().unwrap();
         let world = handle.lock_world();
         assert_eq!(
-            world.get_component::<WorkState>(Entity::new(entity, 0)),
+            world.get_component::<WorkState>(entity),
             Some(&WorkState::Cancelled)
         );
         assert!(tick
@@ -1985,7 +2083,7 @@ mod tests {
             .flatten()
             .any(|command| command.command_type.contains("RequestCancellation")));
         assert!(world
-            .get_component::<AdmittedMarker>(Entity::new(entity, 0))
+            .get_component::<AdmittedMarker>(entity)
             .is_none());
     }
 
@@ -1996,12 +2094,12 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "test".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: "".to_string(),
-                    input_path: "".to_string(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("test".to_string()),
+                    resource_claim: default_claim(),
+                    output_path: FilePath("".to_string()),
+                    input_path: FilePath("".to_string()),
                 }),
             )))
             .expect("create");
@@ -2015,7 +2113,7 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::MarkObserved(MarkObservedCommand {
                     entity: work_entity,
-                    observed_epoch: 0,
+                    observed_epoch: Epoch(0),
                 }),
             )))
             .expect("observe");
@@ -2023,8 +2121,8 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RecordWorkPlan(RecordWorkPlanCommand {
                     entity: work_entity,
-                    backend: "auto".to_string(),
-                    output_format: "cimage".to_string(),
+                    backend: parse_backend("auto").unwrap(),
+                    output_format: Format("cimage".to_string()),
                     resource_estimate_bytes: 1024,
                     timeout_ms: 30000,
                 }),
@@ -2042,7 +2140,7 @@ mod tests {
                 LifecycleCommand::AcquireWorkLease(AcquireWorkLeaseCommand {
                     work_entity,
                     ttl_ms: 60000,
-                    lease_generation: 1,
+                    lease_generation: Generation(1),
                 }),
             )))
             .expect("lease");
@@ -2050,8 +2148,8 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RecordDispatchIntent(RecordDispatchIntentCommand {
                     work_entity,
-                    backend: "auto".to_string(),
-                    config: "{}".to_string(),
+                    backend: parse_backend("auto").unwrap(),
+                    config: Config("{}".to_string()),
                     deadline_ms: 9999999999,
                 }),
             )))
@@ -2062,8 +2160,8 @@ mod tests {
                     prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
                         work_entity,
                         output: vec![],
-                        output_path: String::new(),
-                        lease_generation: 1,
+                        output_path: FilePath(String::new()),
+                        lease_generation: Generation(1),
                     },
                 ),
             )))
@@ -2103,19 +2201,18 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "compile".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: output_str.clone(),
-                    input_path: "".to_string(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("compile".to_string()),
+                    resource_claim: default_claim(),
+output_path: FilePath(output_str.clone()),
+                    input_path: FilePath("".to_string()),
                 }),
             )))
             .expect("create");
         let work_entity = match create.result {
             crate::CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
-                work_entity,
-                ..
+                work_entity, ..
             }) => work_entity,
             ref other => panic!("expected WorkCreated, got {other:?}"),
         };
@@ -2125,7 +2222,7 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::MarkObserved(MarkObservedCommand {
                     entity: work_entity,
-                    observed_epoch: 0,
+                    observed_epoch: Epoch(0),
                 }),
             )))
             .expect("observe");
@@ -2133,8 +2230,8 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RecordWorkPlan(RecordWorkPlanCommand {
                     entity: work_entity,
-                    backend: "auto".to_string(),
-                    output_format: "cimage".to_string(),
+                    backend: parse_backend("auto").unwrap(),
+                    output_format: Format("cimage".to_string()),
                     resource_estimate_bytes: 1024,
                     timeout_ms: 30000,
                 }),
@@ -2152,7 +2249,7 @@ mod tests {
                 LifecycleCommand::AcquireWorkLease(AcquireWorkLeaseCommand {
                     work_entity,
                     ttl_ms: 60000,
-                    lease_generation: 1,
+                    lease_generation: Generation(1),
                 }),
             )))
             .expect("lease");
@@ -2160,8 +2257,8 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RecordDispatchIntent(RecordDispatchIntentCommand {
                     work_entity,
-                    backend: "auto".to_string(),
-                    config: "{}".to_string(),
+                    backend: parse_backend("auto").unwrap(),
+                    config: Config("{}".to_string()),
                     deadline_ms: 9999999999,
                 }),
             )))
@@ -2172,8 +2269,8 @@ mod tests {
                     prism_ecs_constitutional::lifecycle_command::CompleteWorkCommand {
                         work_entity,
                         output: vec![],
-                        output_path: String::new(),
-                        lease_generation: 1,
+                        output_path: FilePath(String::new()),
+                        lease_generation: Generation(1),
                     },
                 ),
             )))
@@ -2285,19 +2382,18 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "compile".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: output_str.clone(),
-                    input_path: "".to_string(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("compile".to_string()),
+                    resource_claim: default_claim(),
+output_path: FilePath(output_str.clone()),
+                    input_path: FilePath("".to_string()),
                 }),
             )))
             .expect("create");
         let work_entity = match create.result {
             crate::CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
-                work_entity,
-                ..
+                work_entity, ..
             }) => work_entity,
             ref other => panic!("expected WorkCreated, got {other:?}"),
         };
@@ -2328,7 +2424,7 @@ mod tests {
 
         // Query the world directly through the kernel handle to verify Published state
         // and that the ResultPayload contains the correct digest
-        let _entity = prism_ecs_core::Entity::new(work_entity, 0);
+        let _entity = work_entity;
         // We can't directly inspect world state from outside, but we verified
         // the PublishResult was emitted via the tick receipt. The next tick should
         // show CleanupSystem finds no more work to process.
@@ -2376,19 +2472,18 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "compile".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: "".to_string(),
-                    input_path: "".to_string(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("compile".to_string()),
+                    resource_claim: default_claim(),
+                    output_path: FilePath("".to_string()),
+                    input_path: FilePath("".to_string()),
                 }),
             )))
             .expect("create");
         let work_entity = match create.result {
             crate::CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
-                work_entity,
-                ..
+                work_entity, ..
             }) => work_entity,
             ref other => panic!("expected WorkCreated, got {other:?}"),
         };
@@ -2401,7 +2496,7 @@ mod tests {
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::RequestCancellation(RequestCancellationCommand {
                     entity: work_entity,
-                    reason: String::new(),
+                    reason: RejectionReason(String::new()),
                 }),
             )))
             .expect("cancel");
@@ -2442,19 +2537,18 @@ mod tests {
         let _create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "compile".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: "/tmp/recovery-test.cimage".to_string(),
-                    input_path: "".to_string(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("compile".to_string()),
+                    resource_claim: default_claim(),
+                    output_path: FilePath("/tmp/recovery-test.cimage".to_string()),
+                    input_path: FilePath("".to_string()),
                 }),
             )))
             .expect("create");
         let _work_entity = match _create.result {
             crate::CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
-                work_entity,
-                ..
+                work_entity, ..
             }) => work_entity,
             ref other => panic!("expected WorkCreated, got {other:?}"),
         };
@@ -2506,23 +2600,22 @@ mod tests {
         let create = handle
             .submit(CommandEnvelope::new(Command::Lifecycle(
                 LifecycleCommand::CreateWork(CreateWorkCommand {
-                    entity: 0,
-                    target_entity: 0,
-                    kind: "compile".to_string(),
-                    resource_claim: "{}".to_string(),
-                    output_path: output_str.clone(),
-                    input_path: "".to_string(),
+                    entity: Entity::new(0, 0),
+                    target_entity: Entity::new(0, 0),
+                    kind: Format("compile".to_string()),
+                    resource_claim: default_claim(),
+output_path: FilePath(output_str.clone()),
+                    input_path: FilePath("".to_string()),
                 }),
             )))
             .expect("create");
         let work_entity = match create.result {
             crate::CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
-                work_entity,
-                ..
+                work_entity, ..
             }) => work_entity,
             ref other => panic!("expected WorkCreated, got {other:?}"),
         };
-        assert!(work_entity > 0, "work entity must have positive id");
+        assert!(work_entity.id() > 0, "work entity must have positive id");
 
         // ── 4. Run ticks until Published or limit reached ──
         // Track which lifecycle command types have been observed

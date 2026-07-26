@@ -5,11 +5,97 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Resource claim — what resources this work item needs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ResourceClaim {
     pub memory_bytes: u64,
     pub compute_units: u32,
     pub priority: Priority,
+    /// Optional inference-specific hints (prompt tokens, max new tokens,
+    /// KV cache configuration, deadline). Captured here so the B-2 typed
+    /// boundary still carries the inference metadata that legacy
+    /// `CreateWorkCommand` constructors passed as opaque JSON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference_hint: Option<InferenceHint>,
+}
+
+impl Default for ResourceClaim {
+    fn default() -> Self {
+        Self {
+            memory_bytes: 0,
+            compute_units: 0,
+            priority: Priority::Normal,
+            inference_hint: None,
+        }
+    }
+}
+
+/// Inference hints carried alongside a `ResourceClaim`. Mirrors the JSON
+/// fields the legacy free-form `resource_claim: String` used to smuggle
+/// into the executor; the B-2 refactor promotes them to a typed optional.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct InferenceHint {
+    pub prompt_tokens: u32,
+    pub max_new_tokens: u32,
+    pub prefill_chunk_tokens: u32,
+    pub kv_epoch: u64,
+    pub kv_tokens: u32,
+    pub kv_capacity_tokens: u32,
+    pub deadline_ms: u64,
+    pub priority: u32,
+}
+
+impl Default for InferenceHint {
+    fn default() -> Self {
+        Self {
+            prompt_tokens: 0,
+            max_new_tokens: 1,
+            prefill_chunk_tokens: 1,
+            kv_epoch: 0,
+            kv_tokens: 0,
+            kv_capacity_tokens: 0,
+            deadline_ms: 0,
+            priority: 0,
+        }
+    }
+}
+
+impl InferenceHint {
+    /// Parse a JSON blob (the legacy `resource_claim: String` shape) into
+    /// a typed hint. Unknown fields are ignored; missing fields use
+    /// safe defaults. The `from_resource_claim` helper below is the
+    /// inverse of the legacy `InferenceWorkMetadata::from_resource_claim`.
+    pub fn from_json_str(s: &str) -> Self {
+        #[derive(Debug, Deserialize, Default)]
+        struct Raw {
+            #[serde(default)]
+            prompt_tokens: u32,
+            #[serde(default)]
+            max_new_tokens: u32,
+            #[serde(default)]
+            prefill_chunk_tokens: u32,
+            #[serde(default)]
+            kv_epoch: u64,
+            #[serde(default)]
+            kv_tokens: u32,
+            #[serde(default)]
+            kv_capacity_tokens: u32,
+            #[serde(default)]
+            deadline_ms: u64,
+            #[serde(default)]
+            priority: u32,
+        }
+        let raw: Raw = serde_json::from_str(s).unwrap_or_default();
+        Self {
+            prompt_tokens: raw.prompt_tokens,
+            max_new_tokens: raw.max_new_tokens,
+            prefill_chunk_tokens: raw.prefill_chunk_tokens,
+            kv_epoch: raw.kv_epoch,
+            kv_tokens: raw.kv_tokens,
+            kv_capacity_tokens: raw.kv_capacity_tokens,
+            deadline_ms: raw.deadline_ms,
+            priority: raw.priority,
+        }
+    }
 }
 
 /// Priority level for scheduling fairness.
@@ -58,11 +144,7 @@ impl WorkItem {
             deadline: None,
             attempt: 0,
             cancellation_epoch: WorldEpoch(0),
-            resource_claim: ResourceClaim {
-                memory_bytes: 0,
-                compute_units: 0,
-                priority: Priority::Normal,
-            },
+            resource_claim: ResourceClaim::default(),
             state: WorkState::Pending,
         }
     }
@@ -149,11 +231,7 @@ impl Scheduler {
                             attempt: 0,
                             cancellation_epoch: WorldEpoch(0),
                             expiry: Timestamp::now(),
-                            resource_claim: ResourceClaim {
-                                memory_bytes: 0,
-                                compute_units: 0,
-                                priority: Priority::Normal,
-                            },
+                            resource_claim: ResourceClaim::default(),
                         });
                         self.ready_count -= 1;
                     }

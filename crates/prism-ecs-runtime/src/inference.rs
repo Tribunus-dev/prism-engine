@@ -108,6 +108,34 @@ impl InferenceWorkMetadata {
         }
     }
 
+    /// Build inference metadata from the typed `ResourceClaim` struct.
+    ///
+    /// The B-2 refactor replaced the previous free-form `String` resource
+    /// claim with the typed `prism_ecs_constitutional::scheduler::ResourceClaim`,
+    /// which now carries an optional `InferenceHint`. If the claim has
+    /// hints attached, they take precedence; otherwise safe defaults are
+    /// used.
+    pub fn from_typed_resource_claim(
+        claim: &prism_ecs_constitutional::scheduler::ResourceClaim,
+    ) -> Self {
+        let hint = claim.inference_hint.unwrap_or_default();
+        Self {
+            prompt_tokens: hint.prompt_tokens,
+            max_new_tokens: hint.max_new_tokens.max(1),
+            prefill_chunk_tokens: hint.prefill_chunk_tokens.max(1),
+            kv_epoch: hint.kv_epoch,
+            kv_tokens: hint.kv_tokens,
+            kv_capacity_tokens: if hint.kv_capacity_tokens == 0 {
+                u32::MAX
+            } else {
+                hint.kv_capacity_tokens
+            },
+            deadline_ms: hint.deadline_ms,
+            priority: hint.priority,
+            ..Self::default()
+        }
+    }
+
     /// Number of tokens reserved by admission for this request.
     pub fn reserved_tokens(&self) -> u32 {
         self.kv_tokens

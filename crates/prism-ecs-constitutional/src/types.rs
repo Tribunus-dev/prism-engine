@@ -239,6 +239,25 @@ pub struct CommandId(pub u64);
 #[serde(transparent)]
 pub struct FilePath(pub String);
 
+impl FilePath {
+    /// True if the inner path string is empty.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    /// Borrow the inner path as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    /// Borrow the inner path as `&String`.
+    pub fn as_inner(&self) -> &String {
+        &self.0
+    }
+    /// Convert to the inner `String` (consumes).
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
 /// Format tag: e.g. `"gguf"`, `"cimage"`, `"safetensors"`. Validated against
 /// the registered format set at construction.
 #[derive(
@@ -247,12 +266,54 @@ pub struct FilePath(pub String);
 #[serde(transparent)]
 pub struct Format(pub String);
 
+impl Format {
+    /// Borrow the inner format tag as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    /// Trim ASCII whitespace. Mirrors `str::trim`.
+    pub fn trim(&self) -> &str {
+        self.0.trim()
+    }
+    /// True if the inner format string is empty.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    /// Convert to the inner `String` (consumes).
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+    /// Borrow the inner format tag as `&String`.
+    pub fn as_inner(&self) -> &String {
+        &self.0
+    }
+}
+
 /// Rejection reason: human-readable, validated, not a free `String`.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[serde(transparent)]
 pub struct RejectionReason(pub String);
+
+impl RejectionReason {
+    /// Borrow the inner reason as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    /// Borrow the inner reason as `&String`.
+    pub fn as_inner(&self) -> &String {
+        &self.0
+    }
+    /// Convert to the inner `String` (consumes).
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+    /// True if the inner reason is empty.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
 /// Adapter handle: backend-specific opaque token. The adapter is the only
 /// authority that can interpret the value.
@@ -262,6 +323,17 @@ pub struct RejectionReason(pub String);
 #[serde(transparent)]
 pub struct AdapterHandle(pub String);
 
+impl AdapterHandle {
+    /// Borrow the inner handle as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    /// Convert to the inner `String` (consumes).
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
 /// Backend config: free-form `key=value` text. Validated by the backend.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
@@ -269,12 +341,26 @@ pub struct AdapterHandle(pub String);
 #[serde(transparent)]
 pub struct Config(pub String);
 
+impl Config {
+    /// Borrow the inner config as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 /// Receipt identity: monotonic per work entity; never reused.
 #[derive(
     Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 #[serde(transparent)]
 pub struct ReceiptId(pub String);
+
+impl ReceiptId {
+    /// Borrow the inner receipt id as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 /// Lease token: opaque to the constitutional layer; verified by the
 /// dispatcher at effect time. Replaces the `String` token used in
@@ -284,6 +370,66 @@ pub struct ReceiptId(pub String);
 )]
 #[serde(transparent)]
 pub struct LeaseToken(pub String);
+
+impl LeaseToken {
+    /// Borrow the inner token as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    /// Convert to the inner `String` (consumes).
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+/// Target profile identity for compilation/inference: a stable string
+/// referencing a device-or-context profile. The server crate has its own
+/// `ContextProfileId`; the constitutional side owns `TargetProfile` so
+/// the dependency direction stays downward (constitutional → core, not
+/// server → constitutional). Server callers convert at the boundary.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct TargetProfile(pub String);
+
+impl TargetProfile {
+    /// Borrow the inner profile as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+    /// Convert to the inner `String` (consumes).
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+/// Dispatch identity: opaque per-dispatch identifier returned by
+/// `RecordDispatchIntent` and consumed by `RecordDispatchStarted` /
+/// `MarkDispatchLost`. Distinct from any other `*Id` because dispatch
+/// IDs are short-lived and per-attempt.
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct DispatchId(pub String);
+
+impl DispatchId {
+    /// Borrow the inner id as `&str`.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+/// Optimization level for compilation jobs. Underlying `u8` so the
+/// wire format is identical to the previous raw `u32` field (transmitted
+/// as a JSON number). The `#[serde(transparent)]` derive keeps the
+/// bytes unchanged.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
+#[serde(transparent)]
+pub struct OptimizationLevel(pub u8);
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 

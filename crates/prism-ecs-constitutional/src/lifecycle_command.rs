@@ -3,6 +3,13 @@
 //! This aggregate preserves the runtime protocol while delegating semantic
 //! state transitions to the constitutional work components. It intentionally
 //! does not introduce legacy `WorkState` variants.
+use crate::artifact::ArtifactDigest;
+use crate::scheduler::ResourceClaim;
+use crate::types::{
+    AdapterHandle, CommandId, Config, DispatchId, Epoch, FilePath, Format, Generation,
+    LeaseToken, OptimizationLevel, ReceiptId, RejectionReason, Sequence, TargetProfile,
+};
+use prism_ecs_kernel::BackendKind;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,100 +55,210 @@ impl LifecycleTypeId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum LifecycleCommandResult {
     WorkCreated {
-        work_entity: u64,
-        sequence: u64,
-        world_epoch: u64,
+        work_entity: prism_ecs_core::Entity,
+        sequence: Sequence,
+        world_epoch: Epoch,
     },
     CompilationJobCreated {
-        entity: u64,
-        sequence: u64,
-        world_epoch: u64,
+        entity: prism_ecs_core::Entity,
+        sequence: Sequence,
+        world_epoch: Epoch,
     },
     RequestCancelled {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
     MarkedObserved {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
     PrerequisiteBlocked {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
     Admitted {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
     Rejected {
-        entity: u64,
-        reason: String,
+        entity: prism_ecs_core::Entity,
+        reason: RejectionReason,
     },
     Deferred {
-        entity: u64,
-        reason: String,
+        entity: prism_ecs_core::Entity,
+        reason: RejectionReason,
     },
     LeaseAcquired {
-        work_entity: u64,
-        lease_generation: u32,
-        token: String,
+        work_entity: prism_ecs_core::Entity,
+        lease_generation: Generation,
+        token: LeaseToken,
     },
     LeaseReleased {
-        work_entity: u64,
+        work_entity: prism_ecs_core::Entity,
     },
     LeaseRenewed {
-        work_entity: u64,
+        work_entity: prism_ecs_core::Entity,
         ttl_ms: u64,
     },
     DispatchIntentRecorded {
-        work_entity: u64,
-        dispatch_id: String,
+        work_entity: prism_ecs_core::Entity,
+        dispatch_id: DispatchId,
     },
     DispatchStarted {
-        work_entity: u64,
-        adapter_handle: String,
+        work_entity: prism_ecs_core::Entity,
+        adapter_handle: AdapterHandle,
     },
     ProgressRecorded {
-        work_entity: u64,
+        work_entity: prism_ecs_core::Entity,
     },
     Completed {
-        work_entity: u64,
+        work_entity: prism_ecs_core::Entity,
         result: String,
-        sequence: u64,
-        world_epoch: u64,
+        sequence: Sequence,
+        world_epoch: Epoch,
     },
     Failed {
-        work_entity: u64,
-        error: String,
+        work_entity: prism_ecs_core::Entity,
+        error: RejectionReason,
     },
     DispatchMarkedLost {
-        work_entity: u64,
+        work_entity: prism_ecs_core::Entity,
     },
     ArtifactAttached {
-        entity: u64,
-        digest: String,
+        entity: prism_ecs_core::Entity,
+        digest: ArtifactDigest,
     },
     DiagnosticsAttached {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
     EvidenceAttached {
-        entity: u64,
-        receipt_id: String,
+        entity: prism_ecs_core::Entity,
+        receipt_id: ReceiptId,
     },
     Published {
-        entity: u64,
-        receipt_id: String,
-        sequence: u64,
-        world_epoch: u64,
+        entity: prism_ecs_core::Entity,
+        receipt_id: ReceiptId,
+        sequence: Sequence,
+        world_epoch: Epoch,
     },
     WorkPlanRecorded {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
     TransientExpired {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
     RetentionComplete {
-        entity: u64,
+        entity: prism_ecs_core::Entity,
     },
 }
-macro_rules! cmd {($($n:ident{$($f:ident:$t:ty),*}),* $(,)?)=>{$(#[derive(Debug,Clone,Serialize,Deserialize)] pub struct $n {$(pub $f:$t),*})*}}
+macro_rules! cmd {($($n:ident{$($f:ident:$t:ty),* $(,)?}),* $(,)?)=>{$(#[derive(Debug,Clone,Serialize,Deserialize)] pub struct $n {$(pub $f:$t),*})*}}
 cmd! {
- CreateWorkCommand{entity:u64,target_entity:u64,kind:String,input_path:String,output_path:String,resource_claim:String}, CreateCompilationJobCommand{entity:u64,model_artifact:u64,target_profile:String,job_id:u64,target_format:String,optimization_level:u32,enable_validation:bool}, RequestCancellationCommand{entity:u64, reason:String}, MarkObservedCommand{entity:u64, observed_epoch:u64}, RecordExternalObservationCommand{entity:u64}, RecordWorkPlanCommand{entity:u64,backend:String,output_format:String,resource_estimate_bytes:u64,timeout_ms:u64}, MarkPrerequisiteBlockedCommand{entity:u64}, AdmitWorkCommand{entity:u64}, RejectWorkCommand{entity:u64, reason:String}, DeferWorkCommand{entity:u64, reason:String}, AcquireWorkLeaseCommand{work_entity:u64, lease_generation:u32,ttl_ms:u64}, ReleaseWorkLeaseCommand{work_entity:u64}, RenewWorkLeaseCommand{work_entity:u64, ttl_ms:u64}, RecordDispatchIntentCommand{work_entity:u64,backend:String,config:String,deadline_ms:u64}, RecordDispatchStartedCommand{work_entity:u64, adapter_handle:String}, RecordProgressCommand{work_entity:u64}, CompleteWorkCommand{work_entity:u64, lease_generation:u32, output:Vec<u8>,output_path:String}, FailWorkCommand{work_entity:u64,error:String,lease_generation:u32,retryable:bool}, MarkDispatchLostCommand{work_entity:u64}, AttachArtifactCommand{entity:u64,digest:String}, AttachDiagnosticsCommand{entity:u64}, AttachEvidenceCommand{entity:u64,digest:String}, PublishResultCommand{entity:u64,result_type:String,result:String}, ExpireTransientCommand{entity:u64}, MarkRetentionCompleteCommand{entity:u64}
+    CreateWorkCommand{
+        entity:prism_ecs_core::Entity,
+        target_entity:prism_ecs_core::Entity,
+        kind:Format,
+        input_path:FilePath,
+        output_path:FilePath,
+        resource_claim:ResourceClaim,
+    },
+    CreateCompilationJobCommand{
+        entity:prism_ecs_core::Entity,
+        model_artifact:ArtifactDigest,
+        target_profile:TargetProfile,
+        job_id:CommandId,
+        target_format:Format,
+        optimization_level:OptimizationLevel,
+        enable_validation:bool,
+    },
+    RequestCancellationCommand{
+        entity:prism_ecs_core::Entity,
+        reason:RejectionReason,
+    },
+    MarkObservedCommand{
+        entity:prism_ecs_core::Entity,
+        observed_epoch:Epoch,
+    },
+    RecordExternalObservationCommand{
+        entity:prism_ecs_core::Entity,
+    },
+    RecordWorkPlanCommand{
+        entity:prism_ecs_core::Entity,
+        backend:BackendKind,
+        output_format:Format,
+        resource_estimate_bytes:u64,
+        timeout_ms:u64,
+    },
+    MarkPrerequisiteBlockedCommand{
+        entity:prism_ecs_core::Entity,
+    },
+    AdmitWorkCommand{
+        entity:prism_ecs_core::Entity,
+    },
+    RejectWorkCommand{
+        entity:prism_ecs_core::Entity,
+        reason:RejectionReason,
+    },
+    DeferWorkCommand{
+        entity:prism_ecs_core::Entity,
+        reason:RejectionReason,
+    },
+    AcquireWorkLeaseCommand{
+        work_entity:prism_ecs_core::Entity,
+        lease_generation:Generation,
+        ttl_ms:u64,
+    },
+    ReleaseWorkLeaseCommand{
+        work_entity:prism_ecs_core::Entity,
+    },
+    RenewWorkLeaseCommand{
+        work_entity:prism_ecs_core::Entity,
+        ttl_ms:u64,
+    },
+    RecordDispatchIntentCommand{
+        work_entity:prism_ecs_core::Entity,
+        backend:BackendKind,
+        config:Config,
+        deadline_ms:u64,
+    },
+    RecordDispatchStartedCommand{
+        work_entity:prism_ecs_core::Entity,
+        adapter_handle:AdapterHandle,
+    },
+    RecordProgressCommand{
+        work_entity:prism_ecs_core::Entity,
+    },
+    CompleteWorkCommand{
+        work_entity:prism_ecs_core::Entity,
+        lease_generation:Generation,
+        output:Vec<u8>,
+        output_path:FilePath,
+    },
+    FailWorkCommand{
+        work_entity:prism_ecs_core::Entity,
+        error:RejectionReason,
+        lease_generation:Generation,
+        retryable:bool,
+    },
+    MarkDispatchLostCommand{
+        work_entity:prism_ecs_core::Entity,
+    },
+    AttachArtifactCommand{
+        entity:prism_ecs_core::Entity,
+        digest:ArtifactDigest,
+    },
+    AttachDiagnosticsCommand{
+        entity:prism_ecs_core::Entity,
+    },
+    AttachEvidenceCommand{
+        entity:prism_ecs_core::Entity,
+        digest:ArtifactDigest,
+    },
+    PublishResultCommand{
+        entity:prism_ecs_core::Entity,
+        result_type:Format,
+        result:String, // free-form payload body
+    },
+    ExpireTransientCommand{
+        entity:prism_ecs_core::Entity,
+    },
+    MarkRetentionCompleteCommand{
+        entity:prism_ecs_core::Entity,
+    },
 }
 pub const ENVELOPE_SCHEMA_VERSION: u32 = 1;

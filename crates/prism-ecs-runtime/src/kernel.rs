@@ -388,7 +388,7 @@ impl KernelHandle {
         // AcquireWorkLease coordinates with the external Valkey-based lease
         // coordinator, then transitions the entity's WorkState to Leased.
         if let Command::Lifecycle(LifecycleCommand::AcquireWorkLease(cmd)) = &envelope.command {
-            let resource_key = format!("work-lease:{}", cmd.work_entity);
+            let resource_key = format!("work-lease:{}", cmd.work_entity.id());
             let result = self
                 .inner
                 .lease_coordinator
@@ -398,7 +398,7 @@ impl KernelHandle {
                     // Update WorkState to Leased(gen=1) inside the world lock
                     {
                         let mut world = self.inner.world.write().unwrap();
-                        let e = prism_ecs_core::Entity::new(cmd.work_entity, 0);
+                        let e = cmd.work_entity;
                         world.add_component(e, WorkState::Leased(1)).map_err(|e| {
                             RuntimeError::Entity(format!("lease state transition: {e}"))
                         })?;
@@ -406,7 +406,7 @@ impl KernelHandle {
                     let cmd_result =
                         CommandResult::Lifecycle(LifecycleCommandResult::LeaseAcquired {
                             work_entity: cmd.work_entity,
-                            token: resource_key.clone(),
+                            token: prism_ecs_constitutional::LeaseToken(resource_key.clone()),
                             lease_generation: cmd.lease_generation,
                         });
                     let json = serde_json::to_string(&cmd_result).unwrap_or_default();
@@ -420,13 +420,13 @@ impl KernelHandle {
                 }
                 Ok(false) => Err(RuntimeError::Lease(format!(
                     "failed to acquire lease for work-entity {}",
-                    cmd.work_entity
+                    cmd.work_entity.id()
                 ))),
                 Err(e) => Err(RuntimeError::Lease(format!("lease error: {e}"))),
             };
         }
         if let Command::Lifecycle(LifecycleCommand::ReleaseWorkLease(cmd)) = &envelope.command {
-            let resource_key = format!("work-lease:{}", cmd.work_entity);
+            let resource_key = format!("work-lease:{}", cmd.work_entity.id());
             self.inner
                 .lease_coordinator
                 .release(&resource_key)
@@ -434,7 +434,7 @@ impl KernelHandle {
             // Transition WorkState back to Ready (available for re-lease)
             {
                 let mut world = self.inner.world.write().unwrap();
-                let e = prism_ecs_core::Entity::new(cmd.work_entity, 0);
+                let e = cmd.work_entity;
                 world
                     .add_component(e, WorkState::Ready)
                     .map_err(|e| RuntimeError::Entity(format!("release state transition: {e}")))?;
@@ -1279,7 +1279,7 @@ fn execute_create_work(
     let spawned = world
         .spawn(EntityKind::WorkUnit, None)
         .map_err(|e| RuntimeError::Entity(format!("spawn work failed: {e}")))?;
-    let work_entity = spawned.entity.id();
+    let work_entity = spawned.entity;
     world
         .add_component(spawned.entity, WorkState::Pending)
         .map_err(|e| RuntimeError::Entity(format!("failed to set state: {e}")))?;
@@ -1296,7 +1296,7 @@ fn execute_create_work(
             spawned.entity,
             prism_ecs_constitutional::work::WorkItemComponent {
                 kind,
-                target_entity: prism_ecs_core::Entity::new(cmd.target_entity, 0),
+                target_entity: cmd.target_entity,
                 retry_count: 0,
                 max_retries: 3,
             },
@@ -1306,7 +1306,7 @@ fn execute_create_work(
         world
             .add_component(
                 spawned.entity,
-                InferenceWorkMetadata::from_resource_claim(&cmd.resource_claim),
+                InferenceWorkMetadata::from_typed_resource_claim(&cmd.resource_claim),
             )
             .map_err(|e| RuntimeError::Entity(format!("failed to set inference metadata: {e}")))?;
     }
@@ -1314,7 +1314,7 @@ fn execute_create_work(
         world
             .add_component(
                 spawned.entity,
-                prism_ecs_constitutional::work::WorkOutputPath(cmd.output_path.clone()),
+                prism_ecs_constitutional::work::WorkOutputPath(cmd.output_path.clone().into_inner()),
             )
             .map_err(|e| RuntimeError::Entity(format!("failed to set output path: {e}")))?;
     }
@@ -1322,15 +1322,15 @@ fn execute_create_work(
         world
             .add_component(
                 spawned.entity,
-                prism_ecs_constitutional::work::WorkInputPath(cmd.input_path.clone()),
+                prism_ecs_constitutional::work::WorkInputPath(cmd.input_path.clone().into_inner()),
             )
             .map_err(|e| RuntimeError::Entity(format!("failed to set input path: {e}")))?;
     }
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::WorkCreated {
             work_entity,
-            sequence: 0,
-            world_epoch: world.current_epoch().0,
+            sequence: prism_ecs_constitutional::Sequence(0),
+            world_epoch: prism_ecs_constitutional::Epoch(world.current_epoch().0),
         },
     ))
 }
@@ -1356,13 +1356,41 @@ fn execute_create_compilation_job(
         .map_err(|e| RuntimeError::Entity(format!("spawn job failed: {e}")))?;
     let job_entity = spawned.entity;
 
+    // The constitutional side now uses typed `ArtifactDigest`, `CommandId`,
+    // `TargetProfile`, `Format`, and `OptimizationLevel` newtypes. Unwrap
+    // them at the kernel boundary where the legacy `compilation` component
+    // types still expect the raw primitives.
+    let job_id_raw: u64 = cmd.job_id.0;
+    let target_artifact_raw: [u8; 32] = cmd.model_artifact.0;
+    let target_format_raw: String = cmd.target_format.clone().into_inner();
+    let target_device_profile_raw: String = cmd.target_profile.clone().into_inner();
+    let optimization_level_raw: u32 = cmd.optimization_level.0 as u32;
+
+    // The legacy `compilation::CompilationJob` and `compilation::JobInput`
+    // components still use `u64` for `target_artifact` (they predate the
+    // typed-digest migration). The `ArtifactDigest` newtype is a `[u8; 32]`
+    // blake3 hash; we expose the first 8 bytes as `u64` for the legacy
+    // component while preserving the full digest in the durable domain event
+    // emitted by the constitutional executor. The full digest is also
+    // available to callers through the typed `CreateCompilationJobCommand`.
+    let model_artifact_u64: u64 = u64::from_le_bytes([
+        target_artifact_raw[0],
+        target_artifact_raw[1],
+        target_artifact_raw[2],
+        target_artifact_raw[3],
+        target_artifact_raw[4],
+        target_artifact_raw[5],
+        target_artifact_raw[6],
+        target_artifact_raw[7],
+    ]);
+
     world
         .insert_component(
             job_entity,
             CompilationJob {
-                job_id: cmd.job_id,
-                target_artifact: cmd.model_artifact,
-                target_device_profile: cmd.target_profile.clone(),
+                job_id: job_id_raw,
+                target_artifact: model_artifact_u64,
+                target_device_profile: target_device_profile_raw,
                 created_at: Timestamp::now(),
             },
         )
@@ -1372,7 +1400,7 @@ fn execute_create_compilation_job(
         .insert_component(
             job_entity,
             JobInput {
-                model_artifact: cmd.model_artifact,
+                model_artifact: model_artifact_u64,
                 source_format: String::new(),
                 quantization_profile: None,
             },
@@ -1383,8 +1411,8 @@ fn execute_create_compilation_job(
         .insert_component(
             job_entity,
             JobConfig {
-                target_format: cmd.target_format.clone(),
-                optimization_level: cmd.optimization_level,
+                target_format: target_format_raw,
+                optimization_level: optimization_level_raw,
                 enable_validation: cmd.enable_validation,
             },
         )
@@ -1396,9 +1424,9 @@ fn execute_create_compilation_job(
 
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::CompilationJobCreated {
-            entity: job_entity.id(),
-            sequence: 0,
-            world_epoch: world.current_epoch().0,
+            entity: job_entity,
+            sequence: prism_ecs_constitutional::Sequence(0),
+            world_epoch: prism_ecs_constitutional::Epoch(world.current_epoch().0),
         },
     ))
 }
@@ -1407,7 +1435,7 @@ fn execute_admit_work(
     world: &mut World,
     cmd: &AdmitWorkCommand,
 ) -> Result<CommandResult, RuntimeError> {
-    let e = Entity::new(cmd.entity, 0);
+    let e = cmd.entity;
     if let Some(state) = world.get_component::<WorkState>(e) {
         if *state == WorkState::Pending {
             world
@@ -1427,9 +1455,9 @@ fn execute_record_dispatch_intent(
     world: &mut World,
     cmd: &RecordDispatchIntentCommand,
 ) -> Result<CommandResult, RuntimeError> {
-    let dispatch_id = uuid::Uuid::new_v4().to_string();
+    let dispatch_id = prism_ecs_constitutional::DispatchId(uuid::Uuid::new_v4().to_string());
     // Transition from Leased to Dispatched
-    let e = prism_ecs_core::Entity::new(cmd.work_entity, 0);
+    let e = cmd.work_entity;
     world
         .add_component(e, WorkState::Leased(1))
         .map_err(|e| RuntimeError::Entity(format!("dispatch state transition: {e}")))?;
@@ -1446,7 +1474,7 @@ fn execute_complete_work(
     cmd: &CompleteWorkCommand,
 ) -> Result<CommandResult, RuntimeError> {
     use crate::ports::ResultPayload;
-    let e = Entity::new(cmd.work_entity, 0);
+    let e = cmd.work_entity;
     // Transition from Collecting/Dispatched to Completed
     world
         .add_component(e, WorkState::Completed)
@@ -1462,8 +1490,8 @@ fn execute_complete_work(
         LifecycleCommandResult::Completed {
             work_entity: cmd.work_entity,
             result: String::from_utf8_lossy(&cmd.output).to_string(),
-            sequence: 0,
-            world_epoch: world.current_epoch().0,
+            sequence: prism_ecs_constitutional::Sequence(0),
+            world_epoch: prism_ecs_constitutional::Epoch(world.current_epoch().0),
         },
     ))
 }
@@ -1472,7 +1500,7 @@ fn execute_fail_work(
     world: &mut World,
     cmd: &FailWorkCommand,
 ) -> Result<CommandResult, RuntimeError> {
-    let e = Entity::new(cmd.work_entity, 0);
+    let e = cmd.work_entity;
     if world.has_entity(e) {
         world
             .add_component(e, WorkState::Failed)
@@ -1488,7 +1516,7 @@ fn execute_request_cancellation(
     world: &mut World,
     cmd: &RequestCancellationCommand,
 ) -> Result<CommandResult, RuntimeError> {
-    let e = prism_ecs_core::Entity::new(cmd.entity, 0);
+    let e = cmd.entity;
     if let Some(state) = world.get_component::<WorkState>(e) {
         if !state.is_terminal() {
             world
@@ -1505,7 +1533,7 @@ fn execute_attach_evidence_cmd(
     _world: &mut World,
     cmd: &AttachEvidenceCommand,
 ) -> Result<CommandResult, RuntimeError> {
-    let receipt_id = uuid::Uuid::new_v4().to_string();
+    let receipt_id = prism_ecs_constitutional::ReceiptId(uuid::Uuid::new_v4().to_string());
     Ok(CommandResult::Lifecycle(
         LifecycleCommandResult::EvidenceAttached {
             entity: cmd.entity,
@@ -1519,14 +1547,14 @@ fn execute_publish_result_cmd(
     cmd: &PublishResultCommand,
 ) -> Result<CommandResult, RuntimeError> {
     use crate::ports::ResultPayload;
-    let e = Entity::new(cmd.entity, 0);
+    let e = cmd.entity;
     // Transition from Completed to Published
     world
         .add_component(e, WorkState::Completed)
         .map_err(|e| RuntimeError::Entity(format!("publish state transition: {e}")))?;
-    let receipt_id = uuid::Uuid::new_v4().to_string();
+    let receipt_id = prism_ecs_constitutional::ReceiptId(uuid::Uuid::new_v4().to_string());
     let payload = ResultPayload {
-        result_type: cmd.result_type.clone(),
+        result_type: cmd.result_type.clone().into_inner(),
         result: cmd.result.clone(),
     };
     world
@@ -1539,8 +1567,8 @@ fn execute_publish_result_cmd(
         LifecycleCommandResult::Published {
             entity: cmd.entity,
             receipt_id,
-            sequence: 0,
-            world_epoch: world.current_epoch().0,
+            sequence: prism_ecs_constitutional::Sequence(0),
+            world_epoch: prism_ecs_constitutional::Epoch(world.current_epoch().0),
         },
     ))
 }
@@ -1549,7 +1577,7 @@ fn execute_mark_observed(
     world: &mut World,
     cmd: &MarkObservedCommand,
 ) -> Result<CommandResult, RuntimeError> {
-    let e = Entity::new(cmd.entity, 0);
+    let e = cmd.entity;
     if let Some(state) = world.get_component::<WorkState>(e) {
         if *state == WorkState::Pending {
             world
@@ -1569,7 +1597,7 @@ fn execute_record_work_plan(
     world: &mut World,
     cmd: &RecordWorkPlanCommand,
 ) -> Result<CommandResult, RuntimeError> {
-    let e = Entity::new(cmd.entity, 0);
+    let e = cmd.entity;
     if let Some(state) = world.get_component::<WorkState>(e) {
         if *state == WorkState::Ready {
             world
@@ -1802,6 +1830,12 @@ fn execute_register_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prism_ecs_constitutional::scheduler::ResourceClaim;
+    use prism_ecs_constitutional::types::{FilePath, Format};
+
+    fn default_claim() -> ResourceClaim {
+        ResourceClaim::default()
+    }
 
     #[test]
     fn inference_work_command_preserves_request_kind_in_ecs() {
@@ -1809,27 +1843,25 @@ mod tests {
         let result = execute_create_work(
             &mut world,
             &CreateWorkCommand {
-                entity: 0,
-                target_entity: 0,
-                kind: "inference".to_string(),
-                resource_claim: "{\"max_tokens\":32}".to_string(),
-                output_path: String::new(),
-                input_path: String::new(),
+                entity: Entity::new(0, 0),
+                target_entity: Entity::new(0, 0),
+                kind: Format("inference".to_string()),
+                resource_claim: default_claim(),
+                output_path: FilePath(String::new()),
+                input_path: FilePath(String::new()),
             },
         )
         .expect("create inference work");
         let work_entity = match result {
             CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
-                work_entity, ..
+                work_entity,
+                ..
             }) => work_entity,
             other => panic!("expected work creation, got {other:?}"),
         };
 
         let item = world
-            .get_component::<prism_ecs_constitutional::work::WorkItemComponent>(Entity::new(
-                work_entity,
-                0,
-            ))
+            .get_component::<prism_ecs_constitutional::work::WorkItemComponent>(work_entity)
             .expect("work item component");
         assert_eq!(
             item.kind,

@@ -351,7 +351,11 @@ fn backend_label(kind: BackendKind) -> &'static str {
     }
 }
 
-fn parse_backend(name: &str) -> Result<BackendKind, RuntimeError> {
+/// Parse a backend name (case-insensitive) into a [`BackendKind`]. Used by
+/// the runtime schedule, the kernel, and the FFI bridge. The string `"auto"`
+/// resolves to [`BackendKind::CPU`] as the safe default; callers that need
+/// a different resolution should pass an explicit backend name.
+pub fn parse_backend(name: &str) -> Result<BackendKind, RuntimeError> {
     match name.to_ascii_lowercase().as_str() {
         "metal" => Ok(BackendKind::Metal),
         "cpu" | "cpu-reference" => Ok(BackendKind::CPU),
@@ -359,6 +363,7 @@ fn parse_backend(name: &str) -> Result<BackendKind, RuntimeError> {
         "cuda" => Ok(BackendKind::CUDA),
         "vulkan" => Ok(BackendKind::Vulkan),
         "amd-npu" | "amdnpu" => Ok(BackendKind::AmdNpu),
+        "auto" => Ok(BackendKind::CPU),
         other => Err(RuntimeError::Dispatch(format!("unknown backend '{other}'"))),
     }
 }

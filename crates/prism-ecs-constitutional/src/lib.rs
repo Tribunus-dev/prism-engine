@@ -44,6 +44,7 @@ pub use envelope::*;
 pub use event_store::*;
 pub use execution::*;
 pub use ingress::*;
+pub use types::*;
 // `ffi` re-export removed: the C-ABI bridge now lives in its own
 // crate `prism-ecs-ffi`. Callers should `use prism_ecs_ffi::*;`
 // (the FFI surface re-exports its symbols at the crate root).

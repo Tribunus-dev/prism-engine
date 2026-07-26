@@ -9,7 +9,8 @@ pub mod test_adapters;
 pub mod world_view;
 
 pub use backend::{
-    BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher, KernelDispatchSpec,
+    parse_backend, BackendExecutionRegistry, KernelArtifactBinding, KernelBackendDispatcher,
+    KernelDispatchSpec,
 };
 pub use fault::{
     FaultMode, FaultPlan, FaultPoint, FaultingCommandStore, FaultingLeaseCoordinator,
@@ -157,12 +158,17 @@ mod tests {
 
         let env = crate::CommandEnvelope::new(Command::Lifecycle(LifecycleCommand::CreateWork(
             CreateWorkCommand {
-                entity: 0,
-                target_entity: 0,
-                kind: "idempotency-test".to_string(),
-                resource_claim: "{}".to_string(),
-                output_path: "".to_string(),
-                input_path: "".to_string(),
+                entity: prism_ecs_core::Entity::new(0, 0),
+                target_entity: prism_ecs_core::Entity::new(0, 0),
+                kind: prism_ecs_constitutional::Format("idempotency-test".to_string()),
+                resource_claim: prism_ecs_constitutional::scheduler::ResourceClaim {
+                    memory_bytes: 0,
+                    compute_units: 0,
+                    priority: prism_ecs_constitutional::scheduler::Priority::Normal,
+                    inference_hint: None,
+                },
+                output_path: prism_ecs_constitutional::FilePath("".to_string()),
+                input_path: prism_ecs_constitutional::FilePath("".to_string()),
             },
         )));
 
@@ -170,12 +176,16 @@ mod tests {
         let first = handle.submit(env.clone()).expect("first submit");
         let work_entity = match &first.result {
             CommandResult::Lifecycle(LifecycleCommandResult::WorkCreated {
-                work_entity, ..
+                work_entity,
+                ..
             }) => *work_entity,
             _ => panic!("expected WorkCreated"),
         };
         assert!(first.sequence > 0, "sequence should be positive");
-        assert!(work_entity > 0, "work entity should be positive");
+        assert!(work_entity.id() > 0, "work entity should be positive");
+        // `first.sequence` is the u64 from the public `CommitOutcome`
+        // (see `kernel::CommitOutcome`); the newtype `Sequence` lives on
+        // the `LifecycleCommandResult` variant.
 
         // Second submission — same envelope (idempotency key)
         let second = handle.submit(env).expect("second submit (idempotent)");

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Legacy entity identifier (no generation tracking).
 /// Generational entity handle.
@@ -33,6 +34,15 @@ impl Entity {
     }
     pub fn generation(&self) -> u32 {
         self.1
+    }
+}
+
+impl fmt::Display for Entity {
+    /// Display shows the id component. The generation is hidden because
+    /// most diagnostics, log lines, and resource keys care only about the
+    /// id (e.g. `"work-lease:42"`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
