@@ -150,7 +150,6 @@ resolver = "2"
 
 members = [
     ".",
-    "compute-core",
     "evidence-schema",
     "prism-ffi",
     "prism-mcp-model",
