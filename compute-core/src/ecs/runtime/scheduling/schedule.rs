@@ -31,6 +31,7 @@ use crate::ecs::runtime::scheduling::metadata::{
     SystemResult,
 };
 use crate::ecs::runtime::world::World;
+use crate::ecs::runtime::world_txn::WorldTxn;
 
 // ---------------------------------------------------------------------------
 // PriorityKey — deterministic ready-queue ordering
@@ -675,7 +676,9 @@ impl Schedule {
     /// Apply a stage's command buffer to the World.
     ///
     /// Commands are sorted deterministically by (system_id, entity, sequence)
-    /// before application.
+    /// before application. Spawns are staged on a `WorldTxn` and committed
+    /// as a single batch at the end of the buffer so the canonical mutation
+    /// seam stays the only authority for entity allocation.
     fn apply_command_buffer(
         world: &mut World,
         buffer: &[crate::ecs::runtime::scheduling::command::StampedCommand],
@@ -698,10 +701,12 @@ impl Schedule {
                 .then_with(|| a.sequence.cmp(&b.sequence))
         });
 
+        let mut pending_spawns = WorldTxn::new();
         for cmd in &sorted {
             match &cmd.command {
                 crate::ecs::runtime::scheduling::command::Command::Spawn => {
-                    world.spawn();
+                    // Stage on the WorldTxn; commit at the end of the buffer.
+                    pending_spawns.stage_spawn();
                 }
                 crate::ecs::runtime::scheduling::command::Command::Despawn(entity) => {
                     world.despawn(*entity);
@@ -717,6 +722,10 @@ impl Schedule {
                     let _ = (entity, type_id);
                 }
             }
+        }
+        // Commit all staged spawns atomically.
+        if pending_spawns.spawn_count() > 0 {
+            let _ = pending_spawns.commit(world);
         }
     }
 }

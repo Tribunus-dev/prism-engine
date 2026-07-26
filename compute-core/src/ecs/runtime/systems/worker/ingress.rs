@@ -14,6 +14,7 @@ use crate::ecs::runtime::resources::*;
 use crate::ecs::runtime::scheduling::command::CommandWriter;
 use crate::ecs::runtime::scheduling::metadata::*;
 use crate::ecs::runtime::world::{Entity, World};
+use crate::ecs::runtime::world_txn::WorldTxn;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -113,35 +114,65 @@ impl ErasedSystem for WorkerIngressSystem {
 
         // ---- 2-8. Process each entry ----
         for entry in entries {
-            let entity = Entity(entry.entity_id);
+            let incoming_entity = Entity(entry.entity_id);
 
             // ---- 2a. Spawn entity if the bridge did not ----
-            let entity = if entity.0 == 0 {
-                match world.spawn() {
+            // The spawn + initial component inserts go through a
+            // `WorldTxn` so entity allocation and the first
+            // request/lifecycle writes commit as one atomic batch.
+            let mut txn = WorldTxn::new();
+            let entity = if incoming_entity.0 == 0 {
+                let token = txn.stage_spawn();
+                txn.stage_insert_on(
+                    token,
+                    WorkerRequest::new(
+                        entry.request_id.clone(),
+                        entry.payload.clone(),
+                        DEFAULT_REQUEST_CLASS,
+                    ),
+                );
+                let mut spawned = match txn.commit(world) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        // World at capacity — skip this entry; the queue
+                        // entry is already consumed, so the request is
+                        // lost.  Real deployments should back-pressure the
+                        // bridge.
+                        Self::record_diagnostics(world);
+                        continue;
+                    }
+                };
+                match spawned.pop() {
                     Some(e) => e,
                     None => {
-                        // World at capacity — skip this entry; the queue
-                        // entry is already consumed, so the request is lost.
-                        // Real deployments should back-pressure the bridge.
                         Self::record_diagnostics(world);
                         continue;
                     }
                 }
             } else {
-                entity
+                // Entity already exists; inserts (if any) target it
+                // directly. We do not stage them here because the
+                // request/lifecycle inserts in step 2b target the
+                // existing entity.
+                incoming_entity
             };
 
             // ---- 2b. Insert request and lifecycle ----
-            // Use the World API for immediate availability; subsequent
-            // mutations to lifecycle happen in-place.
-            world.insert(
-                entity,
-                WorkerRequest::new(
-                    entry.request_id.clone(),
-                    entry.payload.clone(),
-                    DEFAULT_REQUEST_CLASS,
-                ),
-            );
+            // The freshly-spawned entity already has the WorkerRequest
+            // attached (via the WorldTxn above). For incoming entities
+            // from the bridge (e.g. engine.rs) we still need to attach
+            // the request. Subsequent mutations to lifecycle happen
+            // in-place.
+            if incoming_entity.0 != 0 {
+                world.insert(
+                    entity,
+                    WorkerRequest::new(
+                        entry.request_id.clone(),
+                        entry.payload.clone(),
+                        DEFAULT_REQUEST_CLASS,
+                    ),
+                );
+            }
             // Only insert lifecycle if the entity doesn't have one yet.
             // Entities passed from the caller (e.g. engine.rs) already have
             // a lifecycle initialized to Queued — overwriting it would

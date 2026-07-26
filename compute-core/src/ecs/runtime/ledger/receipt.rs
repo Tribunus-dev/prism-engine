@@ -84,6 +84,7 @@ mod tests {
 
     #[test]
     fn despawn_projects_entity_despawned() {
+        use crate::ecs::runtime::world_txn::WorldTxn;
         let mut world = World::default();
         let mut buffer = Vec::new();
         let stage = Stage::Maintenance;
@@ -91,7 +92,10 @@ mod tests {
         let entity;
         {
             let mut writer = CommandWriter::new(&mut buffer, stage, sys_id);
-            entity = world.spawn().unwrap();
+            let mut txn = WorldTxn::new();
+            let token = txn.stage_spawn();
+            let mut spawned = txn.commit(&mut world).expect("commit spawn");
+            entity = spawned.pop().expect("staged spawn");
             writer.despawn(entity).unwrap();
         }
         let stamped = &buffer[0];

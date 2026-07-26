@@ -23,6 +23,7 @@ pub mod signal_bus;
 pub mod stage_graph;
 pub mod systems;
 pub mod world;
+pub mod world_txn;
 
 pub mod executable_bindings;
 pub mod executable_lane;

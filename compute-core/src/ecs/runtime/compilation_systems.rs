@@ -21,6 +21,7 @@ use crate::ecs::runtime::ecs_components::{
 };
 use crate::ecs::runtime::stage_graph::{StageConfig, StageGraph, StageQuantizationConfig};
 use crate::ecs::runtime::world::{Entity, World};
+use crate::ecs::runtime::world_txn::WorldTxn;
 use crate::ecs::training_target::engram::dataset::EngramTrainingDataset;
 use crate::ecs::training_target::engram::trainer::EngramTrainer;
 use crate::quantization::admission::{
@@ -584,14 +585,23 @@ pub fn compile_tensors(
 ) -> Vec<CompiledBinding> {
     let mut world = World::with_capacity((tensors.len() as u32).max(32));
     world.insert_resource(registry);
-    let mut entity_for_input: Vec<(Entity, usize)> = Vec::with_capacity(tensors.len());
-    for (i, tensor) in tensors.iter_mut().enumerate() {
-        let entity = world.spawn().unwrap();
-        world.insert(entity, SourceWeights(std::mem::take(&mut tensor.weights)));
-        world.insert(entity, TensorShape(tensor.shape));
-        world.insert(entity, CompilationStatus::new());
-        entity_for_input.push((entity, i));
+    // Stage every tensor's spawn + initial components on a single
+    // `WorldTxn` and commit before the pipeline runs. The resolved
+    // entities come back in stage order, which matches the input
+    // order, so the readback at the end of the function maps the
+    // same way the original direct mutation did.
+    let mut txn = WorldTxn::new();
+    for tensor in tensors.iter_mut() {
+        let token = txn.stage_spawn();
+        txn.stage_insert_on(token, SourceWeights(std::mem::take(&mut tensor.weights)));
+        txn.stage_insert_on(token, TensorShape(tensor.shape));
+        txn.stage_insert_on(token, CompilationStatus::new());
     }
+    let spawned = txn
+        .commit(&mut world)
+        .expect("compile_tensors: commit spawn txn");
+    let entity_for_input: Vec<(Entity, usize)> =
+        spawned.into_iter().zip(0..tensors.len()).collect();
     validate_sources(&mut world);
     admit_candidates(&mut world);
     bind_tensors(&mut world);
@@ -640,14 +650,23 @@ pub fn compile_stage(
     world.insert_resource(StageConfigResource(stage_config.quantization.clone()));
 
     let stage_id = stage_config.stage_id;
-    let mut entity_for_input: Vec<(Entity, usize)> = Vec::with_capacity(tensors.len());
-    for (i, tensor) in tensors.iter_mut().enumerate() {
-        let entity = world.spawn().unwrap();
-        world.insert(entity, SourceWeights(std::mem::take(&mut tensor.weights)));
-        world.insert(entity, TensorShape(tensor.shape));
-        world.insert(entity, CompilationStatus::new());
-        entity_for_input.push((entity, i));
+    // Stage every tensor's spawn + initial components on a single
+    // `WorldTxn` and commit before the pipeline runs. The resolved
+    // entities come back in stage order, matching the input order,
+    // so the readback at the end of the function maps the same way
+    // the original direct mutation did.
+    let mut txn = WorldTxn::new();
+    for tensor in tensors.iter_mut() {
+        let token = txn.stage_spawn();
+        txn.stage_insert_on(token, SourceWeights(std::mem::take(&mut tensor.weights)));
+        txn.stage_insert_on(token, TensorShape(tensor.shape));
+        txn.stage_insert_on(token, CompilationStatus::new());
     }
+    let spawned = txn
+        .commit(&mut world)
+        .expect("compile_stage: commit spawn txn");
+    let mut entity_for_input: Vec<(Entity, usize)> =
+        spawned.into_iter().zip(0..tensors.len()).collect();
 
     // Run the ECS compilation pipeline
     validate_sources(&mut world);
@@ -791,17 +810,21 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(CapabilityRegistry::default_metal_v1());
 
-        let entity = world.spawn().unwrap();
-        world.insert(entity, SourceWeights(vec![127.0; 4]));
-        world.insert(
-            entity,
+        // Use the engine-local `WorldTxn` to keep the spawn + initial
+        // component inserts under the constitutional mutation seam.
+        let mut txn = WorldTxn::new();
+        let token = txn.stage_spawn();
+        txn.stage_insert_on(token, SourceWeights(vec![127.0; 4]));
+        txn.stage_insert_on(
+            token,
             TensorShape(CanonicalShape {
                 in_features: 4,
                 out_features: 1,
                 rank: 2,
             }),
         );
-        world.insert(entity, CompilationStatus::new());
+        txn.stage_insert_on(token, CompilationStatus::new());
+        let _spawned = txn.commit(&mut world).expect("commit spawn txn");
 
         validate_sources(&mut world);
         admit_candidates(&mut world);

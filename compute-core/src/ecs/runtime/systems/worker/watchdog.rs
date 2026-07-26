@@ -283,13 +283,19 @@ mod tests {
 
     #[test]
     fn system_without_active_entities_is_ok() {
+        use crate::ecs::runtime::world_txn::WorldTxn;
         let mut world = setup_world();
         // Spawn an entity but leave it in Queued (which is not an active phase
-        // monitored by the watchdog).
-        let entity = world.spawn().expect("spawn");
-        world.insert(entity, WorkerAssignment::new("w-1", 0));
-        world.insert(entity, WorkerLifecycle::new());
-        world.insert(entity, WorkerHeartbeat::new("w-1", 0));
+        // monitored by the watchdog). Use the engine-local `WorldTxn` to
+        // keep the spawn+insert path under the constitutional mutation
+        // seam even in tests.
+        let mut txn = WorldTxn::new();
+        let token = txn.stage_spawn();
+        txn.stage_insert_on(token, WorkerAssignment::new("w-1", 0));
+        txn.stage_insert_on(token, WorkerLifecycle::new());
+        txn.stage_insert_on(token, WorkerHeartbeat::new("w-1", 0));
+        let mut spawned = txn.commit(&mut world).expect("commit spawn txn");
+        let entity = spawned.pop().expect("staged spawn");
 
         let mut system = WorkerWatchdogSystem::new();
         let mut buffer = Vec::new();

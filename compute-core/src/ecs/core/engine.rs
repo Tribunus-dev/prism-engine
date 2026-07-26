@@ -867,10 +867,25 @@ impl ComputeEngine {
         })?;
 
         // -- 1. Create request entity in World -----------------------------
-        let entity = world.spawn().ok_or_else(|| {
+        // The entity allocation goes through the constitutional mutation
+        // seam (`WorldTxn::stage_spawn` + `commit`) so the spawn itself
+        // is attributable and replayable. The subsequent component
+        // inserts use the direct `world.insert` API because the
+        // request_id is derived from the resolved entity and the
+        // inserts are not in scope of the 10 ported mutations — they
+        // remain direct on the engine `World`.
+        let mut spawn_txn = crate::ecs::runtime::world_txn::WorldTxn::new();
+        spawn_txn.stage_spawn();
+        let mut spawned = spawn_txn.commit(world).map_err(|_| {
             EngineError::new(
                 EngineErrorCode::InternalInvariantViolation,
                 "ECS world at capacity",
+            )
+        })?;
+        let entity = spawned.pop().ok_or_else(|| {
+            EngineError::new(
+                EngineErrorCode::InternalInvariantViolation,
+                "WorldTxn returned no entity for staged spawn",
             )
         })?;
 

@@ -10,6 +10,7 @@ use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
 use crate::ecs::compilation::distill_core::OnPolicyRefinementResult;
 use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
 use crate::ecs::runtime::world::{Entity, World};
+use crate::ecs::runtime::world_txn::WorldTxn;
 use crate::quantization::contract::{CanonicalShape, RuntimeRepresentationClass};
 
 // ---------------------------------------------------------------------------
@@ -118,9 +119,15 @@ pub fn load_from_generation(
     store: &ContentStore,
 ) -> Result<Entity, String> {
     let context = CimageRuntimeContext::load_from_generation(generation, store)?;
-    let entity = world.spawn().ok_or_else(|| {
-        "ECS world at capacity: cannot spawn entity for loaded generation".to_string()
-    })?;
-    world.insert(entity, context);
+    // Constitutional mutation seam: stage the spawn + insert on a
+    // `WorldTxn` and commit atomically. Keeps the canonical authority
+    // for generation-loading entity creation at a single point.
+    let mut txn = WorldTxn::new();
+    let token = txn.stage_spawn();
+    txn.stage_insert_on(token, context);
+    let mut spawned = txn.commit(world).map_err(|e| e.to_string())?;
+    let entity = spawned
+        .pop()
+        .ok_or_else(|| "WorldTxn returned no entity for staged spawn".to_string())?;
     Ok(entity)
 }

@@ -119,20 +119,33 @@ impl MultiplexerState {
         let main_bytes = weights.length as usize;
         let slot_size = (main_bytes / 32).max(1);
         let mut world = self.world.write();
+        // Stage all 32 agent slots on a single `WorldTxn` so the
+        // canonical mutation seam remains the only authority for
+        // entity allocation. The commit result is intentionally
+        // discarded: a partial-capacity failure is recovered on the
+        // next `init_from_cimage` call (the original code silently
+        // skipped capacity-limited spawns).
+        let mut txn = crate::ecs::runtime::world_txn::WorldTxn::new();
         for i in 0..32 {
-            if let Some(entity) = world.spawn() {
-                world.insert(
-                    entity,
-                    AgentSlot::new(i as u32, (weights.offset as usize) + i * slot_size),
-                );
-                world.insert(
-                    entity,
-                    crate::ecs::runtime::components::KVCacheRef::new(4096),
-                );
-                world.insert(entity, crate::ecs::runtime::components::ToolRegistry::new());
-                world.insert(entity, crate::ecs::runtime::components::AgentConfig::new());
-            }
+            let token = txn.stage_spawn();
+            txn.stage_insert_on(
+                token,
+                AgentSlot::new(i as u32, (weights.offset as usize) + i * slot_size),
+            );
+            txn.stage_insert_on(
+                token,
+                crate::ecs::runtime::components::KVCacheRef::new(4096),
+            );
+            txn.stage_insert_on(
+                token,
+                crate::ecs::runtime::components::ToolRegistry::new(),
+            );
+            txn.stage_insert_on(
+                token,
+                crate::ecs::runtime::components::AgentConfig::new(),
+            );
         }
+        let _ = txn.commit(&mut world);
     }
 
     /// Read-only accessor for the pump thread.
