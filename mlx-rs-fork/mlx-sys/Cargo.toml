@@ -1,0 +1,11 @@
+[package]
+name = "mlx-sys"
+version = "0.1.0"
+edition = "2021"
+description = "Stub — original MLX sys fork code was removed; the engine's mlx-backend feature is dormant"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

@@ -1,0 +1,16 @@
+[
+  {
+    "receipt_id": "evidence_1",
+    "receipt_kind": "QualityGateResult",
+    "manifest_digest": "77899b405c509717c4493b73cacd9796fc18b4635ab0098fc2d1630a447cbcdc",
+    "shard_validation": null,
+    "load_receipt": null
+  },
+  {
+    "receipt_id": "evidence_64",
+    "receipt_kind": "QualityGateResult",
+    "manifest_digest": "77899b405c509717c4493b73cacd9796fc18b4635ab0098fc2d1630a447cbcdc",
+    "shard_validation": null,
+    "load_receipt": null
+  }
+]

@@ -1,0 +1,27 @@
+    // Finite outputs.
+    // Diagnose decompressed output.
+    let n_nan = decompressed.iter().filter(|v| v.is_nan()).count();
+    let n_inf = decompressed.iter().filter(|v| v.is_infinite()).count();
+    let n_finite = decompressed.iter().filter(|v| v.is_finite()).count();
+    println!("decompressed NaN={}, Inf={}, finite={} / {}", n_nan, n_inf, n_finite, o);
+    println!("decompressed[0..8]: {:?}", &decompressed[..8.min(o)]);
+    println!("ane_output[0..8]: {:?}", &last_ane_output[..8.min(f)]);
+    if n_finite > 0 {
+        let min_f = decompressed.iter().cloned().filter(|v| v.is_finite()).fold(f32::MAX, f32::min);
+        let max_f = decompressed.iter().cloned().filter(|v| v.is_finite()).fold(f32::MIN, f32::max);
+        println!("decompressed finite range: [{:.6}, {:.6}]", min_f, max_f);
+    }
+    assert!(
+        decompressed.iter().all(|v| v.is_finite()),
+        "decompressed output has non-finite values (NaN={}, Inf={})", n_nan, n_inf
+    );
+    assert!(rmse.is_finite(), "RMSE is not finite");
+    assert!(snr.is_finite(), "SNR is not finite");
+
+    println!();
+    println!("=== SVD Latent Prefill PASSED ===");
+    println!(
+        "Pipeline: compress ({}) -> ANE ({}) -> decompress ({})  |  RMSE={:.4}  SNR={:.1} dB",
+        LATENT, LATENT_FFN, OUTPUT, rmse, snr
+    );
+}
