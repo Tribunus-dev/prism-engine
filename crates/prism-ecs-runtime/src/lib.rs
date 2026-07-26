@@ -41,6 +41,18 @@ pub use schedule::{
     DispatchSystem, LeaseSystem, ObserveSystem, PlanSystem, PublishSystem, RuntimeSchedule,
     ScheduleError, System, SystemContext, SystemId, SystemSpec, SystemStage, TickReceipt,
 };
+pub use schedule::backpressure::{
+    BackpressureCategory, BackpressureController, BackpressureError, BackpressureEvent,
+    BackpressureEventController, BackpressureLevel, BackpressureReason, BackpressureSummary,
+    BatchCompletionRecord, SchedulingMetrics,
+};
+pub use schedule::lane_queue::{
+    BackpressureReason as LaneBackpressureReason, LaneId, LaneQueue, LaneQueueError,
+    LaneQueueSet, QueueEntry, WorkId as LaneWorkId, WorkPriority,
+};
+pub use schedule::lane_slot_lease::{
+    LeaseError, LeaseId, LeaseState, SlotAccess, SlotId, SlotLease, SlotLeaseManager, WorkId,
+};
 pub use world_view::WorldViewImpl;
 
 pub use test_adapters::{

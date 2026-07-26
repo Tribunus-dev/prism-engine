@@ -1,3 +1,11 @@
+// Submodules of the schedule module — each owns a single Prism-domain
+// authority and is named for what it does in Prism, not for an
+// upstream project. The submodule declaration list lives at the
+// top of the file so the module surface is grep-able.
+pub mod backpressure;
+pub mod lane_queue;
+pub mod lane_slot_lease;
+
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
