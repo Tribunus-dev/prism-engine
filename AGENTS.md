@@ -19,16 +19,25 @@ This file is the agent-facing project definition. It is short on purpose. The de
 ## Project layout
 
 - `crates/prism-ecs-core` — entity, world, storage, identity primitives. Domain-neutral. Lowest layer; `unsafe` allowed.
-- `crates/prism-ecs-constitutional` — schemas, typed commands, lifecycle, transactions, durable events, replay semantics, authority-bearing state transitions.
-- `crates/prism-ecs-runtime` — provider-neutral runtime kernel: schedule, command handling, admission, dispatch coordination, ports, receipts.
-- `crates/prism-ecs-kernel` — compiled-kernel contracts, backend interfaces, target-independent kernel ABI.
-- `crates/prism-ecs-{compile,quantization,ir,artifact,spatial-ir,server,protocol,...}` — compiler, quantization, IR, artifact, server, product crates. They must not become alternate runtime authorities.
+- `crates/prism-ecs-constitutional` — schemas, typed commands, lifecycle, transactions, durable events, replay semantics, authority-bearing state transitions. Owns `admission_gates` (compile-phase ANE admission, qualification gate, evidence probe).
+- `crates/prism-ecs-runtime` — provider-neutral runtime kernel: schedule, command handling, admission, dispatch coordination, ports, receipts. Owns `buffer_lifetime_plan`, `engine_systems`, `engine_receipts` (re-implements `core/engine_receipts.rs` from the engine), `attention_sink` (re-implements the `SinkState` pattern from `core/executor.rs`).
+- `crates/prism-ecs-kernel` — compiled-kernel contracts, backend interfaces, target-independent kernel ABI. Owns `kernel_generation` (post-dispatch kernel-template resolution + `{{PLACEHOLDER}}` expansion).
+- `crates/prism-ecs-compile` — compiler and CImage lifecycle. Owns `compile_pipeline` (re-implements `system/pipeline_core.rs`), `compile_planning`, `hardware_tuning`, `fusion_analysis`, `fusion_scheduling` (re-implementations of `system/`), plus `cimage_pipeline/`, `cimage_packer/`, `cimage_validation/` (re-implementations of the highest-leverage `compute_image/` files).
+- `crates/prism-ecs-{quantization,ir,artifact,spatial-ir,server,protocol,...}` — quantization, IR, artifact, server, product crates. They must not become alternate runtime authorities. `prism-ecs-artifact` owns `text_architecture_extract` (re-implements `system/model_load.rs`).
+- `crates/prism-ane` — ANE builder, MIL program construction, MIL layer programs. Owns `mil_builder` (the canonical home for the merged engine + prism-ane MIL builder) and `mil_layer_programs` (high-level ANE program constructors). The engine's `compute-core/src/ecs/core/mil_builder.rs` is a 68-LOC re-export shim that delegates here.
+- `crates/prism-gguf` — GGUF format adapter. Now also owns `manifest` (typed `TextArchitecture` extraction — re-implements the manifest-extraction portion of the engine's `core/gguf.rs`).
 - `crates/prism-{cuda,rocm,metal,amd-npu,ane,intel-npu,tt,igc}-runtime` — hardware backends. The name is the public target contract.
-- `crates/prism-{onnx,pytorch}-ingest`, `crates/prism-gguf` — format adapters. The name is the public format contract.
-- `compute-core.legacy/` — archaeology. Treat as legacy unless the canonical path explicitly imports it.
+- `crates/prism-{onnx,pytorch}-ingest` — format adapters. The name is the public format contract.
+- `compute-core/` — the engine being absorbed into the constitutional ECS. The package name is `tribunus-compute-core`; it is a sibling workspace member. **The engine is the source of truth for patterns, but the constitutional libraries are the source of truth for state.** Per the project-absorption discipline, do not add new files in `compute-core/` that name themselves after an external project; the engine is in the middle of being absorbed, and the canonical home for new code is the constitutional crate that owns the relevant authority.
+- `compute-core/compute-core.legacy/` — a snapshot of the pre-absorption engine (preserved for archaeology; not built). Treat as legacy unless the canonical path explicitly imports it.
 - `CAMPAIGN.md` — subsystem migration state. Read this first; it tells you which subsystems are `Shadow`, `Canonical`, or `LegacyRemoved`.
 - `clippy.toml` — strict clippy config (thresholds, disallowed methods). Wired through `[workspace.lints.*]` in root `Cargo.toml` at `warn` level to keep the build passing during migration.
 - `PrismAgent/`, `PrismAgentiOS/`, `PrismMenuBar/`, `Sources/`, `deno-dashboard/`, `examples/`, `docs/` — product surfaces and long-form docs. Ingress and projection layers; do not own domain truth.
+
+**Pre-existing build issues (out of scope for absorption):**
+
+- **`crates/prism-metal-runtime/` is not in the workspace.** The crate declares `version.workspace = true` / `edition.workspace = true` and expects to be a workspace member, but it is not listed in the root `Cargo.toml` `[workspace] members` array. Building it standalone fails with "package believes it's in a workspace when it's not." This pre-dates the absorption and is tracked separately.
+- **`prism-metal-runtime` → `tribunus-compute-core` dependency is broken.** `crates/prism-metal-runtime/Cargo.toml` declares `tribunus-compute-core = { path = "../../compute-core" }`; the engine builds with pre-existing errors (~219, including missing `ComputeRouteProfile`, `BoundaryExecutionReceipt`, `CompEntity`, etc., per the Phase 3 changelog baseline). The link is therefore broken even when the workspace membership is fixed. Tracked separately.
 
 ## Skills
 
@@ -88,6 +97,7 @@ The `[workspace.lints.clippy]` keeps `all` / `pedantic` / `nursery` at `warn` to
 - Adversarial tests are part of the implementation protocol — write them before declaring a change complete, not as a follow-up
 - Test names describe the invariant (`stale_fencing_generation_rejected`), not the function (`test_kernel_4`)
 - Tests use the same constitutional commands and transactions as production. A test that calls `world.spawn` with `set_direct_mutation_allowed(true)` is a legacy test and must be migrated
+- The engine (`compute-core/`) has pre-existing build errors (~219 as of the Phase 3 changelog baseline) and is excluded from `cargo test --workspace` in practice. Constitutional libraries (`crates/prism-ecs-*`) build and test cleanly; verify absorption work with focused crate commands like `cargo test -p prism-ecs-compile --lib cimage_` or `cargo test -p prism-ecs-runtime --lib engine_receipts`.
 - Run the focused crate's tests after each layer; run the affected crate's complete suite before completion
 
 ## PR & commit conventions

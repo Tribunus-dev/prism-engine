@@ -39,21 +39,46 @@ next cutover step until it is paid or formally waived. The methodology is owned 
 |---|-----------|--------|-------------|---------|-------|
 | 1 | **Artifact Ingestion** | `ReplayVerified` | Artifact | ArtifactPath, ArtifactDigest, ArtifactMetadata, ArtifactLifecycle | kernel |
 | 2 | **Device Discovery** | `Canonical` | Device | DeviceStableId, DriverFactoryId, BackendFamily, DeviceCapabilities, DeviceMemoryLimits, DeviceTopology, DeviceHealth, DeviceLifecycle, DesiredDeviceState, ObservedDeviceState, LastObservation, RuntimeHandleKey | kernel |
-| 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
-| 4 | **Session Lifecycle** | `Shadow` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
 | 3 | **Model Deployment & Residency** | `Canonical` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
+| 4 | **Session Lifecycle** | `Shadow` | Session | SessionConfig, SessionModels, SessionDevices, SessionLifecycle, ResidencyModelRef | kernel |
 | 5 | **Work Scheduling** | `Shadow` | WorkItem | WorkItemComponent, WorkState, WorkLeaseComponent, ResourceClaimComponent, WorkPrerequisites, WorkOutput | kernel |
-| 3 | **Model Deployment & Residency** | `Shadow` | Model, Residency | ModelId, ModelArtifactRef, ModelLifecycle, ResidencyDeviceRef, ResidencyMemoryClaim, ResidencyFormat, ResidencyLifecycle, AllocationToken | kernel |
 | 6 | **Execution Leases** | `Shadow` | — | ExecutionLease, LeaseOwner, LeaseTokenRange, KvSlot, KvOwnership, ExecutionOutput | kernel |
-| 7 | **Compilation & Model Production** | `Shadow` | CompilationJob | CompilationJob, JobInput, JobConfig, JobOutput, JobLifecycle, ValidationReceipt, QuantizationPlan, CimagePromotion | kernel |
+| 7 | **Compilation & Model Production** | `Shadow` | CompilationJob | CompilationJob, JobInput, JobConfig, JobOutput, JobLifecycle, ValidationReceipt, QuantizationPlan, CimagePromotion; plus `cimage_pipeline` (admission, authority, canonical, diagnostics, differential, publish, receipts), `cimage_packer` (V4 unified packer, pack-from-dir, segment writer, helpers, multimodal), `cimage_validation` (per-kernel validators + ValidationMatrix), and the re-implementations of `system/{compile_planning,hardware_tuning,fusion_analysis,fusion_scheduling,compile_pipeline}.rs` (commit `472d9754`) | kernel |
 | 8 | **Agent & Tool Execution** | `Shadow` | Agent | AgentRun, AgentTask, AgentPhase, ToolInvocation, ToolOutcome, AgentMessage, AgentConfig, AgentLifecycle | kernel |
 | 9 | **Multimodal Pipelines** | `Shadow` | Pipeline | Pipeline, PipelineStage, PipelineModality, InputArtifactRef, OutputArtifactRef, PipelineLifecycle, WorkLeaseRef | kernel |
 | 10 | **Distributed Topology** | `Shadow` | Node | PeerIdentity, NodeMembership, PeerCapabilities, NodeTopology, TrustState, WorkerHealth, RemoteLease, RemoteCapabilityObservation | kernel |
 | 11 | **Server & API Bridges** | `Shadow` | — | IngressRequest, ApiKey, RateLimiterState, RequestQueue, TransportSession, IngressLifecycle | kernel |
-| 12 | **Persistence & Projections** | `Design` | — | ReplayRegistry, EventStore (InMemory), Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
-| 12 | **Persistence & Projections** | `Shadow` | — | FsEventStore (file-backed, durable-before-ack), ReplayRegistry (16 appliers), EventStore trait, InMemoryEventStore, Snapshot, ReplayEngine, ProjectionCheckpoint | kernel |
 | 12 | **Persistence & Projections** | `Shadow` | — | FsEventStore (file-backed, durable-before-ack, restart recovery proven), ReplayRegistry (16 appliers), ReplayEngine::replay_into, restart recovery integration test | kernel |
-|| 13 | **Dashboard & Authority Purge** | `LegacyRemoved` | — | — | kernel |
+| 13 | **Dashboard & Authority Purge** | `LegacyRemoved` | — | — | kernel |
+| 14 | **Engine Receipts** | `Shadow` | Worker | ModelLoadReceipt, RequestAdmissionReceipt, PhaseReceipt, StepReceipt, TerminalRequestReceipt, WorkerExitReceipt, Timeline, ReceiptBuilder, ReceiptId. Re-implements `compute-core/src/ecs/core/engine_receipts.rs` (1,264 LOC) at `crates/prism-ecs-runtime/src/engine_receipts.rs` (~660 LOC, 20 tests) — commit `b7d92c40`. Original kept in place for shadow comparison. | runtime |
+| 15 | **Attention Sinks** | `Shadow` | (no entity — pattern overlay) | SinkHandle, SinkStore (trait), SinkWindow, SinkWindowConfig, AttentionRange, SinkError. Re-implements the `SinkState` design from `compute-core/src/ecs/core/executor.rs` (1,308 LOC, of which ~172 LOC is the sink pattern) at `crates/prism-ecs-runtime/src/attention_sink.rs` (~430 LOC, 13 tests) — commit `b7d92c40`. Original kept in place; MLX-coupled `run_prologue` / `run_layer` / `moe_forward` parts stay engine-side. | runtime |
+| 16 | **GGUF Manifest Extraction** | `Shadow` | (no entity — format adapter) | TextArchitecture, AttentionKind, RopeSpec, MoeConfig, ManifestError, plus canonical GGUF metadata keys. Re-implements the manifest-extraction portion of `compute-core/src/ecs/core/gguf.rs` (1,118 LOC) at `crates/prism-gguf/src/manifest.rs` (~440 LOC, 9 tests) — commit `b7d92c40`. Original kept in place (the duplicate format parser is a deferred-deletion candidate). | kernel |
+| 17 | **ANE MIL Builder** | `Canonical` | (no entity — builder) | MilBuilder, MilProgram, MilSpec, high-level ANE program constructors. The engine's 2,226-LOC `compute-core/src/ecs/core/mil_builder.rs` (the *superset*) was merged into `crates/prism-ane/src/mil_builder.rs`; the engine file is now a 68-LOC re-export shim. Plus new `crates/prism-ane/src/mil_layer_programs.rs` (278 LOC) for high-level ANE program constructors. 28/28 prism-ane tests pass (+19 new) — commit `7cd96e16`. | ane |
+| 18 | **Compile-Phase Admission Gates** | `Shadow` | CompilationJob | AneAdmissionGate, LaneAdmissionGate, AneArtifactQualificationRecord, AneQualificationKey, EvidenceProbeBuffer. Re-implements `compute-core/src/ecs/system/gates.rs` (1,044 LOC) at `crates/prism-ecs-constitutional/src/admission_gates.rs` (470 LOC, 17 tests) — commit `472d9754`. Original deleted. | constitutional |
+| 19 | **Buffer Lifetime Planning** | `Shadow` | Dispatch, Value | BufferLifetimePlan, ValueLifetime, SlotState, BufferLifetimeError. Re-implements `compute-core/src/ecs/system/buffer_lifetime.rs` (350 LOC) at `crates/prism-ecs-runtime/src/buffer_lifetime_plan.rs` (376 LOC, 10 tests) — commit `472d9754`. Original deleted. | runtime |
+| 20 | **Hardware Tuning & Kernel Generation** | `Shadow` | Dispatch, GpuProfile | GpuProfileId, KernelFamily, KernelTemplateId, CodecFamily, DType, TileShape. Re-implements `compute-core/src/ecs/system/{tuning.rs, kernel_gen.rs}` (843 LOC) at `crates/prism-ecs-compile/src/hardware_tuning.rs` (281 LOC, 11 tests) and `crates/prism-ecs-kernel/src/kernel_generation.rs` (364 LOC, 15 tests) — commit `472d9754`. Originals deleted. | kernel |
+| 21 | **Engine Singleton Systems** | `Shadow` | Engine | EngineSingleton, ModelInstallRequest, ModelLoadRequest, GenerationRequest, InFlightDecode, Pressure. Re-implements `compute-core/src/ecs/system/engine_systems.rs` (1,036 LOC) at `crates/prism-ecs-runtime/src/engine_systems.rs` (281 LOC, 15 tests) — commit `472d9754`. Original deleted. | runtime |
+| 22 | **Text Architecture Extraction** | `Shadow` | Model | TextArchitecture, AttentionKind, RopeSpec, MoeConfig. Re-implements `compute-core/src/ecs/system/model_load.rs` (350 LOC) at `crates/prism-ecs-artifact/src/text_architecture_extract.rs` (280 LOC, 12 tests) — commit `472d9754`. Original deleted. | artifact |
+| 23 | **Engine Runtime WorldTxn** | `Canonical` (engine-local) | — | WorldTxn, PendingEntity, InsertTarget, WorldTxnError, WorldTxnErrorCategory, CommitReceipt. Engine-local `WorldTxn` mirroring the constitutional `prism_ecs_constitutional::WorldTxn` shape, scoped to the engine's runtime `World` (entity/component storage, not the constitutional `ComponentStore`). Lives at `compute-core/src/ecs/runtime/world_txn.rs` (459 LOC, 14 unit tests). Used to port the 10 remaining direct world mutations in `runtime/` and `core/` — commit `ebcaf2bc`. | runtime |
+
+> Subsystems 14–23 are the new surfaces introduced by the
+> `compute-core.legacy/` → constitutional ECS absorption (2026-07-25).
+> See `changelogs/2026-07-25-compute-core-legacy-integration-plan.md`
+> for the per-phase commit and changelog pointers.
+>
+> **Status convention for absorbed subsystems.** A re-implementation in
+> a constitutional crate enters at `Shadow` and advances to
+> `Canonical` only when (a) the original engine file is deleted (no
+> parallel authority) and (b) the constitutional path has a propagation
+> test. Subsystems 18, 19, 20, 21, 22 reached `Shadow` with the
+> original engine files deleted in the same commit (single authority);
+> subsystems 14, 15, 16 left the originals in place for shadow
+> comparison and remain `Shadow` until coordinated deletion in a
+> follow-up phase. Subsystem 17 (ANE MIL builder) is `Canonical`
+> because the engine file is now a re-export shim delegating to the
+> constitutional crate. Subsystem 23 is engine-local and is
+> `Canonical` within the engine; the constitutional libraries do not
+> see it directly.
 
 ## Cutover Protocol
 
@@ -201,6 +226,28 @@ Re-run before any state transition.
 - **Project absorption.** 5 absorbed-pattern files in the canonical paths:
   `tinygrad_core.rs`, `uop.rs`, `bonsai_ternary.rs`, `bonsai_cimage.rs`,
   `turboquant_kv.rs`. All in canonical paths; none under a vendored exception.
+- **compute-core.legacy absorption (2026-07-25).** 10 `system/` files
+  re-implemented in 6 constitutional crates (commit `472d9754`,
+  changelog `changelogs/2026-07-25-compute-core-absorption-phase-2-system.md`).
+  3 `compute_image/` files re-implemented in `prism-ecs-compile`
+  (`cimage_pipeline/`, `cimage_packer/`, `cimage_validation/`, commit
+  `14e8edb1`, changelog
+  `changelogs/2026-07-25-compute-core-absorption-phase-4b-compute-image.md`).
+  3 `core/` files re-implemented in `prism-ecs-runtime` and
+  `prism-gguf` (`engine_receipts`, `attention_sink`, `manifest`, commit
+  `b7d92c40`, changelog
+  `changelogs/2026-07-25-compute-core-absorption-phase-4c-core.md`).
+  `mil_builder` absorbed into `prism-ane` (commit `7cd96e16`).
+  10 remaining direct world mutations ported to a new engine-local
+  `WorldTxn` at `compute-core/src/ecs/runtime/world_txn.rs` (commits
+  `ebcaf2bc` + `c5ad9070`, changelog
+  `changelogs/2026-07-25-compute-core-absorption-phase-3-runtime.md`).
+  All 16+ absorbed files live in constitutional crates under
+  Prism-domain names; 4 shim directories (`constitutional/`,
+  `quantization/`, `kv_cache/`, `inference_profile/`) were removed
+  from `compute-core/src/ecs/mod.rs` in commit `ef826363`. The engine
+  is renamed from `compute-core.legacy/` to `compute-core/` and is
+  now a workspace member.
 - **Propagation.** All currently `Shadow` and `Canonical` subsystems have replay
   appliers registered in the ReplayRegistry (16 appliers in total per
   `Persistence & Projections` row below). The propagation gate is satisfied at
@@ -253,6 +300,41 @@ above is the priority queue, ordered by LOC.
 The re-implementation pattern, the exception categories (format adapters, hardware
 backends, vendored dependencies — all exempt), and the migration sequence are in
 `references/project-absorption.md`.
+
+### Project Absorption — `compute-core.legacy/` → constitutional ECS (2026-07-25)
+
+The following engine files have been re-implemented in the constitutional
+crates during the 2026-07-25 absorption wave. The new files live under
+Prism-domain names and are the canonical home for the relevant authority;
+the engine files are either deleted (single authority) or left in
+place as shadow copies for follow-up deletion (dual authority, awaiting
+coordination with the engine's own callers).
+
+| Original (`compute-core/src/ecs/...`) | Re-implementation | Authority the new file owns | Status | Commit |
+|---|---|---|---|---|
+| `system/buffer_lifetime.rs` (350 LOC) | `crates/prism-ecs-runtime/src/buffer_lifetime_plan.rs` (376 LOC) | Buffer lifetime planning: per-buffer alloc/free epoch derivation from a dataflow graph's topological sort, plus the scratch buffer sizing heuristic for dispatch entities | `Shadow` (original deleted) | `472d9754` |
+| `system/model_load.rs` (350 LOC) | `crates/prism-ecs-artifact/src/text_architecture_extract.rs` (280 LOC) | Translating a HuggingFace-style config JSON (and any `text_config` sub-section) into a `TextArchitecture` value for downstream compile-time systems | `Shadow` (original deleted) | `472d9754` |
+| `system/planning_core.rs` (352 LOC) | `crates/prism-ecs-compile/src/compile_planning.rs` (285 LOC) | The four planning-time decisions between graph construction and kernel lowering: ANE eligibility, memory budget check, region catalogue / planner, and packaging receipt | `Shadow` (original deleted) | `472d9754` |
+| `system/tuning.rs` (358 LOC) | `crates/prism-ecs-compile/src/hardware_tuning.rs` (281 LOC) | Hardware-targeted kernel tuning: tile shape selection by score and AMD GPU profile matching by compute-unit proximity | `Shadow` (original deleted) | `472d9754` |
+| `system/kernel_gen.rs` (485 LOC) | `crates/prism-ecs-kernel/src/kernel_generation.rs` (364 LOC) | Post-dispatch kernel-generation: select a template by root op + codec, resolve `KernelParameters` from the dispatch's shape, expand the template source with strict `{{PLACEHOLDER}}` substitution | `Shadow` (original deleted) | `472d9754` |
+| `system/fusion/analysis.rs` (539 LOC) | `crates/prism-ecs-compile/src/fusion_analysis.rs` (384 LOC) | Fusion analysis: build a `DataflowGraph` from layer `CanonicalRole`s, identify fusion groups, emit one dispatch per group | `Shadow` (original deleted) | `472d9754` |
+| `system/fusion/scheduler.rs` (623 LOC) | `crates/prism-ecs-compile/src/fusion_scheduling.rs` (393 LOC) | Fusion scheduling: backend evaluation, group growth for singleton groups, and cost-based candidate selection | `Shadow` (original deleted) | `472d9754` |
+| `system/gates.rs` (1,044 LOC) | `crates/prism-ecs-constitutional/src/admission_gates.rs` (470 LOC) | Compile-phase admission: ANE admission (determinism, perf, memory, bridge copy, numerical error), qualification gate, and evidence probe | `Shadow` (original deleted) | `472d9754` |
+| `system/engine_systems.rs` (1,036 LOC) | `crates/prism-ecs-runtime/src/engine_systems.rs` (281 LOC) | Engine singleton systems: init, generation requests, model install / load / unload, cancel, metrics, and shutdown | `Shadow` (original deleted) | `472d9754` |
+| `system/pipeline_core.rs` (1,242 LOC) | `crates/prism-ecs-compile/src/compile_pipeline.rs` (472 LOC) | Per-model compile pipeline state: distillation, epoch schedule, calibration frontier, phase IR, profitability, and tri-lane cost model | `Shadow` (original deleted) | `472d9754` |
+| `compute_image/compile/pipeline.rs` (2,664 LOC) | `crates/prism-ecs-compile/src/cimage_pipeline/` (1,811 LOC across 9 files: `mod`, `admission`, `authority`, `canonical`, `diagnostics`, `differential`, `publish`, `receipts`, `tests`) | Authority-aware compile pipeline: preflight, profile check, compatibility detect, differential compile, `publish_image` step, `CompileReceipt`, `DiagnosticReport` | `Shadow` (original left in place) | `14e8edb1` |
+| `compute_image/cimage_packer/pipeline.rs` (3,372 LOC) | `crates/prism-ecs-compile/src/cimage_packer/` (1,304 LOC across 6 files: `mod`, `pack_unified`, `pack_from_dir`, `segment_writer`, `helpers`, `multimodal`, `tests`) | V4 unified `.cimage` packer: 5-segment unified packer, directory-aware packer, page-alignment, multimodal segment synthesis types | `Shadow` (original left in place) | `14e8edb1` |
+| `compute_image/compile/validation_matrix.rs` (3,118 LOC) | `crates/prism-ecs-compile/src/cimage_validation/` (575 LOC across 14 files: `mod`, `result`, `run`, per-kernel `validators/*`, `tests`) | Post-emission kernel validation matrix: `ValidationMatrix`, `ValidationResult`, per-kernel `validate_*` functions abstracted behind a `ValidationDevice` port | `Shadow` (original left in place) | `14e8edb1` |
+| `core/engine_receipts.rs` (1,264 LOC) | `crates/prism-ecs-runtime/src/engine_receipts.rs` (~660 LOC, 20 tests) | Engine receipt types: `ModelLoadReceipt`, `RequestAdmissionReceipt`, `PhaseReceipt`, `StepReceipt`, `TerminalRequestReceipt`, `WorkerExitReceipt`, `Timeline`, `ReceiptBuilder`. Authority-bearing fields promoted to typed enums (`AdmissionDecision`, `RequestOutcome`, `CancellationMode`, `ExecutionPhase`); `ReceiptId` re-exported from `prism_ecs_constitutional` | `Shadow` (original left in place) | `b7d92c40` |
+| `core/executor.rs` (SinkState pattern, ~172 LOC of 1,308) | `crates/prism-ecs-runtime/src/attention_sink.rs` (~430 LOC, 13 tests) | Attention-sink pattern: backend-neutral `SinkHandle`, `SinkStore` trait, `SinkWindow`, `SinkWindowConfig`, `AttentionRange`, plus the entropy-driven adaptive window heuristic | `Shadow` (original left in place; MLX-coupled parts stay engine-side) | `b7d92c40` |
+| `core/gguf.rs` (manifest extraction, ~400 LOC of 1,118) | `crates/prism-gguf/src/manifest.rs` (~440 LOC, 9 tests) | Typed `TextArchitecture` extraction from parsed GGUF metadata. `keys` module with canonical GGUF metadata keys; `ManifestError` with `MissingKey` / `InvalidValue` variants; `RopeSpec`, `MoeConfig`, `AttentionKind` types | `Shadow` (original left in place; duplicate format parser is a deferred-deletion candidate) | `b7d92c40` |
+| `core/mil_builder.rs` (2,226 LOC) | `crates/prism-ane/src/mil_builder.rs` (1,016 LOC) + `crates/prism-ane/src/mil_layer_programs.rs` (278 LOC) | ANE MIL builder and high-level ANE program constructors. Engine was the *superset* — unique methods (`topk`, `batch_size`, `silu`, `softmax`, `matmul_transpose_y`, `concat`, `conv`, `reshape`, `transpose`, `const_i32`, `reserve_names`, full 3-arg `gather`) absorbed; engine file replaced with 68-LOC re-export shim | `Canonical` (engine file is now a re-export shim) | `7cd96e16` |
+| `runtime/` (10 direct world mutations) + `core/engine.rs:870` (1 direct world mutation) | `compute-core/src/ecs/runtime/world_txn.rs` (459 LOC, 14 unit tests) — engine-local `WorldTxn` mirroring the constitutional `prism_ecs_constitutional::WorldTxn` shape | Engine-local staged-mutation buffer scoped to the engine's runtime `World`. `WorldTxn::stage_spawn`, `stage_insert_on`, `stage_insert`, `stage_remove`, `commit`; `PendingToken`; `InsertTarget`; `WorldTxnError`; `CommitReceipt` | `Canonical` (engine-local) | `ebcaf2bc` |
+
+The re-implementation pattern, the exception categories (format adapters, hardware
+backends, vendored dependencies — all exempt), and the migration sequence are in
+`references/project-absorption.md`. The per-file `Completion report` for each
+phase lives in `changelogs/2026-07-25-compute-core-absorption-phase-*.md`.
 
 ### Rust Quality Backlog
 
