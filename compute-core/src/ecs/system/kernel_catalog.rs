@@ -6,6 +6,7 @@
 
 use crate::ecs::component::aot::CatalogEntry;
 use crate::ecs::component::backend::{BinaryFormat, CompiledBinary};
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -30,6 +31,12 @@ impl CompilerSystem for KernelCatalogSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernels: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
+        // Stage every per-kernel `CatalogEntry` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden — the txn is the single authority-bearing commit
+        // boundary for state mutations in this system.
+        let mut txn = ConstitutionalWorldTxn::new();
         for &kernel in &kernels {
             let mut errors: Vec<String> = Vec::new();
 
@@ -57,8 +64,18 @@ impl CompilerSystem for KernelCatalogSystem {
                 true
             };
 
-            let _ = world.add_component(kernel, CatalogEntry { valid, errors });
+            // Stage against the existing (already-allocated) kernel entity.
+            // Errors are logged and swallowed: this system is a
+            // per-entity validation pass, not a preflight gate, so an
+            // individual insert failure should not abort the whole run.
+            if let Err(e) = txn.stage_insert(kernel, CatalogEntry { valid, errors }) {
+                tracing::warn!(entity = ?kernel, error = %e, "kernel_catalog: stage_insert failed");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "kernel_catalog: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("kernel_catalog: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

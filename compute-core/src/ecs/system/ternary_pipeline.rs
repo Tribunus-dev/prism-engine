@@ -8,6 +8,7 @@ use crate::ecs::component::model_source::CimageBinaryComp;
 use crate::ecs::compute_image::compile::ternary::{
     write_cimage_header_le, CimageHeader, SegmentEntry, SegmentKind, CIMAGE_SEGMENT_CAPACITY,
 };
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -109,7 +110,18 @@ impl CompilerSystem for TertiaryPipelineSystem {
             .map_err(|e| anyhow::anyhow!("write final cimage header: {e}"))?;
 
         // Store on model entity.
-        let _ = world.add_component(model_entity, CimageBinaryComp(buf));
+        //
+        // Stage the insert on a `ConstitutionalWorldTxn` and commit
+        // atomically. Direct `world.add_component` calls outside the
+        // WorldTxn seam are forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
+        if let Err(e) = txn.stage_insert(model_entity, CimageBinaryComp(buf)) {
+            tracing::warn!(entity = ?model_entity, error = %e, "ternary_pipeline: stage_insert CimageBinaryComp");
+        }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "ternary_pipeline: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("ternary_pipeline: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

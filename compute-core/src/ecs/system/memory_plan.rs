@@ -2,6 +2,7 @@ use crate::ecs::component::backend::BackendTarget;
 use crate::ecs::component::memory::{BufferLifetime, MemoryDomain, MemoryPool, PoolPolicy};
 use crate::ecs::component::tensor::{CanonicalRoleComp, CodecFamilyComp, Shape};
 use crate::ecs::plan::CodecFamily;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
@@ -92,6 +93,11 @@ impl CompilerSystem for MemoryDomainAssignmentSystem {
 
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensors = world.entities_of_kind(EntityKind::Tensor);
+        // Stage every per-tensor `MemoryDomain` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for tensor in tensors {
             let target = world
                 .get_component::<BackendTarget>(tensor)
@@ -110,8 +116,14 @@ impl CompilerSystem for MemoryDomainAssignmentSystem {
                 BackendTarget::CPU => MemoryDomain::HostVisible,
             };
 
-            let _ = world.add_component(tensor, domain);
+            if let Err(e) = txn.stage_insert(tensor, domain) {
+                tracing::warn!(entity = ?tensor, error = %e, "memory_domain_assignment: stage_insert MemoryDomain");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "memory_domain_assignment: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("memory_domain_assignment: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
         Ok(())
     }
 }
@@ -143,6 +155,11 @@ impl CompilerSystem for BufferAllocationSystem {
         let tensors = world.entities_of_kind(EntityKind::Tensor);
         let mut next_dedicated_pool: u32 = 1; // 0 is reserved for arena
 
+        // Stage every per-tensor buffer spawn + component inserts on
+        // a single `ConstitutionalWorldTxn` and commit atomically.
+        // Direct `world.spawn` / `world.add_component` calls outside
+        // the WorldTxn seam are forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for tensor in tensors {
             // Skip tensors that haven't been fully described yet.
             let Some(shape) = world.get_component::<Shape>(tensor) else {
@@ -172,23 +189,35 @@ impl CompilerSystem for BufferAllocationSystem {
             };
 
             // ── Allocate buffer entity ──────────────────────────────────
-            let buffer = world.spawn(EntityKind::Buffer, None)?;
+            let buffer_token = txn.stage_spawn(EntityKind::Buffer, None);
 
-            let _ = world.add_component(buffer,
-            MemoryPool {
-                policy,
-                pool_id,
-                total_bytes: storage_bytes,
-                used_bytes: 0,
-            },);
+            if let Err(e) = txn.stage_insert_on(
+                buffer_token,
+                MemoryPool {
+                    policy,
+                    pool_id,
+                    total_bytes: storage_bytes,
+                    used_bytes: 0,
+                },
+            ) {
+                tracing::warn!(tensor = ?tensor, error = %e, "buffer_allocation: stage_insert_on MemoryPool");
+            }
 
-            let _ = world.add_component(buffer,
-            BufferLifetime {
-                alloc_epoch: 0,       // allocated in planning phase
-                free_epoch: u64::MAX, // unknown until liveness analysis
-                causal_death_frontier: None,
-            },);
+            if let Err(e) = txn.stage_insert_on(
+                buffer_token,
+                BufferLifetime {
+                    alloc_epoch: 0,       // allocated in planning phase
+                    free_epoch: u64::MAX, // unknown until liveness analysis
+                    causal_death_frontier: None,
+                },
+            ) {
+                tracing::warn!(tensor = ?tensor, error = %e, "buffer_allocation: stage_insert_on BufferLifetime");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "buffer_allocation: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("buffer_allocation: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

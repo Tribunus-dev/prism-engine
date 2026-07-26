@@ -22,6 +22,7 @@ pub mod serving;
 pub mod signal_bus;
 pub mod stage_graph;
 pub mod systems;
+pub mod constitutional_world_txn;
 pub mod world;
 pub mod world_txn;
 

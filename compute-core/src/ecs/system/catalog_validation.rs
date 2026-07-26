@@ -6,6 +6,7 @@
 //! (`Compilation`).
 
 use crate::ecs::component::aot::{SelectedVariant, ValidationReceipt};
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -25,6 +26,11 @@ impl CompilerSystem for CatalogValidationSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
+        // Stage every per-kernel `ValidationReceipt` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for &kernel in &kernel_entities {
             // Only validate kernels that have a selected variant.
             if world.get_component::<SelectedVariant>(kernel).is_none() {
@@ -35,15 +41,21 @@ impl CompilerSystem for CatalogValidationSystem {
             // In the full pipeline this would run the compiled kernel against
             // held-out tensor shapes and compute NRMSE + perplexity delta.
             // Here we attach a passing receipt with baseline metrics.
-            let _ = world.add_component(
+            if let Err(e) = txn.stage_insert(
                 kernel,
                 ValidationReceipt {
                     passed: true,
                     nrmse: 0.001,
                     perplexity_delta: 0.0,
                 },
-            );
+            ) {
+                tracing::warn!(entity = ?kernel, error = %e, "catalog_validation: stage_insert ValidationReceipt");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "catalog_validation: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("catalog_validation: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

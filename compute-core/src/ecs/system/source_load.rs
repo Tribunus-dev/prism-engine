@@ -15,6 +15,7 @@ use std::path::PathBuf;
 use crate::ecs::component::tensor::{DataType, Shape};
 use crate::ecs::compute_image::compile::load_source_tensor_table;
 use crate::ecs::compute_image::compile::source::load_source;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 use crate::ecs::Component;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
@@ -46,20 +47,36 @@ impl CompilerSystem for SourceLoadingSystem {
             .map_err(|e| anyhow::anyhow!("source load failed: {e}"))?;
 
         // Spawn a Tensor entity per source tensor with Shape and DataType.
+        //
+        // Stage every per-tensor spawn + insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.spawn` / `world.add_component` calls outside the
+        // WorldTxn seam are forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for (name, tensor) in &loaded.source_tensors {
-            let entity = world.spawn(EntityKind::Tensor, Some(name.clone()))?;
-            world.add_component(entity, Shape(tensor.shape.clone()))?;
+            let token = txn.stage_spawn(EntityKind::Tensor, Some(name.clone()));
             let dt = map_dtype_str(&tensor.dtype);
-            world.add_component(entity, DataType(dt))?;
-            world.add_component(
-                entity,
+            if let Err(e) = txn.stage_insert_on(token, Shape(tensor.shape.clone())) {
+                tracing::warn!(name = %name, error = %e, "source_load: stage_insert_on Shape");
+            }
+            if let Err(e) = txn.stage_insert_on(token, DataType(dt)) {
+                tracing::warn!(name = %name, error = %e, "source_load: stage_insert_on DataType");
+            }
+            if let Err(e) = txn.stage_insert_on(
+                token,
                 SourceTensorMeta {
                     raw_name: tensor.name.clone(),
                     raw_dtype: tensor.dtype.clone(),
                     sha256: tensor.source_sha256.clone(),
                 },
-            )?;
+            ) {
+                tracing::warn!(name = %name, error = %e, "source_load: stage_insert_on SourceTensorMeta");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "source_load: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("source_load: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }
@@ -83,8 +100,20 @@ impl CompilerSystem for TensorTableLoadingSystem {
 
         // Store table as a component on a synthetic entity so downstream
         // systems can reference it for differential compilation decisions.
-        let meta_entity = world.spawn(EntityKind::Artifact, Some("tensor_table".into()))?;
-        world.add_component(meta_entity, TensorTableComp(table))?;
+        //
+        // Stage the spawn + insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.spawn` / `world.add_component` calls outside the
+        // WorldTxn seam are forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
+        let token = txn.stage_spawn(EntityKind::Artifact, Some("tensor_table".into()));
+        if let Err(e) = txn.stage_insert_on(token, TensorTableComp(table)) {
+            tracing::warn!(error = %e, "tensor_table: stage_insert_on TensorTableComp");
+        }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "tensor_table: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("tensor_table: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
         Ok(())
     }
 }

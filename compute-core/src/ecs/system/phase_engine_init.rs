@@ -1,4 +1,5 @@
 use crate::ecs::component::scheduling::{PhaseDagState, ReadyQueueState};
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -25,36 +26,54 @@ impl CompilerSystem for PhaseEngineInitSystem {
         }
 
         // Spawn a new engine entity with phase DAG and ready queue state.
-        let entity = world.spawn(EntityKind::Executable, Some("phase_engine".into()))?;
-        let _ = world.add_component(entity,
-        PhaseDagState {
-            phase_names: vec![
-                "model_load".into(),
-                "quantize".into(),
-                "memory_plan".into(),
-                "fusion_dispatch".into(),
-                "kernel_gen".into(),
-                "compile".into(),
-                "package".into(),
-                "validate".into(),
-                "execute".into(),
-            ],
-            edges: vec![
-                ("model_load".into(), "quantize".into()),
-                ("quantize".into(), "memory_plan".into()),
-                ("memory_plan".into(), "fusion_dispatch".into()),
-                ("fusion_dispatch".into(), "kernel_gen".into()),
-                ("kernel_gen".into(), "compile".into()),
-                ("compile".into(), "package".into()),
-                ("package".into(), "validate".into()),
-                ("validate".into(), "execute".into()),
-            ],
-            current_phase: "model_load".into(),
-        },);
-        let _ = world.add_component(entity,
-        ReadyQueueState {
-            pending_items: Vec::new(),
-        },);
+        //
+        // Stage the spawn + both inserts on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.spawn` / `world.add_component` calls outside the
+        // WorldTxn seam are forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
+        let token = txn.stage_spawn(EntityKind::Executable, Some("phase_engine".into()));
+        if let Err(e) = txn.stage_insert_on(
+            token,
+            PhaseDagState {
+                phase_names: vec![
+                    "model_load".into(),
+                    "quantize".into(),
+                    "memory_plan".into(),
+                    "fusion_dispatch".into(),
+                    "kernel_gen".into(),
+                    "compile".into(),
+                    "package".into(),
+                    "validate".into(),
+                    "execute".into(),
+                ],
+                edges: vec![
+                    ("model_load".into(), "quantize".into()),
+                    ("quantize".into(), "memory_plan".into()),
+                    ("memory_plan".into(), "fusion_dispatch".into()),
+                    ("fusion_dispatch".into(), "kernel_gen".into()),
+                    ("kernel_gen".into(), "compile".into()),
+                    ("compile".into(), "package".into()),
+                    ("package".into(), "validate".into()),
+                    ("validate".into(), "execute".into()),
+                ],
+                current_phase: "model_load".into(),
+            },
+        ) {
+            tracing::warn!(error = %e, "phase_engine_init: stage_insert_on PhaseDagState");
+        }
+        if let Err(e) = txn.stage_insert_on(
+            token,
+            ReadyQueueState {
+                pending_items: Vec::new(),
+            },
+        ) {
+            tracing::warn!(error = %e, "phase_engine_init: stage_insert_on ReadyQueueState");
+        }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "phase_engine_init: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("phase_engine_init: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

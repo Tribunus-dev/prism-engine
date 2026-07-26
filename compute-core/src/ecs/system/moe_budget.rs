@@ -5,6 +5,7 @@ use crate::ecs::component::tensor::{
 };
 use crate::ecs::config::TextArchitecture;
 use crate::ecs::plan::CodecFamily;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 use std::collections::{HashMap, HashSet};
@@ -59,31 +60,49 @@ impl CompilerSystem for MoERoutingSystem {
         let top_k = max_expert_count;
 
         // Create an expert entity for each (layer, expert) pair.
+        //
+        // Stage every expert spawn + insert AND the per-model MoEConfig
+        // insert on a single `ConstitutionalWorldTxn` and commit
+        // atomically. Direct `world.spawn` / `world.add_component`
+        // calls outside the WorldTxn seam are forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for experts in layer_experts.values() {
             for expert_idx in experts {
-                let expert_entity = world.spawn(EntityKind::Expert, None)?;
-                let _ = world.add_component(expert_entity,
-                ExpertIndex {
-                    index: *expert_idx,
-                    total,
-                    top_k,
-                },);
+                let expert_token = txn.stage_spawn(EntityKind::Expert, None);
+                if let Err(e) = txn.stage_insert_on(
+                    expert_token,
+                    ExpertIndex {
+                        index: *expert_idx,
+                        total,
+                        top_k,
+                    },
+                ) {
+                    tracing::warn!(error = %e, "moe_routing: stage_insert_on ExpertIndex");
+                }
             }
         }
 
         // Add MoEConfig to the model entity (first one).
         if total > 0 {
             for model in world.entities_of_kind(EntityKind::Model) {
-                let _ = world.add_component(model,
-                MoEConfig {
-                    shared_expert: has_shared_expert,
-                    num_experts: total,
-                    top_k,
-                    intermediate_size: None,
-                },);
+                if let Err(e) = txn.stage_insert(
+                    model,
+                    MoEConfig {
+                        shared_expert: has_shared_expert,
+                        num_experts: total,
+                        top_k,
+                        intermediate_size: None,
+                    },
+                ) {
+                    tracing::warn!(entity = ?model, error = %e, "moe_routing: stage_insert MoEConfig");
+                }
                 break;
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "moe_routing: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("moe_routing: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }
@@ -156,16 +175,29 @@ impl CompilerSystem for MemoryBudgetSystem {
         let total_bytes = weight_bytes + scratch_bytes + kv_cache_bytes;
 
         // Add MemoryBudget to the first model entity.
+        //
+        // Stage the per-model insert on a `ConstitutionalWorldTxn` and
+        // commit atomically. Direct `world.add_component` calls
+        // outside the WorldTxn seam are forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for model in model_entities {
-            let _ = world.add_component(model,
-            MemoryBudget {
-                total_bytes,
-                weight_bytes,
-                scratch_bytes,
-                kv_cache_bytes,
-            },);
+            if let Err(e) = txn.stage_insert(
+                model,
+                MemoryBudget {
+                    total_bytes,
+                    weight_bytes,
+                    scratch_bytes,
+                    kv_cache_bytes,
+                },
+            ) {
+                tracing::warn!(entity = ?model, error = %e, "memory_budget: stage_insert MemoryBudget");
+            }
             break;
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "memory_budget: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("memory_budget: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

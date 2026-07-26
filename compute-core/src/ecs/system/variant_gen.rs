@@ -8,6 +8,7 @@
 use crate::ecs::component::aot::{CompEntityRef, KernelVariantEntityData};
 use crate::ecs::component::fusion::FusionGroup;
 use crate::ecs::plan::KernelTemplateId;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -153,22 +154,39 @@ impl CompilerSystem for VariantGenerationSystem {
         let kernel_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
 
         // Fallback: if no kernel entities exist yet, create one.
-        let fallback_kernel = if kernel_entities.is_empty() {
-            Some(
-                world
-                    .spawn(EntityKind::Kernel, Some("variant_parent".into()))?
-                    .entity,
-            )
+        //
+        // The fallback path requires a two-stage commit because the
+        // fallback Entity is needed as `parent_kernel` for the variant
+        // inserts, and `WorldTxn::stage_spawn` returns a token whose
+        // resolved Entity is only known after `commit`. The original
+        // code spawned the fallback inline and used the real Entity
+        // directly. The staged-txn port preserves the same observable
+        // outcome via a two-transaction sequence: (1) commit the
+        // fallback, (2) stage and commit the variants with the
+        // resolved parent Entity. Direct `world.spawn` /
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let profiles = target_profiles();
+
+        // Transaction 1: fallback kernel (only if needed).
+        let fallback_parent: Option<Entity> = if kernel_entities.is_empty() {
+            let mut fallback_txn = ConstitutionalWorldTxn::new();
+            let token = fallback_txn.stage_spawn(EntityKind::Kernel, Some("variant_parent".into()));
+            let spawned = fallback_txn.commit(world).map_err(|e| {
+                tracing::error!(error = %e, "variant_gen: fallback commit failed");
+                anyhow::anyhow!("variant_gen: fallback commit failed: {e}")
+            })?;
+            let _ = token; // token consumed by commit
+            spawned.into_iter().next()
         } else {
             None
         };
 
-        let profiles = target_profiles();
-
+        // Transaction 2: every per-variant spawn + insert.
+        let mut txn = ConstitutionalWorldTxn::new();
         for &dispatch in &dispatch_entities {
             let parent_kernel = if kernel_entities.is_empty() {
-                // Use the fallback we created above.
-                fallback_kernel.unwrap()
+                fallback_parent.expect("fallback_parent resolved in transaction 1")
             } else {
                 // Simple assignment: pick a kernel from the list (round-robin proxy).
                 let idx = dispatch.0 as usize % kernel_entities.len();
@@ -178,19 +196,27 @@ impl CompilerSystem for VariantGenerationSystem {
             for &template_id in ALL_TEMPLATES {
                 for profile in &profiles {
                     let profile_str = profile.to_string();
-                    let variant = world.spawn(
+                    let variant_token = txn.stage_spawn(
                         EntityKind::KernelVariant,
                         Some(format!("variant_{template_id:?}_{profile_str}")),
-                    )?;
-                    let _ = world.add_component(variant,
-                    KernelVariantEntityData {
-                        profile_id: profile_str,
-                        template_id,
-                        parent_kernel: CompEntityRef(parent_kernel.0),
-                    },);
+                    );
+                    if let Err(e) = txn.stage_insert_on(
+                        variant_token,
+                        KernelVariantEntityData {
+                            profile_id: profile_str,
+                            template_id,
+                            parent_kernel: CompEntityRef(parent_kernel.0),
+                        },
+                    ) {
+                        tracing::warn!(error = %e, "variant_gen: stage_insert_on KernelVariantEntityData");
+                    }
                 }
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "variant_gen: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("variant_gen: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

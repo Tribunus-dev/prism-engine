@@ -8,6 +8,7 @@
 
 use crate::ecs::component::aot::{KernelVariantEntityData, SelectedVariant};
 use crate::ecs::component::backend::GPUArch;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -207,6 +208,12 @@ impl CompilerSystem for VariantSelectionSystem {
         let device_profile = target_device_profile(world);
 
         // For each group, score and select the best variant.
+        //
+        // Stage every `SelectedVariant` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for (parent_kernel, variants) in &groups {
             let scored: Vec<f64> = variants
                 .iter()
@@ -223,13 +230,21 @@ impl CompilerSystem for VariantSelectionSystem {
             if let Some(idx) = best_idx {
                 let best_data = &variants[idx].1;
                 let score = scored[idx];
-                let _ = world.add_component(*parent_kernel,
-                SelectedVariant {
-                    profile_id: best_data.profile_id.clone(),
-                    score,
-                },);
+                if let Err(e) = txn.stage_insert(
+                    *parent_kernel,
+                    SelectedVariant {
+                        profile_id: best_data.profile_id.clone(),
+                        score,
+                    },
+                ) {
+                    tracing::warn!(entity = ?parent_kernel, error = %e, "variant_select: stage_insert SelectedVariant");
+                }
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "variant_select: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("variant_select: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

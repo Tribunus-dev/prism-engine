@@ -14,6 +14,7 @@ use crate::ecs::execution_profile::{
     RuntimeHealthReceipt, StabilityStatus,
 };
 use crate::ecs::plan::ModelExecutionPlan;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -38,6 +39,11 @@ impl CompilerSystem for ProfileExecutionSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
+        // Stage every per-model `ProfileRunResult` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in model_entities {
             // Skip if already profiled.
             if world.get_component::<ProfileRunResult>(entity).is_some() {
@@ -56,8 +62,14 @@ impl CompilerSystem for ProfileExecutionSystem {
 
             let result = execute_profile(&plan, &config);
 
-            let _ = world.add_component(entity, ProfileRunResult(result));
+            if let Err(e) = txn.stage_insert(entity, ProfileRunResult(result)) {
+                tracing::warn!(entity = ?entity, error = %e, "profile: stage_insert ProfileRunResult");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "profile: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("profile: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

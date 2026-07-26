@@ -1,4 +1,5 @@
 use crate::ecs::Entity;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 use crate::ecs::{CompilerSystem, Component, EntityKind, SchedulePhase, World};
 use serde::{Deserialize, Serialize};
 
@@ -58,12 +59,21 @@ impl CompilerSystem for PhaseEngineSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
+        // Stage every per-entity `PhaseLifecycleComponent` mutation on
+        // a single `ConstitutionalWorldTxn` and commit atomically.
+        // Direct `world.get_component_mut` calls outside the WorldTxn
+        // seam are forbidden. Extract-mutate-insert pattern.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &entities {
-            let Some(phase) = world.get_component_mut::<PhaseLifecycleComponent>(*entity) else {
+            let Some(phase) = world
+                .get_component::<PhaseLifecycleComponent>(*entity)
+                .cloned()
+            else {
                 continue;
             };
 
-            phase.phase = match phase.phase {
+            let mut updated = phase;
+            updated.phase = match updated.phase {
                 PhaseState::Dormant => PhaseState::Ready,
                 PhaseState::Ready => PhaseState::ResidencyPending,
                 PhaseState::ResidencyPending => PhaseState::LeasePending,
@@ -75,7 +85,14 @@ impl CompilerSystem for PhaseEngineSystem {
                 PhaseState::Publishing => PhaseState::Complete,
                 other => other,
             };
+            if let Err(e) = txn.stage_insert(*entity, updated) {
+                tracing::warn!(entity = ?entity, error = %e, "phase_engine: stage_insert PhaseLifecycleComponent");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "phase_engine: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("phase_engine: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

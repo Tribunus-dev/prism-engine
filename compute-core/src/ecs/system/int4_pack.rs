@@ -9,6 +9,7 @@ use crate::ecs::component::tensor::Shape;
 use crate::ecs::compute_image::compile::int4_pack::{
     quantize_to_ternary_block32, repack_ternary_tensor,
 };
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 use crate::ecs::Component;
 
 use crate::ecs::Entity;
@@ -74,11 +75,20 @@ impl CompilerSystem for Int4PackSystem {
             let packed = pack_f32_to_ternary_blocks(weights);
             let block_count = packed.len() as u32 / 9;
 
-            let _ = world.add_component(entity,
-            TernaryPackResult {
-                packed_blocks: packed,
-                block_count,
-            },);
+            let mut txn = ConstitutionalWorldTxn::new();
+            if let Err(e) = txn.stage_insert(
+                entity,
+                TernaryPackResult {
+                    packed_blocks: packed,
+                    block_count,
+                },
+            ) {
+                tracing::warn!(entity = ?entity, error = %e, "int4_pack: stage_insert TernaryPackResult");
+            }
+            let _ = txn.commit(world).map_err(|e| {
+                tracing::error!(error = %e, "int4_pack: ConstitutionalWorldTxn commit failed");
+                anyhow::anyhow!("int4_pack: ConstitutionalWorldTxn commit failed: {e}")
+            })?;
         }
 
         Ok(())

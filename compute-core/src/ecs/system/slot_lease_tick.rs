@@ -1,4 +1,5 @@
 use crate::ecs::Entity;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 use crate::ecs::{CompilerSystem, Component, EntityKind, SchedulePhase, World};
 use serde::{Deserialize, Serialize};
 
@@ -43,18 +44,32 @@ impl CompilerSystem for SlotLeaseTickSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
+        // Stage every per-entity `SlotLeaseComponent` mutation on a
+        // single `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.get_component_mut` calls outside the WorldTxn seam
+        // are forbidden. Extract-mutate-insert pattern.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &entities {
-            let Some(lease) = world.get_component_mut::<SlotLeaseComponent>(*entity) else {
+            let Some(lease) = world.get_component::<SlotLeaseComponent>(*entity).cloned()
+            else {
                 continue;
             };
 
-            lease.state = match lease.state {
+            let mut updated = lease;
+            updated.state = match updated.state {
                 SlotState::Free => SlotState::WriteActive,
                 SlotState::WriteActive => SlotState::OutputReady,
                 SlotState::OutputReady => SlotState::Consumed,
                 other => other,
             };
+            if let Err(e) = txn.stage_insert(*entity, updated) {
+                tracing::warn!(entity = ?entity, error = %e, "slot_lease_tick: stage_insert SlotLeaseComponent");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "slot_lease_tick: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("slot_lease_tick: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

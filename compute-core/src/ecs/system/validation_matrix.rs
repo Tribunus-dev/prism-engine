@@ -8,7 +8,9 @@
 use crate::ecs::component::model_source::{ValidationReportComp, ValidationResultSummary};
 use crate::ecs::compute_image::compile::validation_matrix::{ValidationMatrix, ValidationResult};
 use crate::ecs::Entity;
-use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};pub struct ValidationMatrixSystem;
+use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
+
+pub struct ValidationMatrixSystem;
 
 impl CompilerSystem for ValidationMatrixSystem {
     fn name(&self) -> &str {
@@ -81,12 +83,21 @@ impl CompilerSystem for ValidationMatrixSystem {
                 })
                 .collect();
 
-            let _ = world.add_component(entity,
-            ValidationReportComp {
-                kernel_name: name,
-                results,
-                overall_pass: matrix.overall_pass,
-            },);
+            let mut txn = crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn::new();
+            if let Err(e) = txn.stage_insert(
+                entity,
+                ValidationReportComp {
+                    kernel_name: name,
+                    results,
+                    overall_pass: matrix.overall_pass,
+                },
+            ) {
+                tracing::warn!(entity = ?entity, error = %e, "validation_matrix: stage_insert ValidationReportComp");
+            }
+            let _ = txn.commit(world).map_err(|e| {
+                tracing::error!(error = %e, "validation_matrix: ConstitutionalWorldTxn commit failed");
+                anyhow::anyhow!("validation_matrix: ConstitutionalWorldTxn commit failed: {e}")
+            })?;
         }
 
         Ok(())

@@ -8,6 +8,7 @@ use crate::ecs::component::tensor::LayerIndex;
 use crate::ecs::compute_image::compile::execution_graph::{
     ExecutionGraphDescriptor, LayerExecutionNode,
 };
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -65,13 +66,27 @@ impl CompilerSystem for ExecutionGraphSystem {
         let serialized = desc.to_bytes();
 
         // Attach to the first model entity, or spawn one.
+        //
+        // Stage every spawn + insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.spawn` / `world.add_component` calls outside the
+        // WorldTxn seam are forbidden.
         let model_entities = world.entities_of_kind(EntityKind::Model);
+        let mut txn = ConstitutionalWorldTxn::new();
         if let Some(entity) = model_entities.first() {
-            let _ = world.add_component(*entity, ExecutionGraphComp(serialized));
+            if let Err(e) = txn.stage_insert(*entity, ExecutionGraphComp(serialized)) {
+                tracing::warn!(entity = ?entity, error = %e, "execution_graph: stage_insert ExecutionGraphComp (existing model)");
+            }
         } else {
-            let spawn_result = world.spawn(EntityKind::Model, Some("execution_graph".into()))?;
-            let _ = world.add_component(spawn_result, ExecutionGraphComp(serialized));
+            let token = txn.stage_spawn(EntityKind::Model, Some("execution_graph".into()));
+            if let Err(e) = txn.stage_insert_on(token, ExecutionGraphComp(serialized)) {
+                tracing::warn!(error = %e, "execution_graph: stage_insert_on ExecutionGraphComp (new model)");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "execution_graph: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("execution_graph: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

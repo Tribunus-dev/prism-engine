@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::ecs::component::backend::{
     BackendTarget, BinaryFormat, CompileConfig, CompileMode, CompiledBinary, KernelSource,
 };
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum CompileError {
@@ -45,6 +46,18 @@ impl CompilerSystem for BackendCompilationSystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernels: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
+        // Stage every per-kernel `CompiledBinary` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        //
+        // The `metal_compiler.compile` / `compile_rocm` calls are
+        // side-effects (process invocation) and are intentionally
+        // NOT routed through the WorldTxn — WorldTxn is the
+        // canonical authority seam for ECS state, not for external
+        // resources. The side effect runs first, and only its
+        // result-component write is staged.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in kernels {
             let Some(source) = world.get_component::<KernelSource>(entity).cloned() else {
                 continue;
@@ -64,8 +77,14 @@ impl CompilerSystem for BackendCompilationSystem {
                 _ => continue,
             };
 
-            world.add_component(entity, compiled)?;
+            if let Err(e) = txn.stage_insert(entity, compiled) {
+                tracing::warn!(entity = ?entity, error = %e, "backend_compile: stage_insert CompiledBinary");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "backend_compile: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("backend_compile: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }
@@ -197,6 +216,11 @@ impl CompilerSystem for ExecutableCachingSystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let kernels: Vec<Entity> = world.entities_of_kind(EntityKind::Kernel);
+        // Stage every per-kernel `CompileConfig` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in kernels {
             let Some(binary) = world.get_component::<CompiledBinary>(entity) else {
                 continue;
@@ -217,8 +241,14 @@ impl CompilerSystem for ExecutableCachingSystem {
                     "cache_miss".to_string()
                 }],
             };
-            world.add_component(entity, config)?;
+            if let Err(e) = txn.stage_insert(entity, config) {
+                tracing::warn!(entity = ?entity, error = %e, "executable_caching: stage_insert CompileConfig");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "executable_caching: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("executable_caching: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

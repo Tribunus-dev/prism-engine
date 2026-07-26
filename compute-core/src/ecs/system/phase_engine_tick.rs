@@ -1,4 +1,5 @@
 use crate::ecs::component::scheduling::PhaseDagState;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -18,22 +19,35 @@ impl CompilerSystem for PhaseEngineTickSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let entities: Vec<Entity> = world.entities_of_kind(EntityKind::Executable);
 
+        // Stage every per-entity `PhaseDagState` mutation on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.get_component_mut` calls outside the WorldTxn seam
+        // are forbidden. Extract-mutate-insert pattern.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &entities {
-            let Some(dag) = world.get_component_mut::<PhaseDagState>(*entity) else {
+            let Some(dag) = world.get_component::<PhaseDagState>(*entity).cloned() else {
                 continue;
             };
 
+            let mut updated = dag;
             // Find the next phase by looking at outgoing edges from the current phase.
-            let next = dag
+            let next = updated
                 .edges
                 .iter()
-                .find(|(from, _)| from == &dag.current_phase)
+                .find(|(from, _)| from == &updated.current_phase)
                 .map(|(_, to)| to.clone());
 
             if let Some(next_phase) = next {
-                dag.current_phase = next_phase;
+                updated.current_phase = next_phase;
+            }
+            if let Err(e) = txn.stage_insert(*entity, updated) {
+                tracing::warn!(entity = ?entity, error = %e, "phase_engine_tick: stage_insert PhaseDagState");
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "phase_engine_tick: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("phase_engine_tick: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

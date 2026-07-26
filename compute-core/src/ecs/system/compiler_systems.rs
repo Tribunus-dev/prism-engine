@@ -17,6 +17,7 @@ use crate::ecs::compiler::pass::TransformPass;
 use crate::ecs::compiler::scheduled::ScheduledModule;
 use crate::ecs::component::compilation::{GraphNode, GraphNodeKind, NodeId};
 use crate::ecs::config::ModelExecutionPlan;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -130,6 +131,11 @@ impl CompilerSystem for GraphOptimizerSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities: Vec<Entity> = world.entities_of_kind(EntityKind::Model);
 
+        // Stage every per-model `GraphNode` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &model_entities {
             let Some(plan) = world.get_component::<ModelExecutionPlan>(*entity) else {
                 continue;
@@ -138,15 +144,21 @@ impl CompilerSystem for GraphOptimizerSystem {
             let mut owned = plan.clone();
             optimize(&mut owned);
             // GraphNode marking the optimisation
-            let _ = world.add_component(
+            if let Err(e) = txn.stage_insert(
                 *entity,
                 GraphNode {
                     id: NodeId::from("graph-optimised"),
                     deps: Vec::new(),
                     kind: GraphNodeKind::Matmul,
                 },
-            );
+            ) {
+                tracing::warn!(entity = ?entity, error = %e, "graph_optimizer: stage_insert GraphNode");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "graph_optimizer: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("graph_optimizer: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
         Ok(())
     }
 }
@@ -257,39 +269,52 @@ impl CompilerSystem for GraphEqualizationSystem {
             "logits_projection",
         ];
 
+        // Stage every per-tensor `GraphNode` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for window in phase_types.windows(2) {
             let producer = window[0];
             let consumer = window[1];
             match is_legal_boundary(producer, consumer) {
                 BoundaryLegality::Illegal { reason } => {
                     for entity in &tensor_entities {
-                        let _ = world.add_component(
+                        if let Err(e) = txn.stage_insert(
                             *entity,
                             GraphNode {
                                 id: NodeId::from(format!("ill-boundary-{producer}-{consumer}")),
                                 deps: vec![],
                                 kind: GraphNodeKind::Unknown(reason.to_string()),
                             },
-                        );
+                        ) {
+                            tracing::warn!(entity = ?entity, error = %e, "graph_equalization: stage_insert ill-boundary GraphNode");
+                        }
                     }
                 }
                 BoundaryLegality::Conditional {
                     requires_inverse: _,
                 } => {
                     for entity in &tensor_entities {
-                        let _ = world.add_component(
+                        if let Err(e) = txn.stage_insert(
                             *entity,
                             GraphNode {
                                 id: NodeId::from(format!("cond-boundary-{producer}-{consumer}")),
                                 deps: vec![],
                                 kind: GraphNodeKind::Unknown("conditional_scale_boundary".into()),
                             },
-                        );
+                        ) {
+                            tracing::warn!(entity = ?entity, error = %e, "graph_equalization: stage_insert cond-boundary GraphNode");
+                        }
                     }
                 }
                 BoundaryLegality::Legal => {}
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "graph_equalization: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("graph_equalization: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
         Ok(())
     }
 }

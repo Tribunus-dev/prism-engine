@@ -1,5 +1,6 @@
 use crate::ecs::component::fusion::{TileSize, WorkgroupCount};
 use crate::ecs::component::tensor::Shape;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -17,13 +18,24 @@ impl CompilerSystem for ScalarDispatchSystem {
 
         let dispatches = world.entities_of_kind(EntityKind::Dispatch);
 
+        // Stage every per-dispatch `WorkgroupCount` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in dispatches {
             if let Some(total) = dispatch_total_elements(world, entity) {
                 if total < SCALAR_THRESHOLD {
-                    let _ = world.add_component(entity, WorkgroupCount(1, 1, 1));
+                    if let Err(e) = txn.stage_insert(entity, WorkgroupCount(1, 1, 1)) {
+                        tracing::warn!(entity = ?entity, error = %e, "scalar_dispatch: stage_insert WorkgroupCount");
+                    }
                 }
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "scalar_dispatch: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("scalar_dispatch: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

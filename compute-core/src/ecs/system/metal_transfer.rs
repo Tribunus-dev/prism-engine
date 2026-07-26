@@ -1,4 +1,5 @@
 use crate::ecs::component::backend::{BackendComponent, MetalDeviceState, TensorComponent};
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -44,16 +45,30 @@ impl CompilerSystem for MetalTransferSystem {
         }
 
         // Scan tensor entities and update residency when needed.
+        //
+        // Stage every per-tensor `TensorComponent` mutation on a
+        // single `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.get_component_mut` calls outside the WorldTxn seam
+        // are forbidden. Extract-mutate-insert pattern.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &tensor_entities {
-            let Some(tensor) = world.get_component_mut::<TensorComponent>(*entity) else {
+            let Some(tensor) = world.get_component::<TensorComponent>(*entity).cloned() else {
                 continue;
             };
+            let mut updated = tensor;
             // If tensor is not resident on any available backend,
             // mark it as pending transfer to the first metal backend.
-            if tensor.residency == "none" || tensor.residency == "cpu" {
-                tensor.residency = "metal".into();
+            if updated.residency == "none" || updated.residency == "cpu" {
+                updated.residency = "metal".into();
+            }
+            if let Err(e) = txn.stage_insert(*entity, updated) {
+                tracing::warn!(entity = ?entity, error = %e, "metal_transfer: stage_insert TensorComponent");
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "metal_transfer: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("metal_transfer: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

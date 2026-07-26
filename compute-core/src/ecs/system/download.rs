@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::ecs::component::model_source::{DownloadedSourceComp, HfDownloadComp};
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
@@ -160,6 +161,17 @@ impl CompilerSystem for DownloadSystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities = world.entities_of_kind(EntityKind::Model);
+        // Stage every per-model `DownloadedSourceComp` insert on a
+        // single `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        //
+        // The `download_hf_model` call is a side-effect (network +
+        // filesystem) and is intentionally NOT routed through the
+        // WorldTxn — WorldTxn is the canonical authority seam for ECS
+        // state, not for external resources. The side effect runs
+        // first, and only its result-component write is staged.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &model_entities {
             let Some(info) = world.get_component::<HfDownloadComp>(*entity) else {
                 continue;
@@ -173,8 +185,17 @@ impl CompilerSystem for DownloadSystem {
             )
             .map_err(|e| anyhow::anyhow!("HF download failed: {e}"))?;
 
-            let _ = world.add_component(*entity, DownloadedSourceComp(info.dest_dir.clone()));
+            if let Err(e) = txn.stage_insert(
+                *entity,
+                DownloadedSourceComp(info.dest_dir.clone()),
+            ) {
+                tracing::warn!(entity = ?entity, error = %e, "download: stage_insert DownloadedSourceComp");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "download: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("download: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
         Ok(())
     }
 }
@@ -191,6 +212,11 @@ impl CompilerSystem for HfSourceParsingSystem {
     }
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let model_entities = world.entities_of_kind(EntityKind::Model);
+        // Stage every per-model `HfDownloadComp` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &model_entities {
             // Skip if already has HfDownloadComp.
             if world.get_component::<HfDownloadComp>(*entity).is_some() {
@@ -206,16 +232,22 @@ impl CompilerSystem for HfSourceParsingSystem {
                         .unwrap_or_else(|_| "/tmp/hf_models".to_string()),
                 )
                 .join(hub_id.replace('/', "_"));
-                let _ = world.add_component(
+                if let Err(e) = txn.stage_insert(
                     *entity,
                     HfDownloadComp {
                         hub_id: hub_id.to_string(),
                         revision: revision.to_string(),
                         dest_dir,
                     },
-                );
+                ) {
+                    tracing::warn!(entity = ?entity, error = %e, "hf_source_parsing: stage_insert HfDownloadComp");
+                }
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "hf_source_parsing: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("hf_source_parsing: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
         Ok(())
     }
 }

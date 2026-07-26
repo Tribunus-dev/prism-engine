@@ -4,6 +4,7 @@ use crate::ecs::plan::backend_capability::{
 };
 use crate::ecs::plan::fusion::DataflowOpKind;
 use crate::ecs::plan::fusion_scheduler_types::FusionPolicy;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::{CompEntity, CompilerSystem, SchedulePhase, World};
 
@@ -69,6 +70,19 @@ impl CompilerSystem for FusionHeuristicSystem {
             .filter(|e| world.get_component::<FusionGroup>(*e).is_some())
             .collect();
 
+        // Stage every per-entity `FusionGroup` mutation on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.get_component_mut` calls outside the WorldTxn seam
+        // are forbidden.
+        //
+        // Strategy: snapshot the pre-mutation value via
+        // `get_component` (immutable read), compute the post-mutation
+        // value locally, and stage the new value as an insert. This
+        // is the extract-mutate-insert pattern documented in the
+        // Phase 2.5 changelog; it preserves the constitutional
+        // discipline at the cost of one clone per FusionGroup
+        // mutation.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in group_entities {
             // Clone before mutating so we can read and write the world.
             let group = match world.get_component::<FusionGroup>(entity) {
@@ -80,10 +94,12 @@ impl CompilerSystem for FusionHeuristicSystem {
             let root_kind = match parse_op_kind(&group.root_op_kind) {
                 Some(k) => k,
                 None => {
-                    if let Some(comp) = world.get_component_mut::<FusionGroup>(entity) {
-                        comp.accepted = false;
-                        comp.reject_reason =
-                            Some(format!("unknown root op kind: {}", group.root_op_kind));
+                    let mut updated = group;
+                    updated.accepted = false;
+                    updated.reject_reason =
+                        Some(format!("unknown root op kind: {}", updated.root_op_kind));
+                    if let Err(e) = txn.stage_insert(entity.into(), updated) {
+                        tracing::warn!(entity = ?entity, error = %e, "fusion_heuristic: stage_insert unknown root op kind");
                     }
                     continue;
                 }
@@ -92,32 +108,35 @@ impl CompilerSystem for FusionHeuristicSystem {
             // ── 2. Parse each fused op kind string ───────────────────────
             let mut all_kinds: Vec<DataflowOpKind> = vec![root_kind];
             let mut parse_failed = false;
-            for op_str in &group.fused_op_kinds {
+            let mut updated = group;
+            for op_str in &updated.fused_op_kinds.clone() {
                 match parse_op_kind(op_str) {
                     Some(k) => all_kinds.push(k),
                     None => {
-                        if let Some(comp) = world.get_component_mut::<FusionGroup>(entity) {
-                            comp.accepted = false;
-                            comp.reject_reason = Some(format!("unknown fused op kind: {op_str}"));
-                        }
+                        updated.accepted = false;
+                        updated.reject_reason = Some(format!("unknown fused op kind: {op_str}"));
                         parse_failed = true;
                         break;
                     }
                 }
             }
             if parse_failed {
+                if let Err(e) = txn.stage_insert(entity.into(), updated) {
+                    tracing::warn!(entity = ?entity, error = %e, "fusion_heuristic: stage_insert unknown fused op kind");
+                }
                 continue;
             }
 
             // ── 3. Check against policy limits ───────────────────────────
             if all_kinds.len() > self.policy.max_group_size {
-                if let Some(comp) = world.get_component_mut::<FusionGroup>(entity) {
-                    comp.accepted = false;
-                    comp.reject_reason = Some(format!(
-                        "op count {} exceeds policy max_group_size {}",
-                        all_kinds.len(),
-                        self.policy.max_group_size,
-                    ));
+                updated.accepted = false;
+                updated.reject_reason = Some(format!(
+                    "op count {} exceeds policy max_group_size {}",
+                    all_kinds.len(),
+                    self.policy.max_group_size,
+                ));
+                if let Err(e) = txn.stage_insert(entity.into(), updated) {
+                    tracing::warn!(entity = ?entity, error = %e, "fusion_heuristic: stage_insert policy limit");
                 }
                 continue;
             }
@@ -150,17 +169,22 @@ impl CompilerSystem for FusionHeuristicSystem {
             }
 
             // ── 5. Set accepted / rejected ──────────────────────────────
-            if let Some(comp) = world.get_component_mut::<FusionGroup>(entity) {
-                if any_supported {
-                    comp.accepted = true;
-                    comp.reject_reason = None;
-                } else {
-                    comp.accepted = false;
-                    comp.reject_reason = first_rejection
-                        .or_else(|| Some("no registered backend supports this op sequence".into()));
-                }
+            if any_supported {
+                updated.accepted = true;
+                updated.reject_reason = None;
+            } else {
+                updated.accepted = false;
+                updated.reject_reason = first_rejection
+                    .or_else(|| Some("no registered backend supports this op sequence".into()));
+            }
+            if let Err(e) = txn.stage_insert(entity.into(), updated) {
+                tracing::warn!(entity = ?entity, error = %e, "fusion_heuristic: stage_insert final accept/reject");
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "fusion_heuristic: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("fusion_heuristic: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

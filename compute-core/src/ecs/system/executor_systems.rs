@@ -11,6 +11,7 @@
 use crate::ecs::component::executor::{
     AneStore, ExecutorStage, ExecutorState, ExecutorStep, RouteStore, WeightStore,
 };
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
@@ -37,6 +38,18 @@ impl CompilerSystem for ExecutorSystem {
             .filter(|e| world.get_component::<ExecutorState>(*e).is_some())
             .collect();
 
+        // Stage every per-session state transition + step insert on a
+        // single `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.get_component_mut` / `world.add_component` calls
+        // outside the WorldTxn seam are forbidden.
+        //
+        // Strategy: snapshot the pre-mutation value via `get_component`
+        // (immutable read), produce a post-mutation value locally, and
+        // stage the new value as an insert. This is the extract-mutate-
+        // insert pattern documented in the Phase 2.5 changelog; it
+        // preserves the constitutional discipline at the cost of one
+        // clone per ExecutorState mutation.
+        let mut txn = ConstitutionalWorldTxn::new();
         for entity in &session_entities {
             // Read the current stage with an immutable borrow to avoid NLL conflict
             // between the mutable borrow and world.get_resource() below.
@@ -49,8 +62,13 @@ impl CompilerSystem for ExecutorSystem {
             match stage {
                 ExecutorStage::Idle => {
                     // Transition: Idle → Loading.
-                    if let Some(state) = world.get_component_mut::<ExecutorState>(*entity) {
+                    if let Some(mut state) =
+                        world.get_component::<ExecutorState>(*entity).cloned()
+                    {
                         state.stage = ExecutorStage::Loading;
+                        if let Err(e) = txn.stage_insert(*entity, state) {
+                            tracing::warn!(entity = ?entity, error = %e, "executor: stage_insert Idle->Loading");
+                        }
                     }
                 }
 
@@ -68,52 +86,74 @@ impl CompilerSystem for ExecutorSystem {
                         .map_or(false, |a| a.initialized);
 
                     if weights_ready && routes_ready && ane_ready {
-                        if let Some(state) = world.get_component_mut::<ExecutorState>(*entity) {
+                        if let Some(mut state) =
+                            world.get_component::<ExecutorState>(*entity).cloned()
+                        {
                             state.stage = ExecutorStage::Prefill;
+                            if let Err(e) = txn.stage_insert(*entity, state) {
+                                tracing::warn!(entity = ?entity, error = %e, "executor: stage_insert Loading->Prefill");
+                            }
                         }
                     }
                 }
 
                 ExecutorStage::Prefill => {
-                    // Take scoped mutable borrow for the transition.
-                    if let Some(state) = world.get_component_mut::<ExecutorState>(*entity) {
+                    // Transition: Prefill → Decode, plus place a default
+                    // step for the first decode iteration.
+                    if let Some(mut state) =
+                        world.get_component::<ExecutorState>(*entity).cloned()
+                    {
                         state.stage = ExecutorStage::Decode;
+                        if let Err(e) = txn.stage_insert(*entity, state) {
+                            tracing::warn!(entity = ?entity, error = %e, "executor: stage_insert Prefill->Decode");
+                        }
                     }
-
-                    // Place a default step for the first decode iteration.
-                    let _ = world.add_component(*entity,
-                    ExecutorStep {
-                        token_id: 0,
-                        logits: None,
-                        kv_block_indices: Vec::new(),
-                    },);
+                    if let Err(e) = txn.stage_insert(
+                        *entity,
+                        ExecutorStep {
+                            token_id: 0,
+                            logits: None,
+                            kv_block_indices: Vec::new(),
+                        },
+                    ) {
+                        tracing::warn!(entity = ?entity, error = %e, "executor: stage_insert default ExecutorStep");
+                    }
                 }
 
                 ExecutorStage::Decode => {
-                    // Extract values from the state within a scoped mutable
-                    // borrow, then release the borrow before calling
-                    // world.add_component.
-                    let next_step = {
-                        let state = match world.get_component_mut::<ExecutorState>(*entity) {
-                            Some(s) => s,
-                            None => continue,
-                        };
-                        state.step_counter += 1;
-
-                        if state.step_counter >= state.max_steps {
-                            state.stage = ExecutorStage::Draining;
-                            None
+                    // Extract the post-mutation value within a scoped
+                    // immutable read, then release the borrow before
+                    // staging the insert.
+                    let next_insert: Option<ExecutorState> =
+                        if let Some(state) = world.get_component::<ExecutorState>(*entity) {
+                            let mut projected = state.clone();
+                            projected.step_counter += 1;
+                            if projected.step_counter >= projected.max_steps {
+                                projected.stage = ExecutorStage::Draining;
+                            }
+                            Some(projected)
                         } else {
-                            Some(ExecutorStep {
+                            None
+                        };
+                    if let Some(state) = next_insert {
+                        if let Err(e) = txn.stage_insert(*entity, state) {
+                            tracing::warn!(entity = ?entity, error = %e, "executor: stage_insert Decode tick");
+                        }
+                    }
+                    // Compute the next step projection and stage it as
+                    // an `ExecutorStep` insert (matches the original
+                    // semantics when step_counter < max_steps).
+                    if let Some(state) = world.get_component::<ExecutorState>(*entity) {
+                        if state.step_counter < state.max_steps {
+                            let step = ExecutorStep {
                                 token_id: (state.step_counter % 65536) as u32,
                                 logits: None,
                                 kv_block_indices: vec![state.step_counter as u32],
-                            })
+                            };
+                            if let Err(e) = txn.stage_insert(*entity, step) {
+                                tracing::warn!(entity = ?entity, error = %e, "executor: stage_insert ExecutorStep");
+                            }
                         }
-                    };
-
-                    if let Some(step) = next_step {
-                        let _ = world.add_component(*entity, step);
                     }
                 }
 
@@ -126,6 +166,10 @@ impl CompilerSystem for ExecutorSystem {
                 }
             }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "executor: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("executor: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }

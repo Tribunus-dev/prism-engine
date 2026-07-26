@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use crate::ecs::component::model_source::DraftWeightsComp;
 use crate::ecs::compute_image::compile::draft_loader::load_draft_weights;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::{CompilerSystem, EntityKind, SchedulePhase, World};
 
@@ -26,14 +27,27 @@ impl CompilerSystem for DraftModelSystem {
         let fused = load_draft_weights(&self.ckpt_dir)
             .map_err(|e| anyhow::anyhow!("draft weight load failed: {e}"))?;
 
+        // Stage every spawn + insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.spawn` / `world.add_component` calls outside the
+        // WorldTxn seam are forbidden.
         let model_entities = world.entities_of_kind(EntityKind::Model);
+        let mut txn = ConstitutionalWorldTxn::new();
         if let Some(entity) = model_entities.first() {
-            let _ = world.add_component(*entity, DraftWeightsComp(fused));
+            if let Err(e) = txn.stage_insert(*entity, DraftWeightsComp(fused)) {
+                tracing::warn!(entity = ?entity, error = %e, "draft_model: stage_insert DraftWeightsComp (existing model)");
+            }
         } else {
             // No model entity yet — spawn one.
-            let entity = world.spawn(EntityKind::Model, Some("draft_model".into()))?;
-            let _ = world.add_component(entity, DraftWeightsComp(fused));
+            let token = txn.stage_spawn(EntityKind::Model, Some("draft_model".into()));
+            if let Err(e) = txn.stage_insert_on(token, DraftWeightsComp(fused)) {
+                tracing::warn!(error = %e, "draft_model: stage_insert_on DraftWeightsComp (new model)");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "draft_model: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("draft_model: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
         Ok(())
     }
 }

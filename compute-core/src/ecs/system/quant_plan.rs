@@ -5,6 +5,7 @@ use crate::ecs::plan::precision_plan::{
     PrecisionSelectionBasis, PrecisionSelector,
 };
 use crate::ecs::plan::CodecFamily;
+use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
 use crate::ecs::{CompilerSystem, Component, EntityKind, SchedulePhase, World};
@@ -39,6 +40,11 @@ impl CompilerSystem for CodecSelectionSystem {
     fn run(&self, world: &mut World) -> anyhow::Result<()> {
         let tensors: Vec<Entity> = world.entities_of_kind(EntityKind::Tensor);
 
+        // Stage every per-tensor `CodecFamilyComp` insert on a single
+        // `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for tensor in tensors {
             // Only process tensors with both Shape and CanonicalRoleComp.
             let _shape = match world.get_component::<Shape>(tensor) {
@@ -51,8 +57,14 @@ impl CompilerSystem for CodecSelectionSystem {
             };
 
             let (codec, group_size) = select_codec_for_role(role);
-            let _ = world.add_component(tensor, CodecFamilyComp(codec, group_size));
+            if let Err(e) = txn.stage_insert(tensor, CodecFamilyComp(codec, group_size)) {
+                tracing::warn!(entity = ?tensor, error = %e, "codec_selection: stage_insert CodecFamilyComp");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "codec_selection: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("codec_selection: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }
@@ -164,9 +176,20 @@ impl CompilerSystem for PrecisionPlanSystem {
             compatibility_version: 1,
         };
 
+        // Stage every per-model `PrecisionPlanComponent` insert on a
+        // single `ConstitutionalWorldTxn` and commit atomically. Direct
+        // `world.add_component` calls outside the WorldTxn seam are
+        // forbidden.
+        let mut txn = ConstitutionalWorldTxn::new();
         for model in &models {
-            let _ = world.add_component(*model, PrecisionPlanComponent(plan.clone()));
+            if let Err(e) = txn.stage_insert(*model, PrecisionPlanComponent(plan.clone())) {
+                tracing::warn!(entity = ?model, error = %e, "precision_plan: stage_insert PrecisionPlanComponent");
+            }
         }
+        let _ = txn.commit(world).map_err(|e| {
+            tracing::error!(error = %e, "precision_plan: ConstitutionalWorldTxn commit failed");
+            anyhow::anyhow!("precision_plan: ConstitutionalWorldTxn commit failed: {e}")
+        })?;
 
         Ok(())
     }
