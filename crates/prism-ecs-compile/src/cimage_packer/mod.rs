@@ -38,7 +38,9 @@ use std::io;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+pub mod aligned_mmap;
 pub mod helpers;
+pub mod layout;
 pub mod multimodal;
 pub mod pack_from_dir;
 pub mod pack_unified;
@@ -46,6 +48,11 @@ pub mod segment_writer;
 
 pub use pack_from_dir::pack_cimage_from_dir;
 pub use pack_unified::pack_unified_cimage;
+pub use aligned_mmap::{AlignedMmapBuilder, AlignedMmapError};
+pub use layout::{
+    predict_tar_size, CImageLayoutPlan, CImageTopologyTable, QuantizationLayoutHint,
+    SegmentDescriptor, StrideDescriptor,
+};
 
 /// Page size used by the CImage packer (16 KB Apple Silicon page).
 pub const APPLE_PAGE_SIZE: usize = 16_384;

@@ -159,6 +159,7 @@ pub use legalize::{
 
 pub mod assembly;
 pub mod cimage;
+pub mod cimage_manifest;
 pub mod cimage_packer;
 pub mod cimage_pipeline;
 pub mod cimage_validation;
