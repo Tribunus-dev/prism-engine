@@ -1,6 +1,5 @@
 pub mod attention_sink;
 pub mod backend;
-pub mod buffer_lifetime_plan;
 pub mod engine_receipts;
 pub mod fault;
 pub mod inference;
