@@ -7,9 +7,12 @@ pub mod fault;
 pub mod inference;
 mod kernel;
 pub mod modality;
+pub mod pipeline_parity;
 mod ports;
 pub mod schedule;
+pub mod speculative_decoding;
 pub mod test_adapters;
+pub mod worker_protocol;
 pub mod world_view;
 
 pub use backend::{
