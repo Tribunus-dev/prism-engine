@@ -875,7 +875,7 @@ state is the truth.
 
 ---
 
-## Page 11 — PrismAgent (`/prismagent/`)
+## Page 11 — PrismAgent (`/prismagent/`) — not in v1 manuscript
 
 **Brief:** §6.11.
 

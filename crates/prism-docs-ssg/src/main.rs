@@ -49,6 +49,7 @@ use prism_docs_ssg::new_render::{render_all as render_all_new, write_pages, Rend
 use prism_docs_ssg::selection_controller::SELECTION_CONTROLLER_JS;
 use prism_docs_ssg::theme_provider::THEME_PROVIDER_JS;
 use prism_docs_ssg::transitions_orchestrator::TRANSITIONS_ORCHESTRATOR_JS;
+use prism_docs_ssg::critical_css::CriticalCss;
 
 #[derive(Parser, Debug)]
 #[command(name = "prism-docs-ssg", about = "Prism docs site generator")]
@@ -395,7 +396,19 @@ fn run_new_render(cli: &Cli) -> Result<(), SsgError> {
     let build_kind = std::env::var("PRISM_BUILD_KIND")
         .unwrap_or_else(|_| "release".to_string());
 
-    let ctx = RenderContext::new(&data, &site, &pages, build_id.clone());
+    // Load the per-route critical CSS. Held for the
+    // duration of the build; the renderer inlines a
+    // per-route slice in each page's <head>. Per §12 A18.
+    let critical_css = CriticalCss::load(&cli.styles).map_err(|e| SsgError::Io {
+        path: cli.styles.clone(),
+        source: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+    })?;
+    eprintln!(
+        "prism-docs-ssg [new]: loaded critical CSS ({} files)",
+        critical_css.files.len()
+    );
+
+    let ctx = RenderContext::new(&data, &site, &pages, build_id.clone(), &critical_css);
 
     // Create the output directory.
     std::fs::create_dir_all(&cli.out).map_err(|e| SsgError::Io {

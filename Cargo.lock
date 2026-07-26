@@ -2741,6 +2741,7 @@ name = "prism-ecs-artifact"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "prism-ecs-core",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2769,6 +2770,7 @@ dependencies = [
 name = "prism-ecs-compile"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "chrono",
  "half",
  "hex",
@@ -2907,6 +2909,7 @@ dependencies = [
  "prism-ecs-core",
  "prism-ecs-ir",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "thiserror",
 ]

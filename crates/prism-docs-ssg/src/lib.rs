@@ -3,6 +3,7 @@
 //! for tests and integration.
 
 pub mod build_identity;
+pub mod critical_css;
 pub mod css;
 pub mod data_layer;
 pub mod fixtures;

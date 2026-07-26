@@ -150,6 +150,18 @@ impl AuditContext {
             .collect();
         html_files.retain(|(r, _)| canonical.contains(r));
 
+        // The 404 page is emitted as `404.html` (not as
+        // `index.html`), so the index.html walker does not
+        // pick it up. Load it explicitly so checks that
+        // count pages (A1, A7, A11, A16) see the full v1
+        // surface.
+        let four_oh_four_html = root.join("404.html");
+        if four_oh_four_html.exists() {
+            if let Ok(contents) = std::fs::read_to_string(&four_oh_four_html) {
+                html_files.push(("/404/".to_string(), contents));
+            }
+        }
+
         let canonical_routes: Vec<String> =
             html_files.iter().map(|(r, _)| r.clone()).collect();
 

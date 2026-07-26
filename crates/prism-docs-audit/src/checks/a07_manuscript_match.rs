@@ -35,7 +35,15 @@ pub fn run(ctx: &AuditContext) -> CheckResult {
         .lines()
         .filter(|l| l.starts_with("## "))
         .filter_map(|l| l.trim_start_matches("## ").trim().to_string().into())
-        .filter(|t: &String| t.to_lowercase() != "reviewer checklist" && !t.is_empty())
+        .filter(|t: &String| {
+            let lower = t.to_lowercase();
+            // Drop the preamble ("## Preamble") and the
+            // reviewer checklist (its heading includes
+            // the words "Reviewer checklist").
+            !lower.is_empty()
+                && !lower.starts_with("preamble")
+                && !lower.contains("reviewer checklist")
+        })
         .map(|t: String| {
             let in_v1 = !t.to_lowercase().contains("not in v1");
             (t, in_v1)

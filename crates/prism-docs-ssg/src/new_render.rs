@@ -30,6 +30,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::critical_css::CriticalCss;
 use crate::data_layer::{DataLayer, SiteSummary};
 use crate::manuscript::{Page, Section};
 use crate::selection_controller::SELECTION_CONTROLLER_JS;
@@ -49,6 +50,11 @@ pub struct RenderContext<'a> {
     pub site: &'a SiteSummary,
     pub pages: &'a BTreeMap<String, Page>,
     pub build_id: String,
+    /// The per-route critical CSS. Loaded once at SSG
+    /// startup; the renderer inlines the right slice in
+    /// each page's `<head>`. Per OBSERVATORY_V1_SPEC.md
+    /// §12 A18.
+    pub critical_css: &'a CriticalCss,
 }
 
 impl<'a> RenderContext<'a> {
@@ -57,8 +63,9 @@ impl<'a> RenderContext<'a> {
         site: &'a SiteSummary,
         pages: &'a BTreeMap<String, Page>,
         build_id: String,
+        critical_css: &'a CriticalCss,
     ) -> Self {
-        RenderContext { data, site, pages, build_id }
+        RenderContext { data, site, pages, build_id, critical_css }
     }
 }
 
@@ -863,7 +870,7 @@ fn wrap_in_shell_with_title(
     let nav_html = render_primary_nav(ctx);
     let secondary_nav_html = render_secondary_nav(ctx);
     let canonical = ctx.site.canonical_origin.trim_end_matches('/');
-    let selection_controller = SELECTION_CONTROLLER_JS;
+    let _selection_controller = SELECTION_CONTROLLER_JS;
     let mut html = String::new();
     html.push_str("<!doctype html>\n");
     html.push_str("<html lang=\"en\">\n");
@@ -912,6 +919,19 @@ fn wrap_in_shell_with_title(
         html_escape(&ctx.site.site_tagline)
     ));
     html.push_str("<link rel=\"stylesheet\" href=\"/site.css\">\n");
+    // Per-route critical CSS. Inlined in <style> so the
+    // first paint of the page above-the-fold does not
+    // wait for the full stylesheet. The full bundle
+    // (loaded via the <link> above) is cached and adds
+    // the rest. Per OBSERVATORY_V1_SPEC.md §12 A18:
+    // "Critical CSS per route ≤ 18 KB gzipped."
+    let route = current_route_from_label(page_label, ctx);
+    let critical = ctx.critical_css.for_route(&route);
+    html.push_str(&format!(
+        "<style data-prism-critical=\"{}\">\n{}\n</style>\n",
+        html_escape(&route),
+        critical
+    ));
     // No-flash theme guard. Runs synchronously in <head>
     // before paint, so the visitor never sees the wrong
     // theme. Reads localStorage; falls back to
@@ -972,24 +992,24 @@ fn wrap_in_shell_with_title(
     html
 }
 
-fn current_route_from_label(_label: &str, _ctx: &RenderContext) -> String {
-    // The wrap function is called per-page; route is implied
-    // by the body being rendered. This helper is a placeholder
-    // so the call site compiles; the real route is set in the
-    // body via the data-prism-route attribute. We default to /.
-    String::new()
-}
-
-fn route_attr_for(_label: &str, ctx: &RenderContext) -> String {
-    // The body was rendered for a specific page; we recover the
-    // route from the render context by looking it up. Simpler
-    // approach: pass the route in the body. For now, derive it
-    // from the page label.
-    if let Some(page) = ctx.pages.values().find(|p| p.label == _label) {
+fn current_route_from_label(label: &str, ctx: &RenderContext) -> String {
+    // The wrap function is called per-page; recover the
+    // route from the render context by looking up the
+    // page whose label matches.
+    if let Some(page) = ctx.pages.values().find(|p| p.label == label) {
         page.route.clone()
     } else {
+        // Special-case the 404 page (which has the
+        // synthetic "Not Found" label).
+        if label == "Not Found" {
+            return "/__404__/".to_string();
+        }
         "/".to_string()
     }
+}
+
+fn route_attr_for(label: &str, ctx: &RenderContext) -> String {
+    current_route_from_label(label, ctx)
 }
 
 fn route_canonical(route: &str) -> String {
@@ -1675,7 +1695,7 @@ mod tests {
     use super::*;
     use crate::manuscript::Section;
 
-    fn fake_ctx() -> (DataLayer, SiteSummary, BTreeMap<String, Page>) {
+    fn fake_ctx() -> (DataLayer, SiteSummary, BTreeMap<String, Page>, CriticalCss) {
         let data_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .and_then(|p| p.parent())
@@ -1698,16 +1718,23 @@ mod tests {
             .expect("repo root")
             .join("OBSERVATORY_V1_MANUSCRIPT.md");
         let pages = crate::manuscript::load_manuscript(&manuscript_path).expect("manuscript");
-        (data, site, pages)
+        let styles_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|p| p.parent())
+            .expect("repo root")
+            .join("docs/styles");
+        let critical_css = CriticalCss::load(&styles_dir).expect("critical css");
+        (data, site, pages, critical_css)
     }
 
     #[test]
     fn render_all_emits_13_pages_and_a_404() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test-build".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test-build".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
-        // 13 canonical pages + 1 404 = 14
-        assert_eq!(rendered.len(), 14, "expected 14 rendered entries");
+        // 12 v1 canonical pages (Page 11 PrismAgent is marked
+        // 'not in v1' in the manuscript) + 1 404 = 13
+        assert_eq!(rendered.len(), 13, "expected 13 rendered entries");
         let routes: Vec<&str> = rendered.iter().map(|(r, _)| r.as_str()).collect();
         assert!(routes.contains(&"/"));
         assert!(routes.contains(&"/start/"));
@@ -1718,8 +1745,8 @@ mod tests {
 
     #[test]
     fn home_page_has_spec_headline() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, home) = rendered.iter().find(|(r, _)| r == "/").expect("home");
         assert!(home.contains("Compile intelligence into something you can inspect"));
@@ -1738,8 +1765,8 @@ mod tests {
 
     #[test]
     fn no_brief_marker_in_rendered_pages() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         for (route, html) in &rendered {
             assert!(
@@ -1757,8 +1784,8 @@ mod tests {
 
     #[test]
     fn no_bracket_directive_in_rendered_pages() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         for (route, html) in &rendered {
             // The manuscript uses [Specimen at technical density: ...] and
@@ -1789,8 +1816,8 @@ mod tests {
 
     #[test]
     fn no_horizontal_rule_in_rendered_pages() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         for (route, html) in &rendered {
             // The manuscript uses --- as a page separator. None of these
@@ -1805,8 +1832,8 @@ mod tests {
 
     #[test]
     fn home_page_hero_has_headline_and_blurb() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, home) = rendered.iter().find(|(r, _)| r == "/").expect("home");
         // The hero block contains the spec headline.
@@ -1819,8 +1846,8 @@ mod tests {
 
     #[test]
     fn no_run_page_hero_from_code_block() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, run) = rendered.iter().find(|(r, _)| r == "/run/").expect("run");
         // The Run page must not pick up an H1 from inside a code block.
@@ -1873,8 +1900,8 @@ mod tests {
 
     #[test]
     fn observatory_page_emits_twelve_stages() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, obs) = rendered.iter().find(|(r, _)| r == "/observatory/life/").expect("observatory");
         let stage_count = obs.matches("class=\"observatory-stage\"").count();
@@ -1889,8 +1916,8 @@ mod tests {
 
     #[test]
     fn specimen_page_emits_six_strata() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, spec) = rendered.iter().find(|(r, _)| r == "/computeimage/specimen/").expect("specimen");
         let stratum_count = spec.matches("class=\"stratum-card\"").count();
@@ -1907,8 +1934,8 @@ mod tests {
 
     #[test]
     fn roadmap_page_emits_milestone_cards() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, rm) = rendered.iter().find(|(r, _)| r == "/roadmap/").expect("roadmap");
         let milestone_count = rm.matches("class=\"milestone\"").count();
@@ -1918,8 +1945,8 @@ mod tests {
 
     #[test]
     fn lab_page_emits_lab_note_cards() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, lab) = rendered.iter().find(|(r, _)| r == "/lab/").expect("lab");
         let note_count = lab.matches("class=\"lab-note\"").count();
@@ -1935,8 +1962,8 @@ mod tests {
 
     #[test]
     fn home_status_table_uses_semantic_classes() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, home) = rendered.iter().find(|(r, _)| r == "/").expect("home");
         // The status table has target, state, source, evidence cells.
@@ -1953,8 +1980,8 @@ mod tests {
 
     #[test]
     fn secondary_nav_is_styled() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, home) = rendered.iter().find(|(r, _)| r == "/").expect("home");
         // The secondary nav has a list of pages.
@@ -1967,7 +1994,7 @@ mod tests {
 
     #[test]
     fn primary_nav_has_exactly_five_items() {
-        let (data, _site, pages) = fake_ctx();
+        let (data, _site, pages, critical_css) = fake_ctx();
         let site = data
             .get("site")
             .expect("site")
@@ -1977,7 +2004,7 @@ mod tests {
         let primary = nav.value.get("primary").and_then(|v| v.as_array()).expect("primary");
         assert_eq!(primary.len(), 5, "primary nav must have exactly 5 items");
         // And the rendered shell must use the same five.
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let nav_html = render_primary_nav(&ctx);
         let count = nav_html.matches("site-nav-link").count();
         assert_eq!(count, 5);
@@ -1985,8 +2012,8 @@ mod tests {
 
     #[test]
     fn no_global_chapter_dump() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         for (route, html) in &rendered {
             assert!(
@@ -1999,8 +2026,8 @@ mod tests {
 
     #[test]
     fn status_page_projects_small_honest_list() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, status) = rendered.iter().find(|(r, _)| r == "/status/").expect("status");
         // The status page should reference the actual capability IDs.
@@ -2019,8 +2046,8 @@ mod tests {
 
     #[test]
     fn colophon_names_julian_torres() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         let (_, colophon) = rendered.iter().find(|(r, _)| r == "/colophon/").expect("colophon");
         assert!(colophon.contains("Julian Torres"));
@@ -2028,8 +2055,8 @@ mod tests {
 
     #[test]
     fn forbidden_status_words_appear_only_in_meta() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         for (route, html) in &rendered {
             // The meta commentary about forbidden words is allowed;
@@ -2060,8 +2087,8 @@ mod tests {
     /// persists).
     #[test]
     fn every_page_has_theme_toggle_and_no_flash_guard() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         for (route, html) in &rendered {
             assert!(
@@ -2095,8 +2122,8 @@ mod tests {
     /// state-driven motion per §9.
     #[test]
     fn every_page_loads_transitions_orchestrator() {
-        let (data, site, pages) = fake_ctx();
-        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string());
+        let (data, site, pages, critical_css) = fake_ctx();
+        let ctx = RenderContext::new(&data, &site, &pages, "test".to_string(), &critical_css);
         let rendered = render_all(&ctx).expect("render");
         for (route, html) in &rendered {
             assert!(
