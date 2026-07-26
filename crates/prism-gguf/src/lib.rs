@@ -13,6 +13,8 @@ use thiserror::Error;
 /// Writer for GGUF v3 format (test fixtures and synthetic weights).
 #[doc(hidden)]
 pub mod writer;
+/// Manifest extraction — typed model architecture from GGUF metadata.
+pub mod manifest;
 
 /// Minimum GGUF version supported for import.
 pub const MIN_GGUF_VERSION: u32 = 3;
