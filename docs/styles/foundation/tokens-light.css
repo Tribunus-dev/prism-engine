@@ -1,0 +1,103 @@
+/* Prism Engine Observatory v1 — light theme override.
+ *
+ * The dark theme is the default (in tokens.css). This file
+ * redeclares every color token for the light theme under a
+ * `[data-theme="light"]` selector. The cascade resolves
+ * lexical order: tokens-light.css sorts after tokens.css, so
+ * the override wins whenever the attribute is set.
+ *
+ * Light theme follows the same rules as dark: status is
+ * communicated in text + shape + color; ambient is sparse;
+ * rules are visible at all times. WCAG AA contrast is the
+ * floor for every text/background pair. The prism dispersion
+ * (cyan + magenta) is deepened, not brightened — light
+ * backgrounds can't carry pure white-readable cyan without
+ * vibration.
+ *
+ * The page sets `data-theme` on `<html>` before paint via the
+ * ThemeProvider (selection-controller.js). The choice persists
+ * in localStorage and respects prefers-color-scheme on first
+ * visit.
+ */
+
+[data-theme="light"] {
+  /* Surfaces. The warm-paper light variant. */
+  --color-bg:           #faf9f6;  /* paper */
+  --color-surface-1:    #ffffff;  /* the chapter; the instrument panel */
+  --color-surface-2:    #f1f0ec;  /* the elevated card */
+  --color-surface-3:    #e7e6e0;  /* the active card; the selected stage */
+
+  /* Text. High contrast against the warm paper. */
+  --color-fg:           #18181f;
+  --color-fg-muted:     #4d4d63;
+  --color-fg-subtle:    #7878a0;
+
+  /* Rule. Visible at all times, hairline weight. */
+  --color-rule:         #d8d7d0;
+  --color-rule-strong:  #b8b7b0;
+
+  /* Accent. The prism dispersion, deepened for light-paper
+   * contrast. The cool and warm ends of the prism. */
+  --color-accent:       #0066aa;  /* cyan, deepened: links, in-motion, implemented */
+  --color-accent-warm:  #8a2d99;  /* magenta, deepened: qualifying, in-flight */
+
+  /* Status colors. Each carries enough contrast against the
+   * warm paper to read at AA. The state-badge component
+   * re-uses the text + shape signal that survives the color
+   * shift, so a state is never color-only. */
+  --color-state-planned:      #7878a0;  /* cool gray, low contrast */
+  --color-state-implemented:  #0066aa;  /* cool cyan, present */
+  --color-state-qualifying:   #8a2d99;  /* warm magenta, in flight */
+  --color-state-validated:    #2d7a3a;  /* forest green, materially present */
+  --color-state-released:     #0066aa;  /* cool cyan, carried; tagged */
+  --color-state-unreleased:   #7878a0;  /* cool gray, not yet public */
+
+  /* Status surface tints — the hue at low alpha over the
+   * paper. Computed for the light surface. */
+  --color-state-planned-bg:      rgba(120, 120, 160, 0.10);
+  --color-state-implemented-bg:  rgba(0, 102, 170, 0.10);
+  --color-state-qualifying-bg:   rgba(138, 45, 153, 0.10);
+  --color-state-validated-bg:    rgba(45, 122, 58, 0.12);
+  --color-state-released-bg:     rgba(0, 102, 170, 0.10);
+  --color-state-unreleased-bg:   rgba(120, 120, 160, 0.08);
+
+  /* Focus ring. Slightly more visible on light paper. */
+  --color-focus:        #0066aa;
+  --color-focus-ring:   rgba(0, 102, 170, 0.30);
+
+  /* Shadows. Lighter and smaller; light paper doesn't need
+   * the same depth cue that dark surfaces do. */
+  --shadow-sm:  0 1px 0 rgba(20, 20, 30, 0.08);
+  --shadow-md:  0 2px 8px rgba(20, 20, 30, 0.10);
+  --shadow-lg:  0 8px 24px rgba(20, 20, 30, 0.12);
+}
+
+/* Ambient gradient, light variant. The dark version uses
+ * cyan/magenta at 4% over a void. Light paper can't carry
+ * even that without vibrating; the gradients are halved and
+ * the magenta is shifted toward a calmer rose. */
+[data-theme="light"] body {
+  background-image:
+    radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      rgba(0, 102, 170, 0.025) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 50% 100%,
+      rgba(138, 45, 153, 0.020) 0%,
+      transparent 60%
+    );
+}
+
+/* Selection. Light paper inverts to a deeper accent. */
+[data-theme="light"] ::selection {
+  background: var(--color-accent);
+  color: #ffffff;
+}
+
+/* Site header hairline is slightly heavier on light paper so
+ * the rule is visible. */
+[data-theme="light"] .site-header {
+  border-bottom-color: var(--color-rule-strong);
+}

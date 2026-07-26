@@ -1,30 +1,333 @@
-/* Prism Engine docs — layout primitives.
+/* Prism Engine Observatory v1 — layout primitives.
  *
- * The max-width column, gutters, and the standard horizontal
- * flow. Components compose these.
+ * The page column, the gutters, and the standard horizontal
+ * and vertical flows. Components compose these.
+ *
+ * Spec §9: the site breathes. There is rhythm between darkness
+ * and illumination, dense technical panels and open explanatory
+ * space. The layout primitives are the bones of that rhythm.
  */
 
 * { box-sizing: border-box; }
 
+html, body { width: 100%; }
+
+/* The page column. Three widths: narrow (prose), default,
+ * wide (status, observatory, lab). The visitor reads the
+ * column; everything outside it is page-ambient. */
+.page-column-narrow {
+  max-width: var(--max-width-narrow);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
 .page-column {
   max-width: var(--max-width);
   margin: 0 auto;
   padding: 0 var(--gutter);
 }
-
 .page-column-wide {
   max-width: var(--max-width-wide);
   margin: 0 auto;
   padding: 0 var(--gutter);
 }
 
-.flow > * + * { margin-top: 1rem; }
-.flow-tight > * + * { margin-top: 0.5rem; }
-.flow-loose > * + * { margin-top: 2rem; }
+/* Flow primitives. The names are verbs, not values: `flow`
+ * means "stack these vertically with breathing room." */
+.flow > * + * { margin-top: var(--space-4); }
+.flow-tight > * + * { margin-top: var(--space-2); }
+.flow-loose > * + * { margin-top: var(--space-6); }
 
-.row { display: flex; gap: var(--gutter); }
-.row-tight { display: flex; gap: var(--gutter-tight); }
-.row-loose { display: flex; gap: var(--gutter-loose); }
+/* Row primitives. The names are directions: `row` is a
+ * horizontal flex with the default gutter. */
+.row {
+  display: flex;
+  gap: var(--gutter);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.row-tight {
+  display: flex;
+  gap: var(--gutter-tight);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.row-loose {
+  display: flex;
+  gap: var(--gutter-loose);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
 
-.stack { display: flex; flex-direction: column; gap: var(--gutter-tight); }
-.stack-loose { display: flex; flex-direction: column; gap: var(--gutter-loose); }
+/* Stack primitives. Vertical flex with the default gutter. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.stack-tight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.stack-loose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Grid primitives. Use these for repeating structures. */
+.grid {
+  display: grid;
+  gap: var(--gutter);
+}
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* At small viewports, the multi-column grids collapse to one. */
+@media (max-width: 720px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .row, .row-tight, .row-loose { flex-direction: column; }
+}
+
+/* Section spacing. Sections in the page body are separated
+ * by a hairline rule and a generous gap. The first section
+ * has no top border. */
+.section {
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--color-rule);
+}
+.section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.section-loose {
+  padding: var(--space-7) 0;
+  border-top: 1px solid var(--color-rule);
+}
+.section-loose:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+/* Inline-cluster: a horizontal flex with wrap, tight gap, baseline. */
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+}
+
+/* Bar: a horizontal element with a label and a value,
+ * baseline-aligned. Used in metadata lists. */
+.bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+.bar:last-child { border-bottom: 0; }
+.bar-label {
+  font-size: var(--font-size-sm);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.bar-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+  text-align: right;
+}
+
+/* Center helpers. */
+.center { text-align: center; }
+.center-block { margin-left: auto; margin-right: auto; }
+
+/* Visually hidden (a11y). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link. The first focusable element on every page. */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 0;
+  background: var(--color-accent);
+  color: var(--color-bg);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0 0 var(--radius-md) 0;
+  z-index: var(--z-overlay);
+  font-weight: var(--font-weight-bold);
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 0;
+  text-decoration: none;
+}
+
+/* ---------------------------------------------------------------- *
+ * 8. Mobile polish.
+ *
+ *    Audited at 320 (iPhone SE), 375 (iPhone 12 mini), 414
+ *    (iPhone 12), 600 (large phone), 720 (tablet portrait),
+ *    900 (tablet landscape), 1100 (laptop), 1280 (desktop).
+ *
+ *    The principles: tight gutters; the column never overflows
+ *    the viewport; tables, code, and stratum cards are
+ *    readable; the Observatory grid collapses 4 → 2 → 1; the
+ *    site header stacks; the secondary nav reflows.
+ * ---------------------------------------------------------------- */
+
+/* Tighten gutters below 720 so prose has breathing room
+ * without running into the edge. */
+@media (max-width: 720px) {
+  :root {
+    --gutter:       var(--space-4);
+    --gutter-loose: var(--space-5);
+  }
+}
+
+/* Below 540, gutters get even tighter. The site's max-width
+ * is 64rem (1024px); at 320 viewport, we need the prose
+ * inside the gutter, not pushed to the edge. */
+@media (max-width: 540px) {
+  :root {
+    --gutter:       var(--space-3);
+    --gutter-loose: var(--space-4);
+  }
+}
+
+/* Below 380, the prose column has minimum 1rem padding even
+ * at the extreme small. */
+@media (max-width: 380px) {
+  :root {
+    --gutter: 1rem;
+  }
+  .hero, .hero-home {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .hero-headline {
+    font-size: clamp(1.5rem, 8vw, 2rem);
+  }
+}
+
+/* Tables: at narrow widths, allow horizontal scroll within
+ * the cell, not the page. */
+@media (max-width: 720px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chapter-body, .page-body {
+    overflow-x: hidden;
+  }
+}
+
+/* The observatory instrument panel: at narrow widths, the
+ * header's flex children stack to keep the rule tight. */
+@media (max-width: 600px) {
+  .observatory-instrument-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+  .observatory-instrument-title {
+    font-size: var(--font-size-md);
+  }
+}
+
+/* The redaction manifest and stratum data blocks: ensure
+ * they break words instead of overflowing the column. */
+.stratum-card-data,
+.redaction-manifest pre,
+pre {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Long URLs, paths, and code identifiers in prose wrap. */
+p code, li code, td code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* The site header's nav links: at very narrow viewports,
+ * keep them on one row but use smaller padding so the five
+ * primary items fit on a 360px viewport. */
+@media (max-width: 380px) {
+  .site-nav-link {
+    padding: var(--space-1) var(--space-2);
+    font-size: 0.7rem;
+  }
+}
+
+/* Touch target sizing. Anything interactive below 600px
+ * viewport gets a minimum 44x44 hit area. */
+@media (max-width: 600px) {
+  .theme-toggle,
+  .site-nav-link,
+  .hero-arg,
+  .observatory-stage {
+    min-height: 44px;
+  }
+  .observatory-stage {
+    padding: var(--space-3) var(--space-4);
+  }
+}
+
+/* Page body overflow protection. Unconditional: a long
+ * monospace token in a paragraph or a wide stratum-data
+ * block can never push the page wider than the viewport.
+ * The element itself clips; its children use overflow-x:
+ * auto to allow scroll within themselves. */
+.page-body, .page-body-wide, .page-body-narrow, .chapter-body {
+  overflow-x: hidden;
+  /* Establish a containing block for absolutely-positioned
+   * descendants (the hero halo, the instrument panel). */
+  position: relative;
+}
+
+/* The 404 search form: on narrow viewports, full width. */
+@media (max-width: 600px) {
+  .search-form input[type="search"] {
+    width: 100%;
+  }
+}
+
+/* Print: the site still needs to print, even if no one
+ * uses this. Light paper, no ambient, rules are visible. */
+@media print {
+  :root {
+    --color-bg: #ffffff;
+    --color-fg: #000000;
+    --color-fg-muted: #333;
+    --color-fg-subtle: #666;
+    --color-rule: #ccc;
+    --color-accent: #000;
+  }
+  body {
+    background: white !important;
+  }
+  .site-header, .site-footer, .hero::after, .hero::before {
+    box-shadow: none;
+    background-image: none;
+  }
+  a { color: inherit; text-decoration: underline; }
+  .observatory-stage, .stratum-card, .verifiable-item, .lab-note, .milestone {
+    break-inside: avoid;
+  }
+}

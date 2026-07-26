@@ -1,0 +1,118 @@
+/* Prism Engine Observatory v1 — self-hosted fonts.
+ *
+ * Per spec §A19 (no third-party requests of any kind), the
+ * site serves its own font files from /styles/fonts/. No
+ * requests to fonts.gstatic.com, no Google Fonts CSS, no
+ * anything. The visitor's browser fetches the font files from
+ * the same origin as the page.
+ *
+ * The Ubuntu font family is licensed under the Ubuntu Font
+ * Licence 1.0 — see Ubuntu-LICENCE.txt. Source: Canonical's
+ * fonts-ubuntu 0.83 (Jammy) source tarball, hosted at
+ * archive.ubuntu.com/ubuntu/pool/main/f/fonts-ubuntu/.
+ *
+ * Weights exposed:
+ *   Ubuntu Light        (300)
+ *   Ubuntu Regular      (400)
+ *   Ubuntu Medium       (500)
+ *   Ubuntu Bold         (700)
+ *   + matching italics
+ *   Ubuntu Mono Regular (400)
+ *   Ubuntu Mono Bold    (700)
+ *   + matching italics
+ *
+ * font-display: swap — text renders immediately with the
+ * system fallback; the local face replaces it once loaded.
+ * We do not block the first paint on font readiness.
+ *
+ * The system stack in tokens.css is the fallback layer: even
+ * with the network down, the page is readable.
+ */
+
+/* Ubuntu — sans, primary */
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Light.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-LightItalic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Italic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-MediumItalic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-BoldItalic.ttf") format("truetype");
+}
+
+/* Ubuntu Mono — monospaced identities */
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-Italic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-BoldItalic.ttf") format("truetype");
+}

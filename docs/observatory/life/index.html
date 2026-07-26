@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prism Engine — The Life of a ComputeImage</title>
+<link rel="canonical" href="https://prism-engine.tribunus.dev/">
+<meta name="generator" content="prism-docs-ssg">
+<meta name="build-id" content="ssg-86094">
+<link rel="stylesheet" href="/site.css">
+<script>
+(function(){try{
+  var k='prism-theme';
+  var v=null;
+  try{v=localStorage.getItem(k);}catch(e){}
+  if(v!=='dark'&&v!=='light'){
+    try{
+      if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches){v='light';}
+      else{v='dark';}
+    }catch(e){v='dark';}
+  }
+  document.documentElement.setAttribute('data-theme',v);
+  try{document.documentElement.style.colorScheme=v;}catch(e){}
+}catch(e){}})();
+</script>
+<script src="/theme.js" defer></script>
+<script src="/selection-controller.js" defer></script>
+<script src="/transitions-orchestrator.js" defer></script>
+</head>
+<body data-prism-route="/observatory/life/" data-prism-hydrated="false">
+<header class="site-header">
+<a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Prism Engine</span></a>
+<nav class="site-nav" aria-label="Primary navigation">
+<a class="site-nav-link" href="/start/">Start</a>
+<a class="site-nav-link" href="/architecture/">Architecture</a>
+<a class="site-nav-link" href="/evidence/">Evidence</a>
+<a class="site-nav-link" href="/status/">Status</a>
+<a class="site-nav-link" href="https://github.com/Tribunus-dev/prism-engine" rel="external" target="_blank">GitHub</a>
+</nav>
+<button type="button" class="theme-toggle" aria-label="Toggle dark and light theme" data-theme-toggle><span class="theme-toggle-icon" aria-hidden="true"></span><span class="theme-toggle-label">Theme</span></button>
+</header>
+<main class="page-body" id="top" data-prism-region="main">
+<section class="chapter" id="the-thesis">
+<h3 class="chapter-title">The thesis</h3>
+<div class="chapter-body">
+<p>The architecture is one experience, not a sequence of pages. The visitor lands on a specimen, held in a stage that reveals the underlying data as the visitor interacts.</p>
+</div>
+</section>
+<section class="chapter" id="the-stage">
+<h3 class="chapter-title">The stage</h3>
+<div class="chapter-body">
+<p>Twelve instruments, one per stage of the canonical journey. Each instrument is a window into the data. Selecting an instrument deepens the view. The selection persists in the URL. The selection is visible in every other instrument that references the same identity.</p>
+<p>The full sequence is present in HTML without JavaScript. The default density is rendered. The selection, the depth, and the cross-instrument highlighting are layered on top by the <code>SelectionController</code>. The JavaScript-free fallback is the same authored work without synchronization.</p>
+</div>
+</section>
+<section class="chapter" id="the-twelve-instruments">
+<h3 class="chapter-title">The twelve instruments</h3>
+<div class="chapter-body">
+<p>For each stage, the instrument exposes:</p>
+<ul>
+<li><strong>Overview density</strong> — the major transformation. One paragraph. The artifact dominates the visual.</li>
+<li><strong>Technical density</strong> — the contracts, the constraints, the layouts, the search results, the rejected alternatives.</li>
+<li><strong>Raw-artifact density</strong> — the manifest, the receipt, the digest, the hardware identity, the schema version, the provenance.</li>
+</ul>
+<p>The visitor can step through the stages in order. The visitor can select a non-adjacent stage. The visitor can return to the previous selection by URL.</p>
+<p>The twelve stages, with their default one-sentence description at overview density:</p>
+<ol>
+<li><strong>Source package ingest.</strong> A model package arrives with its metadata.</li>
+<li><strong>Graph recovery and declaration.</strong> Prism recovers the canonical graph under a declared schema, operator semantics, and normalization policy.</li>
+<li><strong>Region decomposition.</strong> The graph is decomposed into logical tensors, semantic regions, and structural priors.</li>
+<li><strong>Representation search.</strong> Prism evaluates candidate representations.</li>
+<li><strong>Target constraints.</strong> Prism applies legality for the named hardware.</li>
+<li><strong>Admitted compilation plan.</strong> A plan is committed as durable state.</li>
+<li><strong>ComputeImage realization.</strong> The plan is materialized into a <code>.cimage</code>.</li>
+<li><strong>Constitutional transaction.</strong> A request enters through a typed command.</li>
+<li><strong>Residency and placement.</strong> The runtime assigns the request to lanes.</li>
+<li><strong>Backend execution.</strong> Provider kernels run.</li>
+<li><strong>Output and receipt.</strong> A typed receipt is emitted.</li>
+<li><strong>Replay, comparison, and promotion.</strong> The receipt and the events around it are replayable.</li>
+</ol>
+</div>
+</section>
+<section class="chapter" id="what-the-v1-observatory-can-show">
+<h3 class="chapter-title">What the v1 Observatory can show</h3>
+<div class="chapter-body">
+<p>The v1 Observatory exposes the published specimen. Selecting stage 1 opens the source orientation. Selecting stage 7 opens the six strata. Selecting stage 8 opens a one-line statement: <em>"No constitutional transaction has been emitted to publishable storage in the v1 corpus."</em> Stages 9–12 are similarly gap-stated. Stages 4, 5, 6 expose the search trace, the legalization report field (absent), and the plan field (absent) of the published specimen.</p>
+<p>The Observatory is honest about what it can show. The instrument panel is fully present; the data behind it is whatever the corpus has.</p>
+</div>
+</section>
+<section class="chapter" id="selection">
+<h3 class="chapter-title">Selection</h3>
+<div class="chapter-body">
+<p>The selection state is addressable. A URL of the form <code>/observatory/life/?stage=7&density=technical&tensor=weight</code> restores on reload. The <code>SelectionController</code> parses, validates, normalizes, writes, and broadcasts. The instruments subscribe.</p>
+<p>The selection is the URL. The animation is a visual consequence. The visitor can link to a particular stage, tensor, capability, or receipt. A reviewer who wants to point at a particular view points at a URL.</p>
+</div>
+</section>
+<section class="observatory">
+<h2 class="chapter-title">The twelve stages</h2>
+<p class="lead">Select a stage. The default is stage 7 (the ComputeImage). Stages 8-12 are gap-stated in the v1 corpus.</p>
+<ol class="observatory-stages" data-observatory-stages>
+<li class="observatory-stage" data-stage-key="1_source_package_ingest" data-corpus="gap" data-stage-number="1" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 1</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Source package ingest</h3>
+<p class="observatory-stage-description">Test fixture; no real source package.</p>
+</li>
+<li class="observatory-stage" data-stage-key="2_graph_recovery_and_declaration" data-corpus="gap" data-stage-number="2" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 2</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Graph recovery and declaration</h3>
+<p class="observatory-stage-description">No graph recovery; no declaration.</p>
+</li>
+<li class="observatory-stage" data-stage-key="3_region_decomposition" data-corpus="populated" data-stage-number="3" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 3</span><span class="observatory-stage-state">populated</span></div>
+<h3 class="observatory-stage-title">Region decomposition</h3>
+<p class="observatory-stage-description">Header has 9 LLaMA-shaped tensor records.</p>
+</li>
+<li class="observatory-stage" data-stage-key="4_representation_search" data-corpus="gap" data-stage-number="4" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 4</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Representation search</h3>
+<p class="observatory-stage-description">No search trace emitted.</p>
+</li>
+<li class="observatory-stage" data-stage-key="5_target_constraints" data-corpus="gap" data-stage-number="5" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 5</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Target constraints</h3>
+<p class="observatory-stage-description">No legalization report emitted.</p>
+</li>
+<li class="observatory-stage" data-stage-key="6_admitted_compilation_plan" data-corpus="gap" data-stage-number="6" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 6</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Admitted compilation plan</h3>
+<p class="observatory-stage-description">No plan emitted.</p>
+</li>
+<li class="observatory-stage" data-stage-key="7_computeimage_realization" data-corpus="populated" data-stage-number="7" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 7</span><span class="observatory-stage-state">populated</span></div>
+<h3 class="observatory-stage-title">ComputeImage realization</h3>
+<p class="observatory-stage-description">Yes. This is the cimage.</p>
+</li>
+<li class="observatory-stage" data-stage-key="8_constitutional_transaction" data-corpus="gap" data-stage-number="8" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 8</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Constitutional transaction</h3>
+<p class="observatory-stage-description">No transaction; no execution.</p>
+</li>
+<li class="observatory-stage" data-stage-key="9_residency_and_placement" data-corpus="gap" data-stage-number="9" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 9</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Residency and placement</h3>
+<p class="observatory-stage-description">Not applicable.</p>
+</li>
+<li class="observatory-stage" data-stage-key="10_backend_execution" data-corpus="gap" data-stage-number="10" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 10</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Backend execution</h3>
+<p class="observatory-stage-description">Not executed.</p>
+</li>
+<li class="observatory-stage" data-stage-key="11_output_and_receipt" data-corpus="gap" data-stage-number="11" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 11</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Output and receipt</h3>
+<p class="observatory-stage-description">No receipt.</p>
+</li>
+<li class="observatory-stage" data-stage-key="12_replay_comparison_promotion" data-corpus="gap" data-stage-number="12" data-density="overview">
+<div class="observatory-stage-header"><span class="observatory-stage-number">Stage 12</span><span class="observatory-stage-state">gap-stated</span></div>
+<h3 class="observatory-stage-title">Replay, comparison, and promotion</h3>
+<p class="observatory-stage-description">No replay; no comparison; no promotion.</p>
+</li>
+</ol>
+<section class="observatory-instrument" data-observatory-instrument aria-live="polite">
+<div class="observatory-instrument-header">
+<h2 class="observatory-instrument-title">Instrument: Stage 7 — ComputeImage realization</h2>
+<span class="observatory-instrument-state">populated</span>
+</div>
+<div class="observatory-instrument-body">
+<p>This is the stage the v1 corpus has populated. The published specimen is the artifact of stage 7: a sanitized ComputeImage whose header is the cimage-manifest schema, whose payloads are synthetic test bytes, and whose redaction manifest is the §4.8 declaration.</p>
+<p>Stages 8-12 are gap-stated. The corpus has no execution receipts, no replay results, and no failure receipts. The Observatory names the gap; the corpus is the only authority from which those measurements may eventually be projected.</p>
+</div>
+</section>
+</section>
+</main>
+<aside class="secondary-nav">
+<ul>
+<li><a href="/">Home</a></li>
+<li><a href="/computeimage/">ComputeImage</a></li>
+<li><a href="/computeimage/specimen/">Specimen</a></li>
+<li><a href="/observatory/life/">The Life of a ComputeImage</a></li>
+<li><a href="/run/">Run</a></li>
+<li><a href="/roadmap/">Roadmap</a></li>
+<li><a href="/prismagent/">PrismAgent</a></li>
+<li><a href="/prism-ml/">Prism ML</a></li>
+<li><a href="/general-compute/">General Compute</a></li>
+<li><a href="/lab/">Lab Notes</a></li>
+<li><a href="/colophon/">Colophon</a></li>
+</ul>
+</aside>
+<footer class="site-footer">
+<p>Prism Engine is independently developed by <strong>Julian Torres</strong>. Released under the project's license. <a href="/colophon/">Colophon</a> · <a href="https://github.com/Tribunus-dev/prism-engine">Repository</a></p>
+</footer>
+<script>
+
+// Prism Observatory v1 — SelectionController.
+// Generated by prism-docs-ssg. Do not edit by hand.
+//
+// The sole owner of the addressable selection state. Parses
+// selection from the URL, validates, normalizes, writes back,
+// and broadcasts to subscribers. The URL is the source of truth.
+
+(function () {
+  'use strict';
+
+  // ---------- Schema (declarative) ----------
+
+  // The known selection dimensions. Each is optional. The URL
+  // carries them as query parameters. Unknown parameters are
+  // ignored. The reducer normalizes the URL after a write.
+  var SCHEMA = {
+    stage:        { kind: 'integer', min: 1, max: 12 },
+    density:      { kind: 'enum',    values: ['overview', 'technical', 'raw-artifact'] },
+    tensor:       { kind: 'string',  pattern: /^[a-zA-Z0-9._-]+$/ },
+    capability:   { kind: 'string',  pattern: /^capability\.[a-zA-Z0-9._-]+$/ },
+    evidence:     { kind: 'string',  pattern: /^evidence\.[a-zA-Z0-9._-]+$/ },
+    specimen:     { kind: 'string',  pattern: /^observatory\.specimen\.[a-zA-Z0-9._-]+$/ }
+  };
+
+  // ---------- Reducer ----------
+
+  function readFromUrl() {
+    var u;
+    try { u = new URL(window.location.href); }
+    catch (e) { return {}; }
+    var out = {};
+    var keys = Object.keys(SCHEMA);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var raw = u.searchParams.get(k);
+      if (raw == null) continue;
+      var parsed = parseValue(k, raw);
+      if (parsed !== undefined) out[k] = parsed;
+    }
+    return out;
+  }
+
+  function parseValue(key, raw) {
+    var def = SCHEMA[key];
+    if (!def) return undefined;
+    if (def.kind === 'integer') {
+      var n = parseInt(raw, 10);
+      if (isNaN(n)) return undefined;
+      if (def.min != null && n < def.min) return undefined;
+      if (def.max != null && n > def.max) return undefined;
+      return n;
+    }
+    if (def.kind === 'enum') {
+      if (def.values.indexOf(raw) === -1) return undefined;
+      return raw;
+    }
+    if (def.kind === 'string') {
+      if (def.pattern && !def.pattern.test(raw)) return undefined;
+      return raw;
+    }
+    return undefined;
+  }
+
+  function writeToUrl(selection) {
+    var u;
+    try { u = new URL(window.location.href); }
+    catch (e) { return; }
+    var keys = Object.keys(SCHEMA);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (selection[k] == null) {
+        u.searchParams.delete(k);
+      } else {
+        u.searchParams.set(k, String(selection[k]));
+      }
+    }
+    // Use replaceState so the browser history is not polluted.
+    try {
+      window.history.replaceState(null, '', u.toString());
+    } catch (e) { /* no-op */ }
+  }
+
+  // ---------- Broadcast ----------
+
+  var subscribers = [];
+  var current = readFromUrl();
+
+  function broadcast(prev) {
+    for (var i = 0; i < subscribers.length; i++) {
+      try { subscribers[i](current, prev); }
+      catch (e) { /* a single subscriber failure must not break the others */ }
+    }
+  }
+
+  // ---------- Public API ----------
+
+  function subscribe(callback) {
+    if (typeof callback !== 'function') return function () {};
+    subscribers.push(callback);
+    // Fire once on subscribe so the new subscriber sees the
+    // current state without waiting for the next change.
+    try { callback(current, current); } catch (e) { /* no-op */ }
+    return function unsubscribe() {
+      var idx = subscribers.indexOf(callback);
+      if (idx !== -1) subscribers.splice(idx, 1);
+    };
+  }
+
+  function set(partial) {
+    if (partial == null || typeof partial !== 'object') return;
+    var prev = {};
+    for (var k in current) prev[k] = current[k];
+    var next = {};
+    for (var k in current) next[k] = current[k];
+    var keys = Object.keys(partial);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (!(k in SCHEMA)) continue;
+      var v = partial[k];
+      if (v == null) {
+        delete next[k];
+      } else {
+        var parsed = parseValue(k, String(v));
+        if (parsed !== undefined) next[k] = parsed;
+      }
+    }
+    current = next;
+    writeToUrl(current);
+    broadcast(prev);
+  }
+
+  function get() {
+    var out = {};
+    for (var k in current) out[k] = current[k];
+    return out;
+  }
+
+  // ---------- Wire up popstate ----------
+
+  window.addEventListener('popstate', function () {
+    var prev = current;
+    current = readFromUrl();
+    broadcast(prev);
+  });
+
+  // ---------- Expose ----------
+
+  window.prismSelection = {
+    subscribe: subscribe,
+    set: set,
+    get: get,
+    schema: SCHEMA
+  };
+})();
+
+</script>
+</body>
+</html>

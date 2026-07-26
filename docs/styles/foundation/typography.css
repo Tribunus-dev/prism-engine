@@ -1,10 +1,27 @@
-/* Prism Engine docs — typography.
+/* Prism Engine Observatory v1 — typography.
  *
  * One source of truth for body, headings, code, links, and
  * lists. Components override only what is specific to them.
+ *
+ * Spec §9: Ubuntu is the primary typeface. Monospaced typography
+ * is reserved for identities, hashes, digests, commands, schemas,
+ * values, machine-state labels, and code. Prose never uses
+ * monospace. Identities never use proportional.
+ *
+ * The font stack is declared in tokens.css. The system fallbacks
+ * ensure the site is readable on every system; the spec name
+ * (Ubuntu) is the first preference.
  */
 
-html, body {
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
   margin: 0;
   padding: 0;
   background: var(--color-bg);
@@ -12,57 +29,269 @@ html, body {
   font-family: var(--font-sans);
   font-size: var(--font-size-base);
   line-height: var(--line-height-base);
+  font-weight: var(--font-weight-regular);
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  min-height: 100vh;
+  /* Subtle ambient gradient. Anchors the visitor; is not the
+   * "gradient soup" §9 forbids. Stays below all content. */
+  background-image:
+    radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      rgba(106, 212, 255, 0.04) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 50% 100%,
+      rgba(197, 106, 212, 0.03) 0%,
+      transparent 60%
+    );
+  background-attachment: fixed;
 }
 
+/* Headings — Ubuntu, with letter-spacing tightening on the
+ * larger sizes. The h1 is reserved for the page hero; chapter
+ * titles use h3 by convention (rendered as a styled H3, not
+ * an H1, to keep the document outline honest). */
 h1, h2, h3, h4, h5, h6 {
-  margin: 0 0 0.5em;
-  font-weight: 700;
-  line-height: 1.2;
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-tight);
   color: var(--color-fg);
 }
 
-h1 { font-size: var(--font-size-3xl); }
-h2 { font-size: var(--font-size-2xl); }
-h3 { font-size: var(--font-size-xl); }
-h4 { font-size: var(--font-size-lg); }
-h5, h6 { font-size: var(--font-size-md); }
+h1 {
+  font-size: var(--font-size-3xl);
+  letter-spacing: -0.03em;
+}
+h2 {
+  font-size: var(--font-size-2xl);
+  letter-spacing: -0.02em;
+}
+h3 {
+  font-size: var(--font-size-xl);
+  letter-spacing: -0.015em;
+  line-height: var(--line-height-snug);
+}
+h4 {
+  font-size: var(--font-size-lg);
+  letter-spacing: -0.01em;
+  line-height: var(--line-height-snug);
+}
+h5, h6 {
+  font-size: var(--font-size-md);
+  letter-spacing: 0;
+  line-height: var(--line-height-snug);
+}
 
-p { margin: 0 0 1em; }
+/* Body text. Generous line height for long-form. */
+p {
+  margin: 0 0 var(--space-4);
+  max-width: 64ch;
+}
 
+p:last-child { margin-bottom: 0; }
+
+/* Long-form prose. Used on the Start page. */
+.prose p {
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-loose);
+  max-width: 64ch;
+}
+
+/* Lead paragraph. The first paragraph under a hero or a
+ * chapter title. Slightly larger, slightly muted. */
+.lead {
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-loose);
+  color: var(--color-fg-muted);
+  max-width: 64ch;
+  margin-bottom: var(--space-5);
+}
+
+/* Muted text. For source paths, dates, footnotes, secondary
+ * information. */
+.muted, small, .small {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.text-subtle { color: var(--color-fg-subtle); }
+
+/* Strong and emphasis. */
+strong, b {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+}
+em, i { font-style: italic; }
+
+/* Links. The accent color, no underline by default, an
+ * underline on hover and focus for affordance. */
 a {
   color: var(--color-accent);
   text-decoration: none;
+  transition: color var(--motion-fast) var(--motion-ease);
 }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+a:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
 
-code, pre {
+/* Monospace. The identity typography. Per §9: prose never
+ * uses monospace; identities never use proportional. */
+code, pre, kbd, samp {
   font-family: var(--font-mono);
-  font-size: 0.95em;
+  font-size: 0.92em;
+  letter-spacing: var(--letter-spacing-mono);
+  font-feature-settings: "calt" 0;
 }
 
 code {
-  background: var(--color-surface);
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  padding: 0.1em 0.4em;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-rule);
+  /* Inline code: slightly tighter line height so it sits
+   * visually centered with the surrounding prose. */
+  line-height: 1.2;
+}
+
+a code, .accent code {
+  color: var(--color-accent);
+  background: transparent;
+  border-color: transparent;
 }
 
 pre {
   display: block;
-  background: var(--color-surface);
-  padding: 1rem 1.25rem;
-  border-radius: 6px;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
   overflow-x: auto;
-  margin: 1rem 0;
+  margin: var(--space-4) 0;
+  line-height: var(--line-height-snug);
 }
 
-pre code { background: transparent; padding: 0; }
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 0.95em;
+  /* Long lines of code stay on one line; let the pre scroll. */
+  white-space: pre;
+}
 
-ul, ol { margin: 0 0 1em; padding-left: 1.5rem; }
-li { margin: 0.25em 0; }
+/* Keyboard input. */
+kbd {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.4em;
+  font-size: 0.85em;
+  box-shadow: 0 1px 0 var(--color-rule-strong);
+}
 
-hr { border: 0; border-top: 1px solid var(--color-rule); margin: 2rem 0; }
+/* Lists. */
+ul, ol {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+}
+li {
+  margin: var(--space-1) 0;
+  line-height: var(--line-height-base);
+}
+li > ul, li > ol { margin: var(--space-1) 0; }
 
-strong, b { font-weight: 700; }
-em, i { font-style: italic; }
+/* Definition lists. */
+dl { margin: 0 0 var(--space-4); }
+dt {
+  font-weight: var(--font-weight-bold);
+  margin-top: var(--space-3);
+}
+dd {
+  margin: var(--space-1) 0 0 var(--space-4);
+  color: var(--color-fg-muted);
+}
 
-small { font-size: var(--font-size-sm); color: var(--color-muted); }
+/* Horizontal rule. The spec filters these from the prose; this
+ * style is here for components that may use it (none currently). */
+hr {
+  border: 0;
+  border-top: 1px solid var(--color-rule);
+  margin: var(--space-6) 0;
+}
+
+/* Blockquote. */
+blockquote {
+  margin: var(--space-5) 0;
+  padding: var(--space-3) var(--space-5);
+  border-left: 3px solid var(--color-accent);
+  color: var(--color-fg-muted);
+  font-style: italic;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* Tables. Default table styling. The status-table component
+ * provides the per-status treatment. */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-4) 0;
+}
+th, td {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-rule);
+  vertical-align: top;
+}
+th {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  font-size: var(--font-size-sm);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+/* Selection. Highlight matches the prism. */
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* Forced-colors mode. §9 / §A20 / §A17: status must remain
+ * visible. Windows High Contrast Mode and other forced-colors
+ * agents use system colors; we hand them our system palette. */
+@media (forced-colors: active) {
+  :root {
+    --color-bg:            Canvas;
+    --color-surface-1:     Canvas;
+    --color-surface-2:     Canvas;
+    --color-fg:            CanvasText;
+    --color-fg-muted:      CanvasText;
+    --color-fg-subtle:     CanvasText;
+    --color-rule:          CanvasText;
+    --color-rule-strong:   CanvasText;
+    --color-accent:        LinkText;
+    --color-accent-warm:   LinkText;
+    --color-focus:         Highlight;
+    --color-state-planned:     GrayText;
+    --color-state-implemented: LinkText;
+    --color-state-qualifying:  LinkText;
+    --color-state-validated:   Highlight;
+    --color-state-released:    LinkText;
+    --color-state-unreleased:  GrayText;
+  }
+  a:focus-visible {
+    outline: 3px solid Highlight;
+  }
+  .state, .dist {
+    border: 1px solid CanvasText !important;
+    forced-color-adjust: none;
+  }
+}

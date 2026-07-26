@@ -544,9 +544,9 @@ A 404 is an authored response. It links to the home page, the Start page, the St
 
 ### 7.5 Route authority
 
-The SSG is the only writer of routes. The redirect table is part of the SSG input. The validator checks that every legacy path resolves to a canonical path and that the destination exists. Canonical paths are emitted as pages; legacy paths are emitted as redirects in the `_redirects` file. A self-redirect is a build failure.
+The SSG is the only writer of routes. The canonical routes (§7.1) are the only routes that exist. The SSG renders each canonical route to an `index.html` under its route directory; GitHub Pages serves the directory URL via that file. There is no legacy URL surface, no redirect table, and no `_redirects` file in v1. The route authority is the SSG's output: a fixed set of canonical directories, each with an `index.html`.
 
-The redirect and header mechanisms are not merely SSG output. The deployment platform named in §15 serves the `_redirects` and `_headers` files at the edge, producing real HTTP responses. The SSG produces the files; the platform serves them.
+When a future version introduces renamed routes, the mechanism is described in §15.3: a small `redirects` table in the SSG, emitted as authored meta-refresh HTML pages at the legacy paths. The platform-agnostic fallback is honest about the platform's limits.
 
 ---
 
@@ -614,7 +614,11 @@ The visual language is already strong. The work that remains is composition.
 
 **Iconography.** Icons are functional. An icon that has no text equivalent is a draft. The site is keyboard-navigable; every interactive element is reachable by tab; the focus ring is visible; the focus order matches the visual order.
 
-**Theme count.** **v1 ships dark only.** Light theme is a follow-on. The reasoning is recorded in the Phase 1 ADR: a deliberately authored dark-only Observatory with proper contrast, forced-colors support, and print stylesheet is preferable to a half-authored light theme that doubles visual and testing work without serving the visitor. A visitor who needs light can use a browser or OS theme override; the site's forced-colors behavior is verified regardless of base theme.
+**Theme count.** **v1 ships dark and light.** The dark theme is the default; the light theme is a deliberate, authored variant on the same token system (per `docs/styles/foundation/tokens-light.css`). The ThemeProvider (per §5.4 and the inline no-flash guard in `<head>`) reads the visitor's choice from `localStorage` (key `prism-theme`), falls back to `prefers-color-scheme`, and writes the `data-theme` attribute on `<html>` before paint. The choice persists across visits. A visitor who has not chosen a theme sees dark by default; a visitor whose OS prefers light sees light on first visit; the toggle in the site header reverses the choice.
+
+**Self-hosted typography.** The Ubuntu font family (Regular, Medium, Bold, Light, with italics, and the Ubuntu Mono family) is served from the same origin as the page (`docs/styles/fonts/Ubuntu-*.ttf`). **No third-party font requests of any kind** (per A19). The canonical source is Canonical's `fonts-ubuntu` 0.83 source tarball, redistributed under the Ubuntu Font Licence 1.0 (`docs/styles/fonts/Ubuntu-LICENCE.txt`). The `@font-face` declarations live in `docs/styles/foundation/fonts.css`. The font-display is `swap` — text paints immediately with the system fallback, then the local face replaces it.
+
+**WebAssembly transitions.** The `prism-transitions` crate compiles to `wasm32-unknown-unknown` and exposes CSS strings (dispersion gradients, transition shorthands, `@keyframes` rules) computed from state inputs. The `transitions-orchestrator.js` module loads the WASM on idle via `import('/transitions/prism_transitions.js')` and dispatches motion on SelectionController broadcasts. The CSS in `site.css` is the renderer; the WASM is the choreographer; the orchestrator is the dispatcher. **The CSS carries the no-JS / no-WASM fallback** — every state change has a static transition; the WASM adds the dynamic, state-driven layer on top.
 
 **No seventeen fonts.** The system uses Ubuntu, one monospace stack, and the system font for the OS-native affordances. That is the entire typeface budget.
 
@@ -661,11 +665,11 @@ The site is produced in nine phases. Each phase has a definition of done. The ph
 
 **Phase 1 — Editorial and truth freeze.** This document is approved. The current repository baseline is committed. The capability vocabulary is frozen. The canonical journey is frozen. The page purposes are frozen. The terminology audit is complete. The legacy pages are classified as *deleted*, *redirected*, *demoted*, or *rewritten*. **An ADR binds the schema names in §10 to the actual engine schemas, or creates them.** The light-theme decision (dark only for v1) is recorded.
 
-**Phase 2 — Data schemas, evidence freeze, specimen selection.** The schemas in `schemas/` are authored. The data layer in §4.1 exists in the repository and validates. The validation gate is implemented with discriminated-union record types per §4.4. **The artifact inventory is curated. Specific specimens are selected, sanitized or not, and frozen in `evidence-index.json` before Phase 3 begins.** The redirect table is part of the SSG input and is validated against the legacy paths in §7.2. The status migration of the existing `capabilities.json` is complete. `capability-history.json` is initialized for the records in migration. The deployment platform ADR (§15) is signed and the Cloudflare Pages project is provisioned.
+**Phase 2 — Data schemas, evidence freeze, specimen selection.** The schemas in `schemas/` are authored. The data layer in §4.1 exists in the repository and validates. The validation gate is implemented with discriminated-union record types per §4.4. **The artifact inventory is curated. Specific specimens are selected, sanitized or not, and frozen in `evidence-index.json` before Phase 3 begins.** The status migration of the existing `capabilities.json` is complete. `capability-history.json` is initialized for the records in migration. The deployment platform ADR (ADR-032) is signed and the publication layer is GitHub Pages (per §15).
 
 **Phase 3 — Complete manuscript.** Every page in §6 is written completely, in the prose it will use, before any component receives the prose. The manuscript is authored around the specimens frozen in Phase 2. The manuscript is reviewed against the Editorial Constitution. **The manuscript is a separate, binding artifact. The briefs in §6 are its outline, not its substitute.**
 
-**Phase 4 — Shell, routes, tokens, and semantic component consolidation.** One shell. One navigation system. One route model (canonical paths emitted as pages, legacy paths emitted as redirects, no self-redirects). One footer. **One design-token source with a working palette — Phase 4 establishes the palette values; Phase 8 tunes composition.** The component contracts in §8 are honored in skeleton: each component renders with stub data. The `SelectionController` is implemented and tested in isolation. The status, evidence, and receipt renderers exist in semantic form. **This phase precedes the Life experience so that the central interaction is built on top of the canonical components, not before them.**
+**Phase 4 — Shell, routes, tokens, and semantic component consolidation.** One shell. One navigation system. One route model (canonical paths emitted as pages, no legacy paths, no redirect surface in v1). One footer. **One design-token source with a working palette — Phase 4 establishes the palette values; Phase 8 tunes composition.** The component contracts in §8 are honored in skeleton: each component renders with stub data. The `SelectionController` is implemented and tested in isolation. The status, evidence, and receipt renderers exist in semantic form. **This phase precedes the Life experience so that the central interaction is built on top of the canonical components, not before them.**
 
 **Phase 5 — Static Life experience.** The static twelve-stage document at `/observatory/life/` is implemented. The full sequence is present in HTML. The default density is rendered. JavaScript deepens density and restores selection but does not create the page. The no-JavaScript fallback is the authored work, not a downgrade to another route.
 
@@ -687,7 +691,7 @@ The release does not ship unless every gate below is green. The gates are organi
 
 These are enforced by tools. They return pass, fail, or a specific error. A fail blocks the release.
 
-**A1. Route integrity.** Every canonical path serves the canonical content. Every legacy path in §7.2 serves a real HTTP 301 to its destination, served by the deployment platform from the `_redirects` file. No path serves the wrong generation. No path serves a 404 where a redirect would resolve. No self-redirects. No `/index.html` resolving to two destinations. The 410 wildcards are not emitted before the §7.3 compatibility window elapses. The A22 smoke test confirms the platform actually serves the redirects.
+**A1. Route integrity.** Every canonical path (§7.1) serves the canonical content via the directory's `index.html`. No path serves the wrong generation. No path serves a 404 where a canonical page should exist. The v1 site has no legacy URL surface, no redirect table, and no `_redirects` file (per §7.5 and §15.3). The 404 page (§7.4, §15.7) is authored and reachable for any path that does not match a canonical route. The A22 smoke test confirms every canonical path serves its content and the 404 serves for any other path.
 
 **A2. Status-vocabulary purity (structured).** Status-bearing language is emitted only through `Claim`, `StatusTable`, and `Release` components. The validator inspects those structured surfaces and rejects records whose `state`, `distribution_state`, or `maturity` fields are not members of the §3 vocabulary, or whose maturity × distribution pair is not in the §3.3 allowed set. A prose linter (a regex set) flags suspicious uses of the forbidden words in page prose; flagged lines are returned for human review (H1), not auto-rejected, because a plain grep cannot distinguish "available memory" from a forbidden status claim. The unconditional zero-match grep is removed.
 
@@ -721,15 +725,15 @@ These are enforced by tools. They return pass, fail, or a specific error. A fail
 
 **A17. Status-not-by-color-alone.** Status is communicated in text, shape, and semantics in addition to color. Verified by rendering the page in forced-colors mode and by checking that every status badge has a textual label and (where applicable) an icon or shape variant.
 
-**A18. Performance budget.** HTML per route ≤ 60 KB gzipped. Critical CSS per route ≤ 18 KB gzipped. JavaScript per route ≤ 80 KB gzipped, with the Observatory permitted up to 120 KB. LCP ≤ 2.5 s, CLS ≤ 0.1, INP ≤ 200 ms. Image budget per page named. Font-loading strategy: preloaded, subsetted, with `font-display: swap`. **Reproducible test contract:** the test runs at viewport 1366×768, on the named CI machine class (recorded in the test manifest), against the Cloudflare Pages preview URL for the candidate build, with a cold cache, repeated 5 times, with the **median** of the runs reported. Slow-4G is simulated via the named network profile (also recorded). Lighthouse and route-level asset reports are the verification.
+**A18. Performance budget.** HTML per route ≤ 60 KB gzipped. Critical CSS per route ≤ 18 KB gzipped. JavaScript per route ≤ 80 KB gzipped, with the Observatory permitted up to 120 KB. LCP ≤ 2.5 s, CLS ≤ 0.1, INP ≤ 200 ms. Image budget per page named. Font-loading strategy: preloaded, subsetted, with `font-display: swap`. **Reproducible test contract:** the test runs at viewport 1366×768, on the named CI machine class (recorded in the test manifest), against the local build served by a static file server, with a cold cache, repeated 5 times, with the **median** of the runs reported. Slow-4G is simulated via the named network profile (also recorded). Lighthouse and route-level asset reports are the verification.
 
-**A19. Security and privacy.** A strict Content Security Policy is set, served as a real HTTP response header by the platform (see §15.4). **No third-party requests of any kind.** No analytics, telemetry, or third-party fonts, scripts, or images. Dependencies audited. **Local assets are filename-fingerprinted for cache identity. SRI is not required for same-origin assets (their integrity is bounded by the platform's deployment guarantees) and is moot for external assets (the site forbids them). Same-origin is an authority boundary, not a cryptographic proof of integrity: trust in the actual bytes still depends on the repository, the build process, the deployment credentials, and the hosting platform. The CSP is the primary defense; fingerprinting provides cache-busting and content identity; the platform's own integrity model is layered on top.** No `eval`, no inline scripts, no third-party iframes. No interaction data leaves the browser while telemetry remains disabled; if telemetry is enabled later, it is named in an ADR and reviewed in §14. Verified by CSP report, dependency audit, and a network capture that shows no third-party traffic.
+**A19. Security and privacy.** The v1 site is served by GitHub Pages (per §15). GitHub Pages does not allow custom response headers; the site's security posture is the platform's defaults, honestly named (see §15.4). **No third-party requests of any kind.** No analytics, telemetry, or third-party fonts, scripts, or images. Dependencies audited. **Local assets are filename-fingerprinted for cache identity. SRI is not required for same-origin assets (their integrity is bounded by the platform's deployment guarantees) and is moot for external assets (the site forbids them). Same-origin is an authority boundary, not a cryptographic proof of integrity: trust in the actual bytes still depends on the repository, the build process, the deployment credentials, and the hosting platform.** No `eval`, no inline scripts, no third-party iframes. No interaction data leaves the browser while telemetry remains disabled; if telemetry is enabled later, it is named in an ADR and reviewed in §14. Verified by dependency audit and a network capture that shows no third-party traffic.
 
 **A20. Accessibility extras.** Contrast ratio meets WCAG 2.2 AA at the chosen theme. **Behavior at 200% and 400% zoom is verified on every canonical route** (not only the seven major ones). For intrinsically wide content — raw artifact manifests, status tables, and the Specimen page data blocks — one-dimensional contained horizontal scrolling is permitted; the gate does not require zero horizontal scrolling when the content's nature is wide tabular data. Forced-colors behavior is verified. Touch targets ≥ 44×44 CSS pixels. Status communication does not depend on color or animation. Verified by axe, by a 400%-zoom render, and by a forced-colors render.
 
 **A21. /docs/ allowlist.** The `/docs/` route serves only files explicitly named in `docs-publication.json`. Internal notes, outdated ADRs, and implementation debris do not reach the live site. Verified by a build that diffs the served `/docs/` tree against the allowlist.
 
-**A22. Deployment smoke test.** The smoke test runs at two points, against two distinct surfaces. **Preview smoke** runs the candidate build at the Cloudflare Pages preview URL produced for the PR or release branch. **Post-production smoke** runs against the production URL after Cloudflare builds the production deployment from the merged commit. Both follow the same path: a synthetic visitor from the home page to a Status row, opens the row to its evidence, follows the evidence to the published receipt, and reaches the receipt's stable URL. The post-production smoke additionally verifies the response headers in §15.4 (CSP, HSTS, Referrer-Policy, COOP/CORP) and the cache directives in §15.5 (`/assets/*` and `/pkg/*` immutable, HTML revalidated). The path is recorded as a deployment log with the build identity and the source commit. **A failure of the preview smoke blocks merge to `main`. A failure of the post-production smoke blocks the deployment from being declared the current production; the previous production deployment remains live, and the failed production deployment is preserved (with build identity, source commit, failure point, captured page) but not promoted. The site does not page on-call; it does not assume an on-call system exists. Alerting is added when there is a real destination for the alert.**
+**A22. Deployment smoke test.** The smoke test runs at two points, against two distinct surfaces. **Preview smoke** runs the candidate build served by the GitHub Actions workflow's artifact (downloaded from the PR's `Actions` tab, or served by a local static file server for the local test). **Post-production smoke** runs against the production URL after the GitHub Pages deployment from the merged commit completes. Both follow the same path: a synthetic visitor from the home page to a Status row, opens the row to its evidence, follows the evidence to the published receipt, and reaches the receipt's stable URL. The post-production smoke additionally verifies the build identity in `build.json` matches the expected build identity for the just-merged commit (per §15.7). The path is recorded as a deployment log with the build identity and the source commit. **A failure of the preview smoke blocks merge to `main`. A failure of the post-production smoke blocks the deployment from being declared the current production; the previous production deployment remains live (via `git revert` of the failed commit), and the failed production deployment is preserved (with build identity, source commit, failure point, captured page) but not promoted. The site does not page on-call; it does not assume an on-call system exists. Alerting is added when there is a real destination for the alert.**
 
 **A23. Schema-naming audit.** Every schema referenced in §10 and §4.3 binds to an actual schema identifier in the engine, or to a schema explicitly created for the site by an ADR. The audit is a list; the list is checked into the repository.
 
@@ -799,72 +803,48 @@ The work in this document is settled where it is settled. The work below is not.
 
 ## 15. Deployment Platform Contract
 
-The redirects, headers, cache, preview, and rollback this document requires are real platform capabilities. The SSG produces the redirect table, the `_headers` file, the asset manifest, the `_redirects` file, and the build identity. The platform serves them.
+The publication layer for v1 is **GitHub Pages**. The site is a static site: HTML, CSS, JavaScript, JSON, and a small number of image assets. GitHub Pages serves the `docs/` directory of the repository's `main` branch. The custom domain `prism-engine.tribunus.dev` is attached to the GitHub Pages site via the `docs/CNAME` file. The build is invoked by a GitHub Actions workflow on push to `main`; the workflow writes the rendered site into `docs/` and pushes the result.
+
+This section is platform-agnostic where it can be. The site is a static site; the contract is "render to `docs/`, serve the directory." A future v2 may move the publication layer to another static-site host; the move is a constitutional change requiring an ADR, but the spec's requirements on the host are limited to: serve files verbatim, support trailing-slash directory URLs (via `index.html`), serve `build.json` as a regular asset, and serve a real `404.html` for any path that does not exist.
+
+The v1 site is not a port of an earlier site. It is a new site. There is no legacy URL surface to redirect from. The redirect mechanism that earlier drafts of this section described is not part of v1. See §15.9 for the rationale.
 
 ### 15.1 Production host and DNS
 
-The production host is **Cloudflare Pages**. The project is connected to this GitHub repository; the production branch is `main`. The custom domain is `prism-engine.tribunus.dev`. The domain's DNS is on Cloudflare; the Pages project attaches the custom domain via a CNAME. The existing GitHub Pages deployment is decommissioned as part of the cutover; the cutover is operational, not spec-affecting, and is recorded in the Phase 2 deployment platform ADR.
+The production host is **GitHub Pages**. The site is served from the `docs/` directory of the `main` branch. The custom domain `prism-engine.tribunus.dev` is attached to the GitHub Pages site via the `docs/CNAME` file (a one-line file containing the domain name, committed to the repository). The DNS is configured at the registrar to point to GitHub Pages' standard apex and `www` records (per GitHub's documentation).
 
-The repository stays on GitHub. The publication layer is Cloudflare. The build is invoked by Cloudflare on push to the configured branch and on pull request; the build output is the `docs/` directory produced by the SSG (see §15.2). The custom domain does not change; only the platform that serves it.
+The repository stays on GitHub. The publication layer is GitHub Pages. The build is invoked by a GitHub Actions workflow on push to the configured branch and on pull request; the build output is the `docs/` directory produced by the SSG (see §15.2). The custom domain does not change.
 
-A future v2 may move to another platform if Cloudflare Pages ceases to meet the contract. The move is a constitutional change requiring an ADR; the spec is platform-agnostic except where this section names a Cloudflare-specific mechanism (e.g., `_redirects`, `_headers`).
+A future v2 may move the publication layer to another host (e.g., a CDN-fronted bucket) if GitHub Pages ceases to meet the contract. The move is a constitutional change requiring an ADR; the spec's host requirements are small and portable.
 
 ### 15.2 Build integration
 
-Cloudflare Pages is configured to:
+The build is a GitHub Actions workflow. The workflow:
 
-- **Build command:** `bash scripts/build-site.sh` (or its documented equivalent — a single entry point that orchestrates the Rust toolchain, the WASM bundle, the SSG, and any pre-publication validations).
-- **Output directory:** `docs/` (the directory the SSG already writes to).
-- **Environment variables:** the rustup toolchain path, any secrets the build needs, and the build identity variables (commit SHA, build number).
-- **Compatibility flags:** Node and Python are not required; the build is a Rust + shell pipeline.
+- Uses the `dtolnay/rust-toolchain` action to install the pinned Rust toolchain recorded in `rust-toolchain.toml` (or in the SSG build script's default). The toolchain is reproducible; the action's `toolchain:` field pins the version.
+- Caches the Cargo registry and build artifacts to keep the build fast.
+- Runs the SSG: `cargo run -p prism-docs-ssg -- --out docs --data docs/data --schemas schemas --manuscript OBSERVATORY_V1_MANUSCRIPT.md --styles docs/styles`.
+- Commits the rendered `docs/` directory back to the repository on `main` (or pushes to a separate `gh-pages` branch, depending on the workflow's design).
 
-The build entry point is a checked-in script. The Cloudflare Pages dashboard is not the source of build configuration; the script is.
+The build entry point is a checked-in script (or workflow file). The GitHub Actions dashboard is not the source of build configuration; the file is.
 
-**Rust and WASM toolchain are not preinstalled in the Cloudflare Pages build image.** The documented Cloudflare Pages build image provides Go, Node.js, Python, and Ruby; it does not list Rust. The build script therefore performs one of two equivalent strategies, recorded in the deployment platform ADR:
-
-- **Strategy A (Pages builds):** the build script installs a pinned Rust toolchain via `rustup` (channel and components named in the ADR), installs the WASM build target (`wasm32-unknown-unknown`), installs `wasm-bindgen-cli` and `wasm-opt` at pinned versions, then runs the SSG. The toolchain install is reproducible (pinned versions, no floating network expectations beyond the rustup dist server) and is recorded in the build log so a divergent toolchain is detectable.
-- **Strategy B (GitHub Actions builds, Pages serves):** a GitHub Actions workflow runs the same build script on a self-hosted or larger runner with Rust preinstalled, and uploads the resulting `docs/` directory as a Pages deployment via `wrangler pages deploy`. Pages does not run a build of its own; the dashboard's "build command" is set to a no-op or omitted. The workflow is the source of build truth.
-
-Strategy A is preferred for v1 because it keeps the build artifact a function of the source commit on the same platform that serves it. Strategy B is the fallback if the Pages build image constraints prove incompatible with the build time. The deployment platform ADR records the choice and the rationale.
+The SSG validates the data layer against the JSON Schemas before rendering. A validation failure aborts the build with a non-zero exit; the rendered site is not committed.
 
 ### 15.3 Redirect mechanism
 
-Cloudflare Pages serves a `_redirects` file from the site root. The SSG emits this file from the validated §7.2 table at build time. The file's format is the standard Cloudflare Pages redirects format:
+The v1 site does not emit a redirect file. There is no legacy URL surface to redirect from. The site is new; the canonical URLs (§7.1) are the only URLs that exist. Visitors who arrive at a legacy URL from an external link will see the GitHub Pages 404 page, which is the GitHub-hosted 404 (or the `404.html` checked into `docs/` if the site provides one). The site provides a 404 (see §7.4 and §15.7) so that visitors who arrive at a mistyped URL see a useful authored page.
 
-```text
-/index.html                                /                                    301
-/architecture.html                         /architecture/                        301
-/capabilities.html                         /status/                              301
-/capabilities/                             /status/                              301
-/computeimage.html                         /computeimage/                        301
-/heterogeneous.html                        /architecture/                        301
-/heterogeneous/                            /architecture/                        301
-/roadmap.html                              /roadmap/                             301
-/prism-ml.html                             /prism-ml/                            301
-/general-compute.html                      /general-compute/                     301
-/work-with-prism.html                      /prismagent/                          301
-/work-with-prism/                          /prismagent/                          301
-/demo.html                                 /observatory/life/                    301
-/demo/                                     /observatory/life/                    301
-/projection-repro.html                     /observatory/life/                    301
-/projection-repro/                         /observatory/life/                    301
-/field-guide.html                          /start/                               301
-/field-guide/                              /start/                               301
-/start-here.html                           /start/                               301
-/start-here/                               /start/                               301
-/run.html                                  /run/                                 301
-/evidence.html                             /evidence/                            301
-```
+The earlier drafts of this section described a `_redirects` file served by Cloudflare Pages. The Cloudflare Pages pivot (ADR-032 v1) was rescinded (ADR-032 v2, see changelog). The redirect mechanism is not part of v1 because the migration it was designed to support is not part of v1.
 
-These are real HTTP 301 responses served at the edge. Crawlers honor them. Browsers honor them. The redirect latency is the latency of an edge redirect, not a browser-side meta refresh.
-
-**`_redirects` supports status codes 200, 301, 302, 303, 307, and 308. It does not support emitting arbitrary responses such as 410.** The legacy asset retirement described in §7.3 is therefore not expressed in `_redirects`. The deployment platform ADR names the actual mechanism: a Pages Function (preferred) or a Cloudflare Worker route that matches the retired asset path prefixes, returns a real HTTP `410 Gone` with a `Link` header to the canonical asset path, and is deployed alongside the static site. Until that mechanism exists, expired legacy asset paths are simply **absent from the build output**; they resolve through the authored 404 (§7.4) rather than through a 410. A1 requires that the platform serve the redirect as specified; A22 verifies a sample.
-
-The conditional routes (`/prism-ml/`, `/general-compute/`) are emitted with a destination of `/lab/` if the conditional route does not exist in the manifest at build time. The validator rejects a build where the redirect table and the manifest disagree about which routes exist.
+**When a redirect is required** (e.g., a future v2 introduces a renamed route), the mechanism is a small `redirects` table in the SSG that the renderer emits as a set of `<meta http-equiv="refresh" content="0; url=/new/">` tags in an authored HTML page at the legacy path. The HTML page is the only thing at the legacy path. Crawlers and browsers honor the meta refresh. This is the platform-agnostic fallback; a future move to a host that supports real HTTP 301s (e.g., a CDN) can replace the meta refresh with a server-side redirect, recorded as a follow-on ADR.
 
 ### 15.4 Header mechanism
 
-Cloudflare Pages serves a `_headers` file from the site root. The SSG emits this file at build time. The file applies headers per path or path-prefix.
+GitHub Pages serves a small, fixed set of response headers. The site cannot configure custom response headers per route. The site does not emit a `_headers` file. Earlier drafts of this section described a CSP and HSTS delivered as real HTTP headers; those are not served by GitHub Pages.
+
+The site's security posture is the platform's defaults. The site is a static site; it does not execute server-side code, does not handle user input, does not store or transmit user data, and does not authenticate visitors. The attack surface that a CSP, HSTS, or Permissions-Policy would mitigate is small. The site is honest about this limit: this section names the headers that would be served on a more capable host, and the project does not claim to serve them on GitHub Pages.
+
+**When real headers are required** (e.g., a future v2 introduces user input or authentication), the publication layer moves to a host that supports custom response headers, recorded as a follow-on ADR. The headers that would be served are:
 
 ```text
 /*
@@ -877,68 +857,49 @@ Cloudflare Pages serves a `_headers` file from the site root. The SSG emits this
   Cross-Origin-Resource-Policy: same-origin
 ```
 
-The CSP is authored as one of the platform's full-feature HTTP headers, not via a `<meta>` tag. Meta-delivered CSP does not support every CSP feature (frame-ancestors, sandbox, report-uri, and others are restricted or unsupported in some browsers when delivered via meta); the spec uses real response headers.
-
-A1 requires that the platform actually serves these headers; the A22 smoke test verifies them. A reviewer inspecting the live site with browser devtools sees the CSP, Referrer-Policy, and the rest as real response headers, not as meta tags.
-
-The site does not use `<meta http-equiv="Content-Security-Policy">` or `<meta name="referrer">`. The meta fallback is not used because the platform supports real headers.
+These are the spec's declared security posture, not the live headers. A reviewer inspecting the live site with browser devtools sees the platform's defaults, not these. The site does not use `<meta http-equiv="Content-Security-Policy">` to compensate; the meta-delivered subset of CSP is not equivalent to the full HTTP-delivered CSP, and the project prefers to be honest about the gap rather than to ship a partial version that claims the same posture.
 
 ### 15.5 Cache policy
 
-The `_headers` file expresses cache directives per path.
+The site is small and content-driven. The HTML pages change on every merge; the cache benefit of long-TTL HTML is minimal and the cost of staleness is real. The site does not configure custom cache headers. GitHub Pages' default cache behavior applies.
 
-```text
-/*
-  Cache-Control: public, max-age=0, must-revalidate
-
-/assets/*
-  Cache-Control: public, max-age=31536000, immutable
-
-/pkg/*
-  Cache-Control: public, max-age=31536000, immutable
-```
-
-- HTML pages: revalidated every request. The site is content-driven and small; the cache benefit is minimal and the cost of staleness is real.
-- Fingerprinted assets under `/assets/` and `/pkg/`: long-cache immutable. The filename hash changes when the content changes; long cache is safe.
-- Service worker: not used at v1.
-
-The cache directives are real HTTP response headers served by the platform. CDN intermediaries and browsers honor them.
+Fingerprinted assets (the WASM bundle, the CSS, the JavaScript bundles) are content-addressed by their filename hash; a future move to a host that supports long-cache immutable for `/assets/*` and `/pkg/*` would be a small change. The v1 site does not depend on this; the cache behavior is the platform's default.
 
 ### 15.6 Preview environment
 
-Every push to a non-production branch and every pull request receives a Cloudflare Pages **preview URL**. The preview is the same build pipeline as production; the only differences are the URL and the absence of the custom domain binding. The preview URL is the surface the A22 smoke test runs against. The preview is also the surface the H1–H13 reviewers use. A reviewer approves a candidate build by approving its preview URL, not by inspecting the production site.
+Every pull request against `main` runs the same GitHub Actions workflow and produces a build artifact. The PR's `Actions` tab shows the rendered site as a downloadable artifact, or the workflow uploads it to a one-shot preview host (e.g., a temporary Cloudflare Pages or Netlify deployment used for the PR, not for the publication layer). The H1–H13 reviewers review the rendered site from the PR artifact, not from the production site. A1–A23 gates run against the rendered artifact in the workflow.
 
-A preview deployment is a distinct deployment artifact. It is identified by a Cloudflare-assigned deployment ID, has its own URL, and is **not** the same artifact as any production deployment even if it was built from the same source commit. Preview deployments are valid for reviewing, gating, and human signoff; they are **not** valid rollback targets. Rollback targets are previous production deployments only.
+The exact preview mechanism is a workflow design choice, not a spec-level contract. The contract is: a reviewer can run the same build locally (`scripts/build-site.sh` or `cargo run -p prism-docs-ssg`) and see the same output. The PR artifact and the local build produce the same `docs/` directory from the same source commit.
 
 ### 15.7 Rollback and promotion
 
-Promotion follows the documented Cloudflare Pages workflow, not a "flip the preview into production" gesture:
+Promotion is a merge to `main`. The GitHub Actions workflow rebuilds and the new site is live. There is no intermediate "promote the preview into production" gesture; the merge is the promotion.
 
-1. A pull request (or a release branch) is opened. Cloudflare Pages builds the preview deployment.
-2. All automated gates (A1–A23) run against the preview. The smoke test (A22) runs against the preview URL. Human gates (H1–H13) are signed against the preview URL.
-3. A passing review permits merging the exact reviewed commit into `main`. The source commit becomes the commit Pages will build from for production.
-4. Cloudflare Pages detects the new commit on `main` and produces a **production deployment**. This is a new build, a new deployment ID, a new artifact. The source commit is identical to the preview; the deployment identities are distinct.
-5. A **post-production smoke check** runs against the production URL. The check is the same path-following flow as A22, plus a verification of the response headers in §15.4 and the cache directives in §15.5. The check is automated. A failure of the check blocks the deployment from being declared the current production; the previous production deployment remains live.
-6. The previous production deployment is recorded as the rollback target. The release log records the promotion with build identity, source commit, gates passed, reviewer, and timestamp.
+Rollback is `git revert` (or `git reset --hard` to a previous known-good commit) and a push to `main`. The workflow rebuilds from the reverted commit. The live site is the previous known-good build until the rebuild completes. There is no window during which a failed build is live.
 
-Rollback to a previous production deployment is a separate operation. The Cloudflare Pages dashboard redeploys the previous deployment's artifact; the live site is the current production until the redeploy completes, then becomes the previous-previous production after the redeploy. There is no window during which the failed build is live. Previous production deployments are the only valid rollback targets; preview deployments are not.
+The previous known-good commit is recorded as the rollback target. The release log records the promotion with build identity, source commit, gates passed, reviewer, and timestamp. The release log is a file in the repository (e.g., `RELEASES.md` or a release log directory).
 
-When a bug is discovered in production (one that passed the gates), rollback is one click in the Cloudflare Pages dashboard: redeploy the last known-good production deployment. The release log records the rollback.
+The post-promotion check is a curl against the live site's home page that asserts the build identity in `build.json` matches the expected build identity for the just-merged commit. A failure of the check indicates the workflow did not run to completion; the merge is reverted and the workflow re-runs.
 
-The deployment platform ADR defines the promotion and rollback workflow precisely, including the post-production smoke check command and its exit codes. The ADR is the operational source of truth for promotion; this section is the constitutional contract.
+### 15.8 Custom domain
 
-### 15.8 Cutover from GitHub Pages
+The custom domain `prism-engine.tribunus.dev` is attached to the GitHub Pages site via a `CNAME` file in `docs/`. The DNS is configured at the registrar to point to GitHub Pages' apex and `www` records. The TLS certificate is provisioned by GitHub Pages via Let's Encrypt; the certificate is automatically renewed.
 
-The cutover from GitHub Pages to Cloudflare Pages is operational, not spec-affecting. The steps are:
+The `CNAME` file is a one-line file containing the domain name (`prism-engine.tribunus.dev`). It is committed to the repository. A future move to another host that does not use a `CNAME` file (e.g., a CDN-fronted bucket) would remove the file as part of the move, recorded as a follow-on ADR.
 
-1. The Cloudflare Pages project is provisioned and connected to the GitHub repository.
-2. A staging deployment is verified at the Cloudflare Pages default domain.
-3. The custom domain `prism-engine.tribunus.dev` is moved to Cloudflare DNS and attached to the Pages project. The TLS certificate is provisioned by Cloudflare.
-4. The GitHub Pages deployment is decommissioned (the GitHub Pages source branch is set to `none`, the custom domain is removed from the GitHub Pages settings).
-5. The first production build on Cloudflare Pages is promoted.
-6. A new `CNAME` is not committed to the repository (Cloudflare Pages does not require it; the custom domain is configured in the dashboard). If a `CNAME` file is later required for some reason, the Phase 2 deployment platform ADR records the change.
+### 15.9 Rationale for GitHub Pages (rescission of ADR-032 v1)
 
-The cutover is recorded in the Phase 2 deployment platform ADR. The cutover does not change the spec; the spec's platform contract was always Cloudflare Pages, and the GitHub Pages deployment was a pre-spec interim state.
+ADR-032 v1 selected Cloudflare Pages as the publication layer. The rationale was a list of platform capabilities (real HTTP 301s, real CSP/HSTS headers, per-path cache control, isolated preview URLs, instant rollback). The v2 decision is to use GitHub Pages instead. The reasons:
+
+- The v1 site is not a port of an earlier site. There is no legacy URL surface to redirect from. The redirect capability the v1 ADR was buying is unnecessary.
+- The v1 site does not handle user input, does not authenticate visitors, and does not store or transmit user data. The CSP, HSTS, and Permissions-Policy headers that v1 was buying are mitigations for a category of attack (cross-site scripting, protocol downgrade, feature misuse) that the v1 site does not face.
+- The preview environment is a workflow concern, not a host concern. The same GitHub Actions workflow that builds the production site can produce a preview artifact for a PR. The reviewer's experience is a download of the rendered site, not a live URL.
+- Rollback is `git revert` and a push. The platform's "instant rollback to a previous deployment" is a UX nicety; the Git-native equivalent is a single command and is honest about the build that's actually live.
+- The site is a static site. GitHub Pages serves static sites well. The custom domain attachment is a one-line `CNAME` file. The TLS certificate is automatic.
+
+The rescission of ADR-032 v1 is recorded as ADR-032 v2 (this version). The original ADR is preserved in the changelog for the audit trail; the operative decision is v2.
+
+A future v2 that needs the capabilities the v1 ADR was buying (user input, authentication, real-time updates, real HTTP 301s for renamed routes) moves the publication layer to a host that supports them, recorded as a follow-on ADR. The v1 site is a static projection of a system; a future v2 may be more.
 
 ---
 

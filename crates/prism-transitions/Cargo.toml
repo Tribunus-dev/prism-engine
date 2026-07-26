@@ -1,0 +1,20 @@
+[package]
+name = "prism-transitions"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "State-driven motion for Prism Observatory. Pure Rust transition math, exposed to the browser as a WebAssembly module. The CSS is the renderer; this crate is the choreographer."
+
+[lib]
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[features]
+default = []
+wasm = ["dep:wasm-bindgen"]
+
+[dependencies]
+wasm-bindgen = { workspace = true, optional = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prism Engine — ComputeImage Specimen</title>
+<link rel="canonical" href="https://prism-engine.tribunus.dev/">
+<meta name="generator" content="prism-docs-ssg">
+<meta name="build-id" content="ssg-86094">
+<link rel="stylesheet" href="/site.css">
+<script>
+(function(){try{
+  var k='prism-theme';
+  var v=null;
+  try{v=localStorage.getItem(k);}catch(e){}
+  if(v!=='dark'&&v!=='light'){
+    try{
+      if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches){v='light';}
+      else{v='dark';}
+    }catch(e){v='dark';}
+  }
+  document.documentElement.setAttribute('data-theme',v);
+  try{document.documentElement.style.colorScheme=v;}catch(e){}
+}catch(e){}})();
+</script>
+<script src="/theme.js" defer></script>
+<script src="/selection-controller.js" defer></script>
+<script src="/transitions-orchestrator.js" defer></script>
+</head>
+<body data-prism-route="/computeimage/specimen/" data-prism-hydrated="false">
+<header class="site-header">
+<a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Prism Engine</span></a>
+<nav class="site-nav" aria-label="Primary navigation">
+<a class="site-nav-link" href="/start/">Start</a>
+<a class="site-nav-link" href="/architecture/">Architecture</a>
+<a class="site-nav-link" href="/evidence/">Evidence</a>
+<a class="site-nav-link" href="/status/">Status</a>
+<a class="site-nav-link" href="https://github.com/Tribunus-dev/prism-engine" rel="external" target="_blank">GitHub</a>
+</nav>
+<button type="button" class="theme-toggle" aria-label="Toggle dark and light theme" data-theme-toggle><span class="theme-toggle-icon" aria-hidden="true"></span><span class="theme-toggle-label">Theme</span></button>
+</header>
+<main class="page-body" id="top" data-prism-region="main">
+<section class="chapter" id="orientation">
+<h3 class="chapter-title">Orientation</h3>
+<div class="chapter-body">
+<p>This is an evidence record, not a chapter. The artifact is a sanitized ComputeImage. Its public projection is the bytes served at this URL. Its original source is the test fixture <code>crates/prism-ecs-compile/output.cimage</code>.</p>
+<ul>
+<li><strong>`computeimage_artifact_digest`:</strong> <code><digest of the served bytes></code>.</li>
+<li><strong>`source_artifact_digest`:</strong> <code><digest of the test fixture bytes></code>. (Identical to the public projection in this case, because the sanitization is declarative, not byte-modifying.)</li>
+<li><strong>`plan_identity`:</strong> not produced for a test fixture. The plan field is absent from the published header.</li>
+<li><strong>`receipt`:</strong> not produced. The corpus has no execution receipt for this artifact. The v1 site names the gap.</li>
+<li><strong>`validation_scope`:</strong> none. The artifact is a test fixture. No real target, no real run, no real measurement.</li>
+</ul>
+</div>
+</section>
+<section class="chapter" id="redaction-manifest">
+<h3 class="chapter-title">Redaction manifest</h3>
+<div class="chapter-body">
+<p>The published bytes are sanitized. The redaction is declarative. The manifest is:</p>
+<ul>
+<li>The tensor payload bytes are synthetic test data. The single tensor in this fixture is <code>weight</code>, shape <code>[4, 4]</code>, dtype <code>f16</code>, 32 bytes of synthetic weight values.</li>
+<li>The <code>source_digest</code> in the header is the placeholder string <code>"test-digest"</code>. It does not identify a real model package.</li>
+<li>The <code>model_family</code> and <code>model_config_json</code> are placeholder values.</li>
+<li>No real model identity, no real source package, no real measurement, and no real execution target is implied.</li>
+</ul>
+</div>
+</section>
+<section class="chapter" id="remaining-verifiable">
+<h3 class="chapter-title">Remaining verifiable</h3>
+<div class="chapter-body">
+<p>The closed set of verifiable relationships is declared in the spec (§4.8). For this specimen:</p>
+<ul>
+<li><strong>`digest_of_source_package`:</strong> <em>verifiable.</em> The source bytes are the test fixture bytes; their digest is the public digest. A reviewer can re-hash the file and confirm.</li>
+<li><strong>`semantic_graph_identity`:</strong> <em>not verifiable.</em> The source is not a real model, so no canonical graph is recovered.</li>
+<li><strong>`execution_target_identity`:</strong> <em>not verifiable.</em> The artifact has no execution target.</li>
+<li><strong>`route_identity`:</strong> <em>not verifiable.</em> No route was admitted.</li>
+<li><strong>`evidence_chain_integrity`:</strong> <em>not verifiable.</em> The chain does not extend to a real execution; the receipts it would link to are not published.</li>
+</ul>
+</div>
+</section>
+<section class="chapter" id="the-data">
+<h3 class="chapter-title">The data</h3>
+<div class="chapter-body">
+<p>The six strata are exposed as labeled blocks. Each block contains the relevant header field, rendered as data, with a short orientation. There is no explanatory prose. The Specimen page is to the ComputeImage chapter what a database record is to a chapter that references it: same fact, different surface.</p>
+<ul>
+<li><strong>Metadata block:</strong> schema version, source digest (placeholder), producer (<code>prism-ecs-compile</code>).</li>
+<li><strong>Logical tensors block:</strong> the single <code>weight</code> tensor; shape, dtype, semantic family.</li>
+<li><strong>Physical layouts block:</strong> the <code>weight</code> tensor's physical layout; offset, size, alignment.</li>
+<li><strong>Execution views block:</strong> absent. The artifact has no execution views.</li>
+<li><strong>Plan and receipts block:</strong> absent. The artifact has no plan or receipts.</li>
+<li><strong>Payloads block:</strong> the synthetic weight bytes, displayed as 32 hex characters. The bytes are not informative; the page is honest that they are synthetic test data.</li>
+</ul>
+</div>
+</section>
+<section class="chapter" id="provenance-chain">
+<h3 class="chapter-title">Provenance chain</h3>
+<div class="chapter-body">
+<p>The chain is one link: the test fixture, with its commit. The fixture is checked into the engine crate. The commit is the build identity. The link is verifiable. The chain does not extend further. The site names the limit.</p>
+</div>
+</section>
+<section class="specimen">
+<div class="specimen-header">
+<h2 class="specimen-title">Sanitized ComputeImage specimen (test fixture)</h2>
+<span class="specimen-id">evidence.computeimage.test_output_cimage.001</span>
+</div>
+<p class="specimen-summary">A sanitized cimage produced by the engine&#39;s compile test. The header has LLaMA-style layer names (q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj, embed_tokens, lm_head) with shape metadata, but all tensor payload bytes are empty (size: 0). The artifact is a compile test output, not a real model. No execution target, no search trace, no legalization report, no selection receipt is present in the published header.</p>
+<p class="sanitization-notice">This artifact is sanitized per <a href="/evidence/">§4.8</a>. The redaction manifest is shown below. The 6-stratum visual below shows the artifact's structure; the absent strata are visually distinct.</p>
+<ol class="cimage-strata" aria-label="The six strata of a ComputeImage">
+<li class="stratum-card" data-state="present" data-stratum="metadata">
+<div class="stratum-card-header"><span class="stratum-card-number">01</span><h3 class="stratum-card-title">Metadata</h3><span class="stratum-card-state">present</span></div>
+<p class="stratum-card-description">Schema version, source digest, producer, source catalog.</p>
+<pre class="stratum-card-data">schema_version: cimage-manifest-v1
+source_digest: test-digest (placeholder)
+producer: prism-ecs-compile
+source_catalog: prism-ecs-compile (test fixture)</pre>
+</li>
+<li class="stratum-card" data-state="present" data-stratum="logical">
+<div class="stratum-card-header"><span class="stratum-card-number">02</span><h3 class="stratum-card-title">Logical Tensors</h3><span class="stratum-card-state">present</span></div>
+<p class="stratum-card-description">The model's logical view. Shapes, dtypes, semantic families, roles.</p>
+<pre class="stratum-card-data">tensor_records: 9 records (q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj, embed_tokens, lm_head)
+shape: per-record
+dtype: f16
+semantic_family: linear / embedding / head</pre>
+</li>
+<li class="stratum-card" data-state="present" data-stratum="physical">
+<div class="stratum-card-header"><span class="stratum-card-number">03</span><h3 class="stratum-card-title">Physical Layouts</h3><span class="stratum-card-state">present</span></div>
+<p class="stratum-card-description">How the tensors are stored. Tile sizes, alignment, padding, memory tier.</p>
+<pre class="stratum-card-data">offset: per-record (declared)
+size: 0 bytes (test fixture)
+alignment: 16 KB page boundary</pre>
+</li>
+<li class="stratum-card" data-state="absent" data-stratum="execution">
+<div class="stratum-card-header"><span class="stratum-card-number">04</span><h3 class="stratum-card-title">Execution Views</h3><span class="stratum-card-state">absent</span></div>
+<p class="stratum-card-description">How a backend consumes the layouts. Lane, provider, dispatch path.</p>
+<p class="stratum-card-empty">The artifact has no execution views. The corpus has no execution target for the v1 specimen.</p>
+</li>
+<li class="stratum-card" data-state="absent" data-stratum="plan">
+<div class="stratum-card-header"><span class="stratum-card-number">05</span><h3 class="stratum-card-title">Plan and Receipts</h3><span class="stratum-card-state">absent</span></div>
+<p class="stratum-card-description">The admitted plan and the receipts that admit it.</p>
+<p class="stratum-card-empty">The artifact has no plan and no receipts. The v1 corpus has no execution receipt; ADR-035 closes the gap.</p>
+</li>
+<li class="stratum-card" data-state="present" data-stratum="payloads">
+<div class="stratum-card-header"><span class="stratum-card-number">06</span><h3 class="stratum-card-title">Payloads</h3><span class="stratum-card-state">present</span></div>
+<p class="stratum-card-description">The tensor bytes, aligned to a 16 KB page boundary so the runtime can mmap them without parsing.</p>
+<pre class="stratum-card-data">payload_bytes: 0 bytes (test fixture)
+alignment: 16 KB
+encoding: raw little-endian f16</pre>
+</li>
+</ol>
+<h3 class="chapter-title">Remaining verifiable</h3>
+<ul class="remaining-verifiable" aria-label="Verifiable claims from §4.8">
+<li class="verifiable-item" data-state="verifiable"><span class="verifiable-item-key">source_package_digest</span><span class="verifiable-item-state">verifiable</span><p class="verifiable-item-desc">The source bytes are the test fixture bytes; their digest is the public digest.</p></li>
+<li class="verifiable-item" data-state="not-verifiable"><span class="verifiable-item-key">semantic_graph_identity</span><span class="verifiable-item-state">not verifiable</span><p class="verifiable-item-desc">The source is not a real model, so no canonical graph is recovered.</p></li>
+<li class="verifiable-item" data-state="not-verifiable"><span class="verifiable-item-key">execution_target_identity</span><span class="verifiable-item-state">not verifiable</span><p class="verifiable-item-desc">The artifact has no execution target.</p></li>
+<li class="verifiable-item" data-state="not-verifiable"><span class="verifiable-item-key">route_identity</span><span class="verifiable-item-state">not verifiable</span><p class="verifiable-item-desc">No route was admitted.</p></li>
+<li class="verifiable-item" data-state="not-verifiable"><span class="verifiable-item-key">evidence_chain_integrity</span><span class="verifiable-item-state">not verifiable</span><p class="verifiable-item-desc">The chain does not extend to a real execution.</p></li>
+</ul>
+<section class="redaction-manifest">
+<div class="redaction-manifest-header">
+<h3 class="redaction-manifest-title">Redaction manifest</h3>
+<span class="redaction-manifest-meta">cimage-sanitization-v1</span>
+</div>
+<pre><code>{
+  "declared_synthetic_fields": [
+    "header.tensor_records[*].size",
+    "header.search_trace (absent)",
+    "header.legalization_report (absent)",
+    "header.selection_receipt (absent)",
+    "header.source_identity (absent)",
+    "header.source_catalog (absent)"
+  ],
+  "redaction_kind": "declarative",
+  "removed_fields": []
+}</code></pre>
+</section>
+<p class="download-link"><a class="hero-arg" href="/evidence/corpus/computeimage-test-output-cimage-001.cimage">Download the published bytes <span class="hero-arg-arrow">→</span></a></p>
+</section>
+</main>
+<aside class="secondary-nav">
+<ul>
+<li><a href="/">Home</a></li>
+<li><a href="/computeimage/">ComputeImage</a></li>
+<li><a href="/computeimage/specimen/">Specimen</a></li>
+<li><a href="/observatory/life/">The Life of a ComputeImage</a></li>
+<li><a href="/run/">Run</a></li>
+<li><a href="/roadmap/">Roadmap</a></li>
+<li><a href="/prismagent/">PrismAgent</a></li>
+<li><a href="/prism-ml/">Prism ML</a></li>
+<li><a href="/general-compute/">General Compute</a></li>
+<li><a href="/lab/">Lab Notes</a></li>
+<li><a href="/colophon/">Colophon</a></li>
+</ul>
+</aside>
+<footer class="site-footer">
+<p>Prism Engine is independently developed by <strong>Julian Torres</strong>. Released under the project's license. <a href="/colophon/">Colophon</a> · <a href="https://github.com/Tribunus-dev/prism-engine">Repository</a></p>
+</footer>
+<script>
+
+// Prism Observatory v1 — SelectionController.
+// Generated by prism-docs-ssg. Do not edit by hand.
+//
+// The sole owner of the addressable selection state. Parses
+// selection from the URL, validates, normalizes, writes back,
+// and broadcasts to subscribers. The URL is the source of truth.
+
+(function () {
+  'use strict';
+
+  // ---------- Schema (declarative) ----------
+
+  // The known selection dimensions. Each is optional. The URL
+  // carries them as query parameters. Unknown parameters are
+  // ignored. The reducer normalizes the URL after a write.
+  var SCHEMA = {
+    stage:        { kind: 'integer', min: 1, max: 12 },
+    density:      { kind: 'enum',    values: ['overview', 'technical', 'raw-artifact'] },
+    tensor:       { kind: 'string',  pattern: /^[a-zA-Z0-9._-]+$/ },
+    capability:   { kind: 'string',  pattern: /^capability\.[a-zA-Z0-9._-]+$/ },
+    evidence:     { kind: 'string',  pattern: /^evidence\.[a-zA-Z0-9._-]+$/ },
+    specimen:     { kind: 'string',  pattern: /^observatory\.specimen\.[a-zA-Z0-9._-]+$/ }
+  };
+
+  // ---------- Reducer ----------
+
+  function readFromUrl() {
+    var u;
+    try { u = new URL(window.location.href); }
+    catch (e) { return {}; }
+    var out = {};
+    var keys = Object.keys(SCHEMA);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var raw = u.searchParams.get(k);
+      if (raw == null) continue;
+      var parsed = parseValue(k, raw);
+      if (parsed !== undefined) out[k] = parsed;
+    }
+    return out;
+  }
+
+  function parseValue(key, raw) {
+    var def = SCHEMA[key];
+    if (!def) return undefined;
+    if (def.kind === 'integer') {
+      var n = parseInt(raw, 10);
+      if (isNaN(n)) return undefined;
+      if (def.min != null && n < def.min) return undefined;
+      if (def.max != null && n > def.max) return undefined;
+      return n;
+    }
+    if (def.kind === 'enum') {
+      if (def.values.indexOf(raw) === -1) return undefined;
+      return raw;
+    }
+    if (def.kind === 'string') {
+      if (def.pattern && !def.pattern.test(raw)) return undefined;
+      return raw;
+    }
+    return undefined;
+  }
+
+  function writeToUrl(selection) {
+    var u;
+    try { u = new URL(window.location.href); }
+    catch (e) { return; }
+    var keys = Object.keys(SCHEMA);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (selection[k] == null) {
+        u.searchParams.delete(k);
+      } else {
+        u.searchParams.set(k, String(selection[k]));
+      }
+    }
+    // Use replaceState so the browser history is not polluted.
+    try {
+      window.history.replaceState(null, '', u.toString());
+    } catch (e) { /* no-op */ }
+  }
+
+  // ---------- Broadcast ----------
+
+  var subscribers = [];
+  var current = readFromUrl();
+
+  function broadcast(prev) {
+    for (var i = 0; i < subscribers.length; i++) {
+      try { subscribers[i](current, prev); }
+      catch (e) { /* a single subscriber failure must not break the others */ }
+    }
+  }
+
+  // ---------- Public API ----------
+
+  function subscribe(callback) {
+    if (typeof callback !== 'function') return function () {};
+    subscribers.push(callback);
+    // Fire once on subscribe so the new subscriber sees the
+    // current state without waiting for the next change.
+    try { callback(current, current); } catch (e) { /* no-op */ }
+    return function unsubscribe() {
+      var idx = subscribers.indexOf(callback);
+      if (idx !== -1) subscribers.splice(idx, 1);
+    };
+  }
+
+  function set(partial) {
+    if (partial == null || typeof partial !== 'object') return;
+    var prev = {};
+    for (var k in current) prev[k] = current[k];
+    var next = {};
+    for (var k in current) next[k] = current[k];
+    var keys = Object.keys(partial);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (!(k in SCHEMA)) continue;
+      var v = partial[k];
+      if (v == null) {
+        delete next[k];
+      } else {
+        var parsed = parseValue(k, String(v));
+        if (parsed !== undefined) next[k] = parsed;
+      }
+    }
+    current = next;
+    writeToUrl(current);
+    broadcast(prev);
+  }
+
+  function get() {
+    var out = {};
+    for (var k in current) out[k] = current[k];
+    return out;
+  }
+
+  // ---------- Wire up popstate ----------
+
+  window.addEventListener('popstate', function () {
+    var prev = current;
+    current = readFromUrl();
+    broadcast(prev);
+  });
+
+  // ---------- Expose ----------
+
+  window.prismSelection = {
+    subscribe: subscribe,
+    set: set,
+    get: get,
+    schema: SCHEMA
+  };
+})();
+
+</script>
+</body>
+</html>

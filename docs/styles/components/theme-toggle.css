@@ -1,0 +1,85 @@
+/* Prism Engine Observatory v1 — theme toggle.
+ *
+ * A small button in the site header that switches between
+ * dark and light themes. The choice persists in localStorage
+ * (per §A22 / user preference), and respects
+ * prefers-color-scheme on first visit.
+ *
+ * The toggle is keyboard-reachable, has a visible focus
+ * ring, and uses an aria-pressed state to communicate its
+ * current value. The icon is text (not SVG) so the dark/light
+ * hint is plain and accessible. The text is also the
+ * state; the icon is reinforcement.
+ */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
+}
+.theme-toggle:hover {
+  border-color: var(--color-accent);
+  background: var(--color-surface-2);
+}
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.theme-toggle[aria-pressed="true"] {
+  border-color: var(--color-accent);
+}
+
+.theme-toggle-icon {
+  display: inline-block;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  line-height: 1;
+  width: 1em;
+  height: 1em;
+  text-align: center;
+  /* The shape is hand-drawn in CSS so it survives forced-colors
+   * mode (per §9 / WCAG 2.4.7). */
+}
+
+/* In dark theme, the icon is a moon (the dimmer). */
+:root .theme-toggle-icon::before { content: "☾"; }
+
+/* In light theme, the icon is a sun (the brighter). */
+[data-theme="light"] .theme-toggle-icon::before { content: "☀"; }
+
+.theme-toggle-label {
+  /* The label is "Theme" on desktop, hidden on small viewports. */
+}
+@media (max-width: 540px) {
+  .theme-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* A "no-flash" guard. The script that sets the data-theme
+ * attribute runs before paint. If the user has not chosen
+ * (and prefers-color-scheme is light), the body briefly
+ * shows a transition-into-light. */
+html { color-scheme: dark light; }
+[data-theme="light"] { color-scheme: light; }

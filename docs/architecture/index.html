@@ -1,123 +1,267 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Prism Engine — Observe Representation</title><link rel="stylesheet" href="/site.css"><script type="module" src="/site.js" defer></script><script type="module" src="/pkg/prism_docs_runtime.js" defer></script><script type="application/json" id="prism-prelude">{"manifest":{"chapters":[{"id":"chapter:home-intent","slug":"home-intent","title":"Observe Intent","order":1,"intent":"Establish one canonical subject and follow it through every observable surface.","blurb":"Where to begin this computation.","reading_minutes":3,"source_refs":[],"body_path":"chapters/home-intent.md"},{"id":"chapter:home-origin","slug":"home-origin","title":"Observe Origin","order":2,"intent":"Trace the canonical subject from model source to the sealed ComputeImage artifact.","blurb":"How a model becomes an artifact.","reading_minutes":5,"source_refs":[],"body_path":"chapters/home-origin.md"},{"id":"chapter:home-constitutional","slug":"home-constitutional","title":"Constitutional Discipline","order":3,"intent":"The site is built on the same constitutional ECS as the engine. The world is the source; HTML, CSS, and JS are projections.","blurb":"How the architecture applies to the site you are reading.","reading_minutes":3,"source_refs":[],"body_path":"chapters/home-constitutional.md"},{"id":"chapter:arch-overview","slug":"arch-overview","title":"The short version","order":1,"intent":"Prism is an ECS-native compiler and runtime for local, heterogeneous AI deployment.","blurb":"The plain-language path.","reading_minutes":2,"source_refs":[],"body_path":"chapters/arch-overview.md"},{"id":"chapter:arch-three-layers","slug":"arch-three-layers","title":"One tensor, three questions","order":2,"intent":"Prism separates concerns that model formats and runtimes often blend together.","blurb":"LogicalTensor, PhysicalTileLayout, ExecutionView.","reading_minutes":3,"source_refs":[],"body_path":"chapters/arch-three-layers.md"},{"id":"chapter:arch-compiler","slug":"arch-compiler","title":"The ECS-native compiler","order":3,"intent":"Make policy explicit so it can be analyzed, searched, and audited.","blurb":"Compiler state as ECS entities and components.","reading_minutes":4,"source_refs":[],"body_path":"chapters/arch-compiler.md"},{"id":"chapter:arch-decision-trace","slug":"arch-decision-trace","title":"One decision, made visible","order":4,"intent":"Representation and placement are searchable data.","blurb":"The decision trace.","reading_minutes":3,"source_refs":[],"body_path":"chapters/arch-decision-trace.md"},{"id":"chapter:arch-cimage","slug":"arch-cimage","title":"A deployment artifact, not a renamed checkpoint","order":5,"intent":"A ComputeImage is the boundary between compilation and execution.","blurb":"The deployment contract.","reading_minutes":3,"source_refs":[],"body_path":"chapters/arch-cimage.md"},{"id":"chapter:arch-runtime","slug":"arch-runtime","title":"The ECS-native runtime","order":6,"intent":"Route decisions, record what was proven.","blurb":"Canonical ECS, router, residency, receipts.","reading_minutes":4,"source_refs":[],"body_path":"chapters/arch-runtime.md"},{"id":"chapter:arch-why","slug":"arch-why","title":"Why not extend an inference runtime?","order":7,"intent":"Compile policy once. Seal the artifact. Execute the explicit plan.","blurb":"Operational consequence.","reading_minutes":2,"source_refs":[],"body_path":"chapters/arch-why.md"},{"id":"chapter:arch-current-boundary","slug":"arch-current-boundary","title":"What the evidence supports today","order":8,"intent":"Be honest about what is validated, what is compile-verified, and what is not claimed.","blurb":"Current state.","reading_minutes":2,"source_refs":[],"body_path":"chapters/arch-current-boundary.md"},{"id":"chapter:ci-why","slug":"ci-why","title":"More than a renamed checkpoint","order":1,"intent":"A deployment artifact preserves how weights were admitted, laid out, routed, and validated.","blurb":"Why it exists.","reading_minutes":2,"source_refs":[],"body_path":"chapters/ci-why.md"},{"id":"chapter:ci-anatomy","slug":"ci-anatomy","title":"Six inspectable strata","order":2,"intent":"One artifact, six inspectable layers.","blurb":"Metadata, logical tensors, physical layouts, execution views, plan + receipts, payloads.","reading_minutes":3,"source_refs":[],"body_path":"chapters/ci-anatomy.md"},{"id":"chapter:ci-three-contracts","slug":"ci-three-contracts","title":"Three contracts","order":3,"intent":"Meaning, storage, and consumption stay separate.","blurb":"LogicalTensor, PhysicalTileLayout, ExecutionView.","reading_minutes":3,"source_refs":[],"body_path":"chapters/ci-three-contracts.md"},{"id":"chapter:ci-lifecycle","slug":"ci-lifecycle","title":"The lifecycle","order":4,"intent":"The artifact accumulates observations without changing identity.","blurb":"Compile, seal, load, run, replay.","reading_minutes":2,"source_refs":[],"body_path":"chapters/ci-lifecycle.md"},{"id":"chapter:ci-current-boundary","slug":"ci-current-boundary","title":"Inspectable does not mean validated","order":5,"intent":"Separate 'artifact exists' from 'this route is qualified'.","blurb":"Current state.","reading_minutes":2,"source_refs":[],"body_path":"chapters/ci-current-boundary.md"},{"id":"chapter:het-idea","slug":"het-idea","title":"One semantic workload, many physical homes","order":1,"intent":"Separate workload semantics from the hardware that satisfies them.","blurb":"The idea.","reading_minutes":3,"source_refs":[],"body_path":"chapters/het-idea.md"},{"id":"chapter:het-same-graph","slug":"het-same-graph","title":"Same graph, different machines","order":2,"intent":"The serving requirement stays constant while the physical plan changes.","blurb":"Phases, handoffs, providers.","reading_minutes":3,"source_refs":[],"body_path":"chapters/het-same-graph.md"},{"id":"chapter:het-target-classes","slug":"het-target-classes","title":"Target classes","order":3,"intent":"Deployment profiles are explicit.","blurb":"CPU, GPU, NPU, heterogeneous.","reading_minutes":3,"source_refs":[],"body_path":"chapters/het-target-classes.md"},{"id":"chapter:het-provider-boundary","slug":"het-provider-boundary","title":"Provider boundary","order":4,"intent":"Prism does not pretend to be the accelerator.","blurb":"What Prism owns, what the provider owns.","reading_minutes":3,"source_refs":[],"body_path":"chapters/het-provider-boundary.md"},{"id":"chapter:het-what-it-enables","slug":"het-what-it-enables","title":"What this enables","order":5,"intent":"Frontier models can travel without becoming identical.","blurb":"Representation, GPU, NPU, state.","reading_minutes":2,"source_refs":[],"body_path":"chapters/het-what-it-enables.md"},{"id":"chapter:ev-authority","slug":"ev-authority","title":"Authority","order":1,"intent":"State changes pass through a constitutional boundary.","blurb":"Command, transaction, event, projection.","reading_minutes":3,"source_refs":[],"body_path":"chapters/ev-authority.md"},{"id":"chapter:ev-receipt-chain","slug":"ev-receipt-chain","title":"Receipt chain","order":2,"intent":"What ran remains attributable.","blurb":"Model, artifact, request, route, outcome.","reading_minutes":3,"source_refs":[],"body_path":"chapters/ev-receipt-chain.md"},{"id":"chapter:ev-operations","slug":"ev-operations","title":"Operations","order":3,"intent":"Evidence is useful after the original run.","blurb":"Replay, experiments, regression.","reading_minutes":3,"source_refs":[],"body_path":"chapters/ev-operations.md"},{"id":"chapter:ev-failure","slug":"ev-failure","title":"Failure","order":4,"intent":"Failure must be recorded, not disguised.","blurb":"Stale outcome, provider failure, restart recovery, projection loss.","reading_minutes":2,"source_refs":[],"body_path":"chapters/ev-failure.md"},{"id":"chapter:ev-source-surfaces","slug":"ev-source-surfaces","title":"Source surfaces","order":5,"intent":"The concepts are backed by repository systems.","blurb":"evidence-schema, prism-mcp-replay, prism-mcp-lab, compute-core.","reading_minutes":2,"source_refs":[],"body_path":"chapters/ev-source-surfaces.md"},{"id":"chapter:cap-classification","slug":"cap-classification","title":"One vocabulary, no status inflation","order":1,"intent":"The capability map uses one vocabulary and refuses to inflate status.","blurb":"Status classification.","reading_minutes":2,"source_refs":[],"body_path":"chapters/cap-classification.md"},{"id":"chapter:cap-map","slug":"cap-map","title":"The capability map","order":2,"intent":"Filter by domain or status; every entry carries source paths and limitations.","blurb":"What is implemented today.","reading_minutes":4,"source_refs":[],"body_path":"chapters/cap-map.md"},{"id":"chapter:cap-reading","slug":"cap-reading","title":"Reading the map","order":3,"intent":"Implemented is not the same as released.","blurb":"Status is scoped to a specific code path.","reading_minutes":2,"source_refs":[],"body_path":"chapters/cap-reading.md"},{"id":"chapter:rm-observatory","slug":"rm-observatory","title":"Observatory v1","order":1,"intent":"Make repository truth the website's source of truth.","blurb":"Data, validation, rendering, gate.","reading_minutes":2,"source_refs":[],"body_path":"chapters/rm-observatory.md"},{"id":"chapter:rm-evidence","slug":"rm-evidence","title":"Evidence materialization","order":2,"intent":"Render real artifacts, not only the idea of proof.","blurb":"Receipt fixtures, replay, evidence navigation.","reading_minutes":2,"source_refs":[],"body_path":"chapters/rm-evidence.md"},{"id":"chapter:rm-demo","slug":"rm-demo","title":"Packaged local demo","order":3,"intent":"Turn the source workflow into a reproducible distribution.","blurb":"The local observatory.","reading_minutes":2,"source_refs":[],"body_path":"chapters/rm-demo.md"},{"id":"chapter:rm-qualification","slug":"rm-qualification","title":"Target qualification","order":4,"intent":"Advance hardware paths one evidence class at a time.","blurb":"CPU, XDNA, ANE/CUDA, multimodal.","reading_minutes":2,"source_refs":[],"body_path":"chapters/rm-qualification.md"},{"id":"chapter:rm-compiler","slug":"rm-compiler","title":"Compiler evolution","order":5,"intent":"Search behavior, not only representation error.","blurb":"Calibrate, search, admit, execute, learn.","reading_minutes":2,"source_refs":[],"body_path":"chapters/rm-compiler.md"},{"id":"chapter:run-prereqs","slug":"run-prereqs","title":"Prerequisites","order":1,"intent":"Use the complete Apple build path.","blurb":"Apple Silicon Mac, Rust toolchain, Xcode CLT, pre-1.0 boundary.","reading_minutes":1,"source_refs":[],"body_path":"chapters/run-prereqs.md"},{"id":"chapter:run-pull","slug":"run-pull","title":"Pull and compile","order":2,"intent":"From model identity to ComputeImage.","blurb":"cargo run --release --bin prism --features full-apple -- pull.","reading_minutes":1,"source_refs":[],"body_path":"chapters/run-pull.md"},{"id":"chapter:run-execute","slug":"run-execute","title":"Run","order":3,"intent":"Start the local execution surface.","blurb":"cargo run --release --bin prism --features full-apple -- run.","reading_minutes":1,"source_refs":[],"body_path":"chapters/run-execute.md"},{"id":"chapter:run-server","slug":"run-server","title":"Call the server","order":4,"intent":"Use the OpenAI-compatible local endpoint.","blurb":"curl localhost:8080/v1/chat/completions.","reading_minutes":1,"source_refs":[],"body_path":"chapters/run-server.md"},{"id":"chapter:guide-reading-path","slug":"guide-reading-path","title":"The reading path","order":1,"intent":"Start with motivation, end with the source.","blurb":"Technical brief, architecture, ABI, PrismIR, repository, capability map.","reading_minutes":2,"source_refs":[],"body_path":"chapters/guide-reading-path.md"},{"id":"chapter:guide-edges","slug":"guide-edges","title":"Then inspect the edges","order":2,"intent":"After the first pass, inspect what the architecture does at the boundary.","blurb":"Heterogeneous targets, capabilities, physics, roadmap.","reading_minutes":1,"source_refs":[],"body_path":"chapters/guide-edges.md"},{"id":"chapter:ww-boundary","slug":"ww-boundary","title":"Choose a boundary","order":1,"intent":"Bring a system worth understanding.","blurb":"We work with teams that can provide a concrete execution boundary.","reading_minutes":1,"source_refs":[],"body_path":"chapters/ww-boundary.md"},{"id":"chapter:ww-contracts","slug":"ww-contracts","title":"Engagement contracts","order":2,"intent":"Five shapes of partnership, each with a clear deliverable.","blurb":"Hardware, datacenter, engineering, research, edge & robotics.","reading_minutes":3,"source_refs":[],"body_path":"chapters/ww-contracts.md"},{"id":"chapter:ww-open-and-confidential","slug":"ww-open-and-confidential","title":"Open and confidential","order":3,"intent":"Evidence stays honest at every boundary.","blurb":"Shared interfaces open; proprietary models confidential.","reading_minutes":1,"source_refs":[],"body_path":"chapters/ww-open-and-confidential.md"},{"id":"chapter:pml-relationship","slug":"pml-relationship","title":"The relationship","order":1,"intent":"Complementary by construction.","blurb":"Prism ML explores representation; Prism Engine solves deployment.","reading_minutes":2,"source_refs":[],"body_path":"chapters/pml-relationship.md"},{"id":"chapter:pml-validation-loop","slug":"pml-validation-loop","title":"The validation loop","order":2,"intent":"Bonsai models made the architecture concrete.","blurb":"Model, ingest, admission, artifact.","reading_minutes":2,"source_refs":[],"body_path":"chapters/pml-validation-loop.md"},{"id":"chapter:pml-scale","slug":"pml-scale","title":"Deployment scale","order":3,"intent":"Prism Engine is the deployment scale.","blurb":"CPU, GPU, NPU, heterogeneous.","reading_minutes":2,"source_refs":[],"body_path":"chapters/pml-scale.md"},{"id":"chapter:pml-ownership","slug":"pml-ownership","title":"What each system owns","order":4,"intent":"Different expertise, one handoff.","blurb":"Prism ML owns model quality; Prism Engine owns deployment quality.","reading_minutes":2,"source_refs":[],"body_path":"chapters/pml-ownership.md"},{"id":"chapter:pml-story","slug":"pml-story","title":"From representation to an honest route","order":5,"intent":"The practical story.","blurb":"Model, compile, cimage, route, prove.","reading_minutes":2,"source_refs":[],"body_path":"chapters/pml-story.md"},{"id":"chapter:demo-agenda","slug":"demo-agenda","title":"The agenda","order":1,"intent":"Read first. Run second.","blurb":"Load, compile, inspect, run.","reading_minutes":1,"source_refs":[],"body_path":"chapters/demo-agenda.md"},{"id":"chapter:demo-staged","slug":"demo-staged","title":"Staged workflow","order":2,"intent":"One path, four gates.","blurb":"Ingest, compile, realize, prove.","reading_minutes":1,"source_refs":[],"body_path":"chapters/demo-staged.md"},{"id":"chapter:demo-bands","slug":"demo-bands","title":"Milestone bands","order":3,"intent":"What must be true to ship.","blurb":"Self-contained launch, observable compilation, reproducible evidence.","reading_minutes":2,"source_refs":[],"body_path":"chapters/demo-bands.md"},{"id":"chapter:demo-why-not-yet","slug":"demo-why-not-yet","title":"Why it is not available yet","order":4,"intent":"Confidence needs a clean boundary.","blurb":"Not yet a release, no invented numbers, hardware scope, evidence first.","reading_minutes":2,"source_refs":[],"body_path":"chapters/demo-why-not-yet.md"},{"id":"chapter:demo-current-work","slug":"demo-current-work","title":"Current work","order":5,"intent":"Stabilize the path before the meeting.","blurb":"Package runtime, connect artifact inspection, capture a real receipt.","reading_minutes":1,"source_refs":[],"body_path":"chapters/demo-current-work.md"},{"id":"chapter:gc-relationship","slug":"gc-relationship","title":"The relationship","order":1,"intent":"A provider and a planner.","blurb":"General Compute brings the accelerator; Prism brings the plan.","reading_minutes":2,"source_refs":[],"body_path":"chapters/gc-relationship.md"},{"id":"chapter:gc-serving-phases","slug":"gc-serving-phases","title":"Serving phases","order":2,"intent":"One serving request, several physical phases.","blurb":"Prefill, KV handoff, decode, stream.","reading_minutes":2,"source_refs":[],"body_path":"chapters/gc-serving-phases.md"},{"id":"chapter:gc-what-prism-adds","slug":"gc-what-prism-adds","title":"What Prism adds","order":3,"intent":"The accelerator stays itself.","blurb":"Capabilities, placement, handoffs, evidence.","reading_minutes":2,"source_refs":[],"body_path":"chapters/gc-what-prism-adds.md"},{"id":"chapter:gc-ownership","slug":"gc-ownership","title":"Ownership","order":4,"intent":"Clear boundaries prevent fake portability.","blurb":"Provider owns physical reality; Prism owns deployment reality.","reading_minutes":2,"source_refs":[],"body_path":"chapters/gc-ownership.md"},{"id":"chapter:gc-validation","slug":"gc-validation","title":"Validation","order":5,"intent":"Compare plans, not slogans.","blurb":"Input, plan A, plan B, output.","reading_minutes":2,"source_refs":[],"body_path":"chapters/gc-validation.md"},{"id":"chapter:pr-purpose","slug":"pr-purpose","title":"The purpose","order":1,"intent":"A projection is a derivation, not a second source of truth.","blurb":"Why a deterministic, replayable projection matters.","reading_minutes":2,"source_refs":[],"body_path":"chapters/pr-purpose.md"},{"id":"chapter:pr-how","slug":"pr-how","title":"How it works","order":2,"intent":"Replay the durable event log, project to the surface, reconcile.","blurb":"Three phases: replay, project, reconcile.","reading_minutes":3,"source_refs":[],"body_path":"chapters/pr-how.md"},{"id":"chapter:pr-current","slug":"pr-current","title":"Current surface","order":3,"intent":"What is implemented today.","blurb":"Replay, projection, and reconcile.","reading_minutes":2,"source_refs":[],"body_path":"chapters/pr-current.md"}],"adrs":[],"claims":[{"id":"claim:inspectable","text":"ComputeImages are inspectable artifacts. Their identities, layouts, and binding ABIs are content-addressed and reproducible from inputs.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:evidence-preserving","text":"Every execution emits a typed receipt. The receipt carries identity, fencing generation, deadline, artifact digest, and numerical policy.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:replayable","text":"Replay rebuilds state from durable events without re-running external effects. A restart that re-derives state from the event store reconstructs the same canonical world.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:site-is-constitutional","text":"The Prism Engine docs site is itself built on the constitutional ECS. HTML, CSS, and JavaScript are projections of the same world; the manifest is the only source of truth.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:one-subject","text":"There is one and only one canonical subject in flight. Every surface observes the same identity.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:logical-physical-execution","text":"LogicalTensor, PhysicalTileLayout, and ExecutionView are independent contracts. A change to one does not silently rewrite another.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:compiler-as-search","text":"The compiler is a search over representation and placement. The search is a typed operation on the ECS, not hidden heuristics.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:cimage-is-contract","text":"A ComputeImage is a deployment contract, not a renamed checkpoint. It binds logical identity to physical plans, views, and evidence.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:runtime-records-evidence","text":"The runtime queries canonical state, routes work, and records what was proven. Handoffs and terminal outcomes become evidence, not hidden side effects.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:no-dynamic-derivation","text":"Prism compiles policy once and seals the artifact. The runtime does not re-derive deployment strategy at execution time.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:cimage-not-checkpoint","text":"A ComputeImage is more than a renamed model checkpoint. It carries logical identity, physical layouts, execution views, plans, and receipts.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:cimage-six-strata","text":"A ComputeImage has six inspectable strata: metadata, logical tensors, physical layouts, execution views, plan + receipts, and payloads.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:workload-describes-work","text":"A model describes the work. The deployment system describes the machine. The two are separated, not blended.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:deployment-describes-machine","text":"Prism preserves workload semantics while selecting mixed-precision representations, memory tiers, execution lanes, and KV-cache policy for a particular target.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:provider-is-not-accelerator","text":"Prism does not pretend to be the accelerator. The provider owns kernels, queues, memory handles, fabric transport, and device topology.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:constitutional-boundary","text":"Canonical ECS state owns accepted work, lifecycle, ownership, leases, committed outcomes, and terminal failures. Queues, caches, backend handles, and projections remain derived or ephemeral.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:durable-before-ack","text":"Durable state change is recorded before acknowledgement. A result that does not survive a restart is not authoritative.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:replay-rebuilds","text":"A projection can be deleted and rebuilt from the durable event log without re-running any external effect.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:stale-rejected","text":"A result produced for an expired or superseded lease is rejected at the boundary, not silently accepted.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:no-status-inflation","text":"The capability map uses one vocabulary and refuses to inflate status. A Measured claim is not a Verified claim; a Compile-verified path is not a Validated path.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:evidence-bounded-claim","text":"Every claim is bounded by the evidence that supports it. A claim outside its evidence class is a constitutional violation.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:implemented-not-released","text":"Implemented is not the same as released. Prism is pre-1.0 systems software; status is attached to a specific code path, feature set, model, hardware target, and evidence class.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:roadmap-not-status","text":"The roadmap contains only future milestones. Present implementation status lives in the capability registry. Planned work cannot be mistaken for shipped support.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:milestone-needs-evidence","text":"A milestone is complete only when its evidence boundary is visible. Until then, the page is a milestone definition, not a claim that the executable is available.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:source-path-works","text":"The CLI and local OpenAI-compatible server are available from source on Apple Silicon. This is distinct from a future signed, self-contained demo.","class":"illustrative","state":"observed","source_refs":[],"framed_by":null},{"id":"claim:evidence-scoped","text":"Observed behavior is scoped to the exact commit, build features, model, machine, route, and receipt. Do not generalize one successful run into universal backend support.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:start-with-motivation","text":"The reading path starts with motivation and ends with the source. The vocabulary is consistent across the path.","class":"illustrative","state":"observed","source_refs":[],"framed_by":null},{"id":"claim:same-vocabulary","text":"Compile-time architecture, numerical admission, target-aware planning, inspectable deployment artifacts, and evidence systems share one vocabulary across the docs.","class":"illustrative","state":"observed","source_refs":[],"framed_by":null},{"id":"claim:bring-a-system","text":"Partnerships work best when a team can provide a concrete execution boundary, a meaningful workload, and enough evidence to distinguish what is implemented from what is being explored.","class":"illustrative","state":"observed","source_refs":[],"framed_by":null},{"id":"claim:evidence-stays-honest","text":"Shared interfaces and reproducible fixtures can become open. Proprietary models and deployment constraints remain confidential when the engagement requires it. The evidence class is recorded either way.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:complementary-by-construction","text":"Prism ML explores training, calibration, progressive quantization, ternarization, mixed precision, and model quality. Prism Engine accepts the resulting artifact and solves deployment questions.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:bonsai-made-it-concrete","text":"The Bonsai Ternary and binary work gave Prism Engine a demanding upstream representation to compile against, validating the central boundary of the architecture.","class":"illustrative","state":"observed","source_refs":[],"framed_by":null},{"id":"claim:demo-needs-reproducibility","text":"A demo milestone is complete only when a second engineer can reproduce the path and see which parts are measured, which are fallback behavior, and which remain unproven.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:no-invented-numbers","text":"The demo page contains no throughput, latency, memory, or quality measurements. Measurements belong to the executable run and its receipt, not to a static mock interface.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:provider-and-planner","text":"General Compute brings the physical execution system. Prism brings the layer that turns a workload requirement into a legal, inspectable composition across capabilities.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:accelerator-stays-itself","text":"Prism does not flatten MI300X ROCm/HIP, XDNA/XDNA2, or other providers into a generic GPU-shaped abstraction. Provider-specific capabilities remain visible to the planner.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:replay-from-events","text":"A replay reads the durable event log, re-derives the canonical world, and projects to the surface. No external effect is re-executed.","class":"architectural","state":"verified","source_refs":[],"framed_by":null},{"id":"claim:no-rerun-effects","text":"Replay does not re-run compilation, inference, network requests, file writes, or device allocation. It re-derives state from durable facts.","class":"architectural","state":"verified","source_refs":[],"framed_by":null}],"pages":[{"id":"page:home","route":"/","title":"Observe Intent","blurb":"One computation. One artifact. One receipt. Follow the constitutional ECS world from a single subject through every observable surface.","chapter_refs":["chapter:home-intent","chapter:home-origin","chapter:home-constitutional"],"claim_refs":["claim:inspectable","claim:evidence-preserving","claim:replayable","claim:site-is-constitutional"],"adr_refs":[],"next":null,"prev":""},{"id":"page:architecture","route":"/architecture/","title":"Observe Representation","blurb":"How Prism turns model bytes into a sealed deployment contract.","chapter_refs":["chapter:arch-overview","chapter:arch-three-layers","chapter:arch-compiler","chapter:arch-decision-trace","chapter:arch-cimage","chapter:arch-runtime","chapter:arch-why","chapter:arch-current-boundary"],"claim_refs":["claim:one-subject","claim:logical-physical-execution","claim:compiler-as-search","claim:cimage-is-contract","claim:runtime-records-evidence","claim:no-dynamic-derivation","claim:site-is-constitutional"],"adr_refs":[],"next":"page:computeimage","prev":"page:home"},{"id":"page:computeimage","route":"/computeimage/","title":"Observe Transformation","blurb":"The ComputeImage: a versioned boundary between compilation and execution.","chapter_refs":["chapter:ci-why","chapter:ci-anatomy","chapter:ci-three-contracts","chapter:ci-lifecycle","chapter:ci-current-boundary"],"claim_refs":["claim:cimage-not-checkpoint","claim:cimage-six-strata"],"adr_refs":[],"next":"page:heterogeneous","prev":"page:architecture"},{"id":"page:heterogeneous","route":"/heterogeneous/","title":"Observe Execution","blurb":"Heterogeneous-first deployment: one workload, many physical homes.","chapter_refs":["chapter:het-idea","chapter:het-same-graph","chapter:het-target-classes","chapter:het-provider-boundary","chapter:het-what-it-enables"],"claim_refs":["claim:workload-describes-work","claim:deployment-describes-machine","claim:provider-is-not-accelerator"],"adr_refs":[],"next":"page:evidence","prev":"page:computeimage"},{"id":"page:evidence","route":"/evidence/","title":"Observe Evidence","blurb":"An output is not authoritative because a backend returned it. Prism preserves the chain from accepted work to execution outcome.","chapter_refs":["chapter:ev-authority","chapter:ev-receipt-chain","chapter:ev-operations","chapter:ev-failure","chapter:ev-source-surfaces"],"claim_refs":["claim:constitutional-boundary","claim:durable-before-ack","claim:replay-rebuilds","claim:stale-rejected"],"adr_refs":[],"next":"page:capabilities","prev":"page:heterogeneous"},{"id":"page:capabilities","route":"/capabilities/","title":"Observe Scale","blurb":"The authoritative public map of what exists, what is qualifying, and what has been validated.","chapter_refs":["chapter:cap-classification","chapter:cap-map","chapter:cap-reading"],"claim_refs":["claim:no-status-inflation","claim:evidence-bounded-claim","claim:implemented-not-released"],"adr_refs":[],"next":"page:roadmap","prev":"page:evidence"},{"id":"page:roadmap","route":"/roadmap/","title":"Roadmap","blurb":"Current state is evidence. This page is what comes next.","chapter_refs":["chapter:rm-observatory","chapter:rm-evidence","chapter:rm-demo","chapter:rm-qualification","chapter:rm-compiler"],"claim_refs":["claim:roadmap-not-status","claim:milestone-needs-evidence"],"adr_refs":[],"next":"page:run","prev":"page:capabilities"},{"id":"page:run","route":"/run/","title":"Run Today","blurb":"Run the system that exists today on Apple Silicon.","chapter_refs":["chapter:run-prereqs","chapter:run-pull","chapter:run-execute","chapter:run-server"],"claim_refs":["claim:source-path-works","claim:evidence-scoped"],"adr_refs":[],"next":"page:field-guide","prev":"page:roadmap"},{"id":"page:field-guide","route":"/start-here/","title":"Start Here","blurb":"Documentation onboarding: compiler-first deployment for local, heterogeneous AI.","chapter_refs":["chapter:guide-reading-path","chapter:guide-edges"],"claim_refs":["claim:start-with-motivation","claim:same-vocabulary"],"adr_refs":[],"next":"page:work-with-prism","prev":"page:run"},{"id":"page:work-with-prism","route":"/work-with-prism/","title":"Work With Prism","blurb":"Partnership-scale observation: hardware validation, datacenter deployments, engineering, research, edge.","chapter_refs":["chapter:ww-boundary","chapter:ww-contracts","chapter:ww-open-and-confidential"],"claim_refs":["claim:bring-a-system","claim:evidence-stays-honest"],"adr_refs":[],"next":"page:prism-ml","prev":"page:field-guide"},{"id":"page:prism-ml","route":"/prism-ml/","title":"Prism ML","blurb":"Prism ML's Bonsai Ternary and binary models meet Prism Engine deployment.","chapter_refs":["chapter:pml-relationship","chapter:pml-validation-loop","chapter:pml-scale","chapter:pml-ownership","chapter:pml-story"],"claim_refs":["claim:complementary-by-construction","claim:bonsai-made-it-concrete"],"adr_refs":[],"next":"page:demo","prev":"page:work-with-prism"},{"id":"page:demo","route":"/demo/","title":"Apple Silicon Demo","blurb":"A reproducible local path from model source to inspectable ComputeImage and runtime evidence.","chapter_refs":["chapter:demo-agenda","chapter:demo-staged","chapter:demo-bands","chapter:demo-why-not-yet","chapter:demo-current-work"],"claim_refs":["claim:demo-needs-reproducibility","claim:no-invented-numbers"],"adr_refs":[],"next":"page:general-compute","prev":"page:prism-ml"},{"id":"page:general-compute","route":"/general-compute/","title":"General Compute","blurb":"How Prism Engine composes General Compute and SambaNova accelerator capabilities into a heterogeneous deployment plan.","chapter_refs":["chapter:gc-relationship","chapter:gc-serving-phases","chapter:gc-what-prism-adds","chapter:gc-ownership","chapter:gc-validation"],"claim_refs":["claim:provider-and-planner","claim:accelerator-stays-itself"],"adr_refs":[],"next":"page:projection-repro","prev":"page:demo"},{"id":"page:projection-repro","route":"/projection-repro/","title":"Projection Repro","blurb":"Deterministic, replayable projection of the canonical subject from durable events.","chapter_refs":["chapter:pr-purpose","chapter:pr-how","chapter:pr-current"],"claim_refs":["claim:replay-from-events","claim:no-rerun-effects"],"adr_refs":[],"next":"","prev":"page:general-compute"}],"links":[],"content_root":"docs/content"},"site_config":{"site_title":"Prism Engine","site_tagline":"Inspectable heterogeneous AI deployment","canonical_origin":"https://prism-engine.example","build_id":"ssg-79849"},"visitor_state":{"observer_mode":"observer","optical_state":"observation","visited_routes":[],"selected_claim":null},"schema_version":1}</script></head><body data-prism-hydrated="false"><main id="top" data-prism-region="main" data-prism-route="/architecture/"><header class="site-header"><a class="brand" href="/"><span class="brand-mark"></span><span class="brand-name">Observe Intent</span></a><nav class="site-nav" aria-label="Primary navigation"><a class="site-nav-link" href="/">Observe Intent</a><a class="site-nav-link" href="/architecture/">Observe Representation</a><a class="site-nav-link" href="/capabilities/">Observe Scale</a><a class="site-nav-link" href="/computeimage/">Observe Transformation</a><a class="site-nav-link" href="/demo/">Apple Silicon Demo</a><a class="site-nav-link" href="/evidence/">Observe Evidence</a><a class="site-nav-link" href="/general-compute/">General Compute</a><a class="site-nav-link" href="/heterogeneous/">Observe Execution</a><a class="site-nav-link" href="/prism-ml/">Prism ML</a><a class="site-nav-link" href="/projection-repro/">Projection Repro</a><a class="site-nav-link" href="/roadmap/">Roadmap</a><a class="site-nav-link" href="/run/">Run Today</a><a class="site-nav-link" href="/start-here/">Start Here</a><a class="site-nav-link" href="/work-with-prism/">Work With Prism</a></nav></header><section class="hero"><h1 class="hero-headline">Establish one canonical subject and follow it through every observable surface.</h1></section><main class="page-body"><p class="page-blurb">How Prism turns model bytes into a sealed deployment contract.</p><section class="chapter" id="arch-overview" data-order="1"><header class="chapter-header"><h2 class="chapter-title">The short version</h2> <span class="chapter-reading">2 min read</span></header><p class="chapter-intent">Prism is an ECS-native compiler and runtime for local, heterogeneous AI deployment.</p><p class="chapter-blurb">The plain-language path.</p><div class="chapter-body"><p>Prism is an ECS-native compiler and runtime for local, heterogeneous
-AI deployment. A model artifact becomes a searchable representation
-plan, a target-aware spatial/execution plan, and a sealed
-ComputeImage; the runtime routes work across CPU, GPU, and NPU
-capabilities while preserving receipts and validation evidence.</p>
-<p>The path:</p>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prism Engine — Architecture</title>
+<link rel="canonical" href="https://prism-engine.tribunus.dev/">
+<meta name="generator" content="prism-docs-ssg">
+<meta name="build-id" content="ssg-86094">
+<link rel="stylesheet" href="/site.css">
+<script>
+(function(){try{
+  var k='prism-theme';
+  var v=null;
+  try{v=localStorage.getItem(k);}catch(e){}
+  if(v!=='dark'&&v!=='light'){
+    try{
+      if(window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches){v='light';}
+      else{v='dark';}
+    }catch(e){v='dark';}
+  }
+  document.documentElement.setAttribute('data-theme',v);
+  try{document.documentElement.style.colorScheme=v;}catch(e){}
+}catch(e){}})();
+</script>
+<script src="/theme.js" defer></script>
+<script src="/selection-controller.js" defer></script>
+<script src="/transitions-orchestrator.js" defer></script>
+</head>
+<body data-prism-route="/architecture/" data-prism-hydrated="false">
+<header class="site-header">
+<a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Prism Engine</span></a>
+<nav class="site-nav" aria-label="Primary navigation">
+<a class="site-nav-link" href="/start/">Start</a>
+<a class="site-nav-link" href="/architecture/">Architecture</a>
+<a class="site-nav-link" href="/evidence/">Evidence</a>
+<a class="site-nav-link" href="/status/">Status</a>
+<a class="site-nav-link" href="https://github.com/Tribunus-dev/prism-engine" rel="external" target="_blank">GitHub</a>
+</nav>
+<button type="button" class="theme-toggle" aria-label="Toggle dark and light theme" data-theme-toggle><span class="theme-toggle-icon" aria-hidden="true"></span><span class="theme-toggle-label">Theme</span></button>
+</header>
+<main class="page-body" id="top" data-prism-region="main">
+<section class="chapter" id="one-subject-three-contracts">
+<h3 class="chapter-title">One Subject, Three Contracts</h3>
+<div class="chapter-body">
+<p>A model arrives. It becomes a ComputeImage. The ComputeImage is admitted to execution. The execution produces a receipt. The receipt is the only authority.</p>
+<p>The journey depends on three contracts. Each contract names a decision. The contracts do not overlap.</p>
 <ul>
-<li><strong>Model</strong> — GGUF or SafeTensors</li>
-<li><strong>ECS Compiler</strong> — quantize, ternarize, lower, search</li>
-<li><strong>ComputeImage</strong> — weights, views, plans, evidence</li>
-<li><strong>Runtime</strong> — CPU, Metal/ROCm GPU, XDNA NPU</li>
+<li><strong>`LogicalTensor`</strong> is the meaning. It is the tensor as the model defines it: shape, dtype, semantic family, role in the graph. Changing a layout does not change a logical tensor. Changing a representation does not change a logical tensor. The logical tensor is the model's claim about what the data is.</li>
+<li><strong>`PhysicalTileLayout`</strong> is the storage. It is the tensor as the hardware stores it: tile sizes, padding, alignment, memory tier. The same logical tensor can have many physical layouts. A physical layout is a candidate transformation, evaluated against the model, the target, and the constraints.</li>
+<li><strong>`ExecutionView`</strong> is the consumption. It is the contract by which a backend reads the data at execution time. An execution view names the lane, the provider, and the dispatch path. A model may have many execution views, one per lane, per provider, per plan.</li>
 </ul>
-<h2>If you remember one thing</h2>
-<p>Prism searches representations and placement together, then makes
-the chosen deployment contract inspectable.</p>
-</div></section><section class="chapter" id="arch-three-layers" data-order="2"><header class="chapter-header"><h2 class="chapter-title">One tensor, three questions</h2> <span class="chapter-reading">3 min read</span></header><p class="chapter-intent">Prism separates concerns that model formats and runtimes often blend together.</p><p class="chapter-blurb">LogicalTensor, PhysicalTileLayout, ExecutionView.</p><div class="chapter-body"><p>Prism separates concerns that model formats and runtimes often blend
-together.</p>
-<h2>LogicalTensor</h2>
-<p>What does this tensor mean? Identity, class, shape, logical operation,
-orientation, data type, and graph boundary: the semantic contract.</p>
-<h2>PhysicalTileLayout</h2>
-<p>How are its bits stored? Codec, tile family, group axis, metadata,
-padding, alignment, and interleave: the storage and kernel ABI.</p>
-<h2>ExecutionView</h2>
-<p>How does a lane consume it? Lane, offsets, metadata ranges, repacking,
-and residency. Multiple views can derive from one physical layout.</p>
-</div></section><section class="chapter" id="arch-compiler" data-order="3"><header class="chapter-header"><h2 class="chapter-title">The ECS-native compiler</h2> <span class="chapter-reading">4 min read</span></header><p class="chapter-intent">Make policy explicit so it can be analyzed, searched, and audited.</p><p class="chapter-blurb">Compiler state as ECS entities and components.</p><div class="chapter-body"><p>Compiler state is represented as ECS entities and components so
-systems can analyze the graph, search progressive quantization and
-ternarization candidates, assign mixed precision, plan layouts and
-KV policy, and emit target-aware execution views without hiding
-policy in a monolithic runtime.</p>
-<h2>Pipeline</h2>
-<ol>
-<li><strong>Ingest</strong> — Model identity, metadata, weights, graph, quality contract.</li>
-<li><strong>Analyze</strong> — Tensor classes, sensitivity, candidate representations, KV pressure.</li>
-<li><strong>Search</strong> — Quantization, ternarization, mixed precision, cache compression.</li>
-<li><strong>Plan</strong> — Layouts, views, residency, CPU/GPU/NPU placement and handoffs.</li>
-<li><strong>Seal</strong> — CImage plus provenance, receipts, and explicit validation gates.</li>
-</ol>
-<h2>Compiler researcher detail</h2>
-<pre><code class="language-text">Model → ECS entities/components → TensorAnalysis → RepresentationSearch → KVPolicy →
-Admission → PhysicalLayout → ExecutionViews → PrismIR → HeterogeneousPlan → CImage
-</code></pre>
-</div></section><section class="chapter" id="arch-decision-trace" data-order="4"><header class="chapter-header"><h2 class="chapter-title">One decision, made visible</h2> <span class="chapter-reading">3 min read</span></header><p class="chapter-intent">Representation and placement are searchable data.</p><p class="chapter-blurb">The decision trace.</p><div class="chapter-body"><p>The ECS-native compiler treats representation and placement as
-searchable data. A tensor can remain FP16/BF16, move through
-INT8/NF4, or be progressively ternarized when calibration and
-admission gates permit; the resulting plan can route different
-regions to CPU, ROCm/HIP GPU, Metal, or XDNA/XDNA2 spatial resources.</p>
-<h2>The trace</h2>
+<p>A change to one contract does not silently rewrite another. A logical identity is preserved across representations because the representation is bound to the plan, not to the tensor. A physical layout is preserved across lanes because the layout is the artifact, not the kernel. An execution view is preserved across runs because the view is durable state, not runtime cache.</p>
+</div>
+</section>
+<section class="chapter" id="the-compiler-as-search">
+<h3 class="chapter-title">The Compiler as Search</h3>
+<div class="chapter-body">
+<p>Compilation is a search. The search has a state space: every legal combination of representation, layout, target constraint, and numerical policy. The search has a cost model: the time, the memory, the precision, the numerical error. The search has a result: a plan, admitted as durable state.</p>
+<p>The candidate transformations are typed. A precision change is a typed operation. A sparsification is a typed operation. A ternarization is a typed operation. A layout change is a typed operation. Search policy may be heuristic, evolutionary, learned, sampled, or cost-model driven. The admitted candidate, its constraints, and its evidence are explicit. The search process is not required to be.</p>
+<p>The visitor sees the search space. The visitor sees the chosen path. The visitor sees the rejected alternatives. The site is not a summary of the choice; it is the evidence of the choice.</p>
+</div>
+</section>
+<section class="chapter" id="the-runtime-as-authority">
+<h3 class="chapter-title">The Runtime as Authority</h3>
+<div class="chapter-body">
+<p>The runtime executes the plan. It does not invent decisions. It may instantiate only the runtime choices explicitly permitted by the plan: lane selection within a permitted set, scheduling within declared residency policy, queue ordering, retry within declared bounds. Anything outside those bounds is a different plan, with a new identity, and a new admission record.</p>
+<p>Canonical world state is the authority for everything the plan does not cover: admission, ownership, leases, deadlines, fencing generations, transaction validity, terminal failure. The runtime consults both. The plan does not replace the world. The world does not replace the plan.</p>
+<p>A result for an expired or superseded lease is rejected at the boundary, not silently accepted. A result that does not survive a restart is not authoritative. A failure is recorded. A recovery is recorded. The recording is the receipt.</p>
+</div>
+</section>
+<section class="chapter" id="the-plan-as-the-boundary">
+<h3 class="chapter-title">The Plan as the Boundary</h3>
+<div class="chapter-body">
+<p>The plan is the boundary between compilation and execution. The plan is sealed when it is admitted. The seal is durable. The seal is the admission record.</p>
+<p>A re-plan is a new admission. A different representation, a different layout, a different target — each produces a new plan identity. The new plan may reuse parts of the old plan's evidence, but it is a new plan. The artifact digest changes if the materialization changes.</p>
+<p>The boundary is not a convention. It is a type. The runtime cannot construct a plan. The compiler cannot construct a request. The two meet at the artifact and at the transaction.</p>
+</div>
+</section>
+<section class="chapter" id="what-the-evidence-supports-today">
+<h3 class="chapter-title">What the Evidence Supports Today</h3>
+<div class="chapter-body">
+<p>The architecture is implemented. The contracts exist. The compiler exists. The runtime exists. The receipt path exists.</p>
+<p>What is <em>Validated</em> on a real target: nothing in the v1 corpus. The receipt types exist as Rust definitions; the engine has not yet emitted one to publishable storage. The <code>ValidationReceipt</code> and <code>SearchSelectionReceipt</code> types are bound to the v1 schema set (per ADR-033) and are the canonical types. A follow-on ADR emits them to a stable, content-addressed path. Until then, the site names the gap and shows the schema.</p>
+<p>What is <em>Implemented</em>: the source code paths for compilation, the cimage encoder/decoder, the constitutional command set, the receipt envelope (<code>ReceiptCandidate</code>), the world transaction layer. Each row above carries a source path; a reviewer can read the entry point and reason about its control flow.</p>
+<p>What is <em>Planned</em>: heterogeneous target qualification, ANE/CUDA/NPU providers (ADR-031), end-to-end receipt emission to publishable storage, a real qualification harness output. Each is a milestone with an exit criterion in the roadmap.</p>
+</div>
+</section>
+</main>
+<aside class="secondary-nav">
 <ul>
-<li><strong>Model</strong> — logical meaning (shape, role, graph edge)</li>
-<li><strong>Representation</strong> — mixed precision (quantize, ternarize, calibrate)</li>
-<li><strong>Spatial plan</strong> — route and resources (CPU, GPU, NPU, KV budget)</li>
-<li><strong>Proof</strong> — sealed contract (CImage, receipt, validation boundary)</li>
+<li><a href="/">Home</a></li>
+<li><a href="/computeimage/">ComputeImage</a></li>
+<li><a href="/computeimage/specimen/">Specimen</a></li>
+<li><a href="/observatory/life/">The Life of a ComputeImage</a></li>
+<li><a href="/run/">Run</a></li>
+<li><a href="/roadmap/">Roadmap</a></li>
+<li><a href="/prismagent/">PrismAgent</a></li>
+<li><a href="/prism-ml/">Prism ML</a></li>
+<li><a href="/general-compute/">General Compute</a></li>
+<li><a href="/lab/">Lab Notes</a></li>
+<li><a href="/colophon/">Colophon</a></li>
 </ul>
-<h2>Invariant</h2>
-<p>The logical graph remains attributable. Formats, execution views,
-routing, and KV-cache policy are selected only when the evidence and
-target legality support them.</p>
-</div></section><section class="chapter" id="arch-cimage" data-order="5"><header class="chapter-header"><h2 class="chapter-title">A deployment artifact, not a renamed checkpoint</h2> <span class="chapter-reading">3 min read</span></header><p class="chapter-intent">A ComputeImage is the boundary between compilation and execution.</p><p class="chapter-blurb">The deployment contract.</p><div class="chapter-body"><p>A ComputeImage is the boundary between compilation and execution. The
-runtime loads it without reconstructing deployment policy from the
-original model.</p>
-<p>The artifact holds:</p>
-<ul>
-<li><strong>Metadata</strong> — identity, version, manifest</li>
-<li><strong>Logical tensors</strong> — semantic tensor table</li>
-<li><strong>Physical layouts</strong> — codec and tile contracts</li>
-<li><strong>Execution views</strong> — lane-specific materializations</li>
-<li><strong>Plan + receipts</strong> — decisions and validation</li>
-<li><strong>Payloads</strong> — mapped tensor bytes</li>
-</ul>
-<h2>ABI detail</h2>
-<p>The CImage layout ABI makes logical identity, physical storage, and
-execution views independently inspectable. A target profile can
-select resident or mutually exclusive views without changing the
-logical graph.</p>
-</div></section><section class="chapter" id="arch-runtime" data-order="6"><header class="chapter-header"><h2 class="chapter-title">The ECS-native runtime</h2> <span class="chapter-reading">4 min read</span></header><p class="chapter-intent">Route decisions, record what was proven.</p><p class="chapter-blurb">Canonical ECS, router, residency, receipts.</p><div class="chapter-body"><p>Prism's ECS runtime queries canonical components and capability
-resources, chooses an admitted execution plan, manages residency and
-KV-cache state, then routes work to CPU, GPU, or NPU systems when the
-target path is validated. Handoffs and terminal outcomes become
-evidence rather than hidden backend side effects.</p>
-<h2>Flow</h2>
-<ul>
-<li>Canonical ECS state</li>
-<li>ECS router + scheduler</li>
-<li>CPU, MI300X / ROCm-HIP, XDNA / XDNA2 spatial plan</li>
-<li>Residency + KV cache</li>
-<li>Execution receipt + validation scope</li>
-</ul>
-<h2>Runtime contract</h2>
-<ul>
-<li><strong>Input</strong> — sealed CImage + request + capabilities</li>
-<li><strong>Work</strong> — query ECS state, route, make resident, dispatch</li>
-<li><strong>Output</strong> — tokens, metrics, KV updates, receipt, failure class</li>
-</ul>
-<p>Canonical state owns accepted work, model identity, ownership,
-leases, committed state, and terminal outcomes. Caches, queues,
-backend handles, and projections remain derived or ephemeral.
-XDNA/XDNA2 is a spatial-planning and legalization boundary unless a
-matching hardware/runtime path has been validated; a compiled plan
-is not itself a claim of device execution.</p>
-</div></section><section class="chapter" id="arch-why" data-order="7"><header class="chapter-header"><h2 class="chapter-title">Why not extend an inference runtime?</h2> <span class="chapter-reading">2 min read</span></header><p class="chapter-intent">Compile policy once. Seal the artifact. Execute the explicit plan.</p><p class="chapter-blurb">Operational consequence.</p><div class="chapter-body"><p>Existing engines can be excellent execution backends. Prism makes a
-different architectural choice: representation admission, layout
-planning, execution views, residency, scheduling metadata,
-validation, and artifact sealing happen once during compilation.</p>
-<h2>Compare</h2>
-<ul>
-<li><strong>Typical runtime</strong> — Load model, derive strategy dynamically, dispatch.</li>
-<li><strong>Prism</strong> — Compile policy, seal artifact, execute explicit plan.</li>
-</ul>
-<h2>Operational consequence</h2>
-<p>Two CImages from the same source can be compared, audited, and
-reproduced without reconstructing hidden runtime heuristics.</p>
-</div></section><section class="chapter" id="arch-current-boundary" data-order="8"><header class="chapter-header"><h2 class="chapter-title">What the evidence supports today</h2> <span class="chapter-reading">2 min read</span></header><p class="chapter-intent">Be honest about what is validated, what is compile-verified, and what is not claimed.</p><p class="chapter-blurb">Current state.</p><div class="chapter-body"><p>Apple Silicon and MI300X ROCm/HIP validation paths are active. CPU
-execution and ECS-native compilation continue under hardening and
-migration gates. XDNA/XDNA2 spatial planning is compile-verified and
-resource/legalization tested, but general Ryzen AI hardware
-execution is not claimed without an XDNA-capable system and the
-matching userspace stack. Progressive quantization, ternarization,
-mixed precision, KV-cache search/compression, and CImages are real
-compiler/runtime concerns; a valid artifact or plan is not by
-itself proof of production readiness on every target.</p>
-</div></section><section class="claims"><h2 class="claims-title">Claims</h2><article class="claim" data-class="architectural" data-state="verified" data-existence="active"><p class="claim-text">There is one and only one canonical subject in flight. Every surface observes the same identity.</p></article><article class="claim" data-class="architectural" data-state="verified" data-existence="active"><p class="claim-text">LogicalTensor, PhysicalTileLayout, and ExecutionView are independent contracts. A change to one does not silently rewrite another.</p></article><article class="claim" data-class="architectural" data-state="verified" data-existence="active"><p class="claim-text">The compiler is a search over representation and placement. The search is a typed operation on the ECS, not hidden heuristics.</p></article><article class="claim" data-class="architectural" data-state="verified" data-existence="active"><p class="claim-text">A ComputeImage is a deployment contract, not a renamed checkpoint. It binds logical identity to physical plans, views, and evidence.</p></article><article class="claim" data-class="architectural" data-state="verified" data-existence="active"><p class="claim-text">The runtime queries canonical state, routes work, and records what was proven. Handoffs and terminal outcomes become evidence, not hidden side effects.</p></article><article class="claim" data-class="architectural" data-state="verified" data-existence="active"><p class="claim-text">Prism compiles policy once and seals the artifact. The runtime does not re-derive deployment strategy at execution time.</p></article><article class="claim" data-class="architectural" data-state="verified" data-existence="active"><p class="claim-text">The Prism Engine docs site is itself built on the constitutional ECS. HTML, CSS, and JavaScript are projections of the same world; the manifest is the only source of truth.</p></article></section></main><aside class="chapter-toc"><h2 class="toc-title">In this computation</h2><ol><li data-order="1"><a href="#home-intent">Observe Intent</a></li><li data-order="2"><a href="#home-origin">Observe Origin</a></li><li data-order="3"><a href="#home-constitutional">Constitutional Discipline</a></li><li data-order="1"><a href="#arch-overview">The short version</a></li><li data-order="2"><a href="#arch-three-layers">One tensor, three questions</a></li><li data-order="3"><a href="#arch-compiler">The ECS-native compiler</a></li><li data-order="4"><a href="#arch-decision-trace">One decision, made visible</a></li><li data-order="5"><a href="#arch-cimage">A deployment artifact, not a renamed checkpoint</a></li><li data-order="6"><a href="#arch-runtime">The ECS-native runtime</a></li><li data-order="7"><a href="#arch-why">Why not extend an inference runtime?</a></li><li data-order="8"><a href="#arch-current-boundary">What the evidence supports today</a></li><li data-order="1"><a href="#ci-why">More than a renamed checkpoint</a></li><li data-order="2"><a href="#ci-anatomy">Six inspectable strata</a></li><li data-order="3"><a href="#ci-three-contracts">Three contracts</a></li><li data-order="4"><a href="#ci-lifecycle">The lifecycle</a></li><li data-order="5"><a href="#ci-current-boundary">Inspectable does not mean validated</a></li><li data-order="1"><a href="#het-idea">One semantic workload, many physical homes</a></li><li data-order="2"><a href="#het-same-graph">Same graph, different machines</a></li><li data-order="3"><a href="#het-target-classes">Target classes</a></li><li data-order="4"><a href="#het-provider-boundary">Provider boundary</a></li><li data-order="5"><a href="#het-what-it-enables">What this enables</a></li><li data-order="1"><a href="#ev-authority">Authority</a></li><li data-order="2"><a href="#ev-receipt-chain">Receipt chain</a></li><li data-order="3"><a href="#ev-operations">Operations</a></li><li data-order="4"><a href="#ev-failure">Failure</a></li><li data-order="5"><a href="#ev-source-surfaces">Source surfaces</a></li><li data-order="1"><a href="#cap-classification">One vocabulary, no status inflation</a></li><li data-order="2"><a href="#cap-map">The capability map</a></li><li data-order="3"><a href="#cap-reading">Reading the map</a></li><li data-order="1"><a href="#rm-observatory">Observatory v1</a></li><li data-order="2"><a href="#rm-evidence">Evidence materialization</a></li><li data-order="3"><a href="#rm-demo">Packaged local demo</a></li><li data-order="4"><a href="#rm-qualification">Target qualification</a></li><li data-order="5"><a href="#rm-compiler">Compiler evolution</a></li><li data-order="1"><a href="#run-prereqs">Prerequisites</a></li><li data-order="2"><a href="#run-pull">Pull and compile</a></li><li data-order="3"><a href="#run-execute">Run</a></li><li data-order="4"><a href="#run-server">Call the server</a></li><li data-order="1"><a href="#guide-reading-path">The reading path</a></li><li data-order="2"><a href="#guide-edges">Then inspect the edges</a></li><li data-order="1"><a href="#ww-boundary">Choose a boundary</a></li><li data-order="2"><a href="#ww-contracts">Engagement contracts</a></li><li data-order="3"><a href="#ww-open-and-confidential">Open and confidential</a></li><li data-order="1"><a href="#pml-relationship">The relationship</a></li><li data-order="2"><a href="#pml-validation-loop">The validation loop</a></li><li data-order="3"><a href="#pml-scale">Deployment scale</a></li><li data-order="4"><a href="#pml-ownership">What each system owns</a></li><li data-order="5"><a href="#pml-story">From representation to an honest route</a></li><li data-order="1"><a href="#demo-agenda">The agenda</a></li><li data-order="2"><a href="#demo-staged">Staged workflow</a></li><li data-order="3"><a href="#demo-bands">Milestone bands</a></li><li data-order="4"><a href="#demo-why-not-yet">Why it is not available yet</a></li><li data-order="5"><a href="#demo-current-work">Current work</a></li><li data-order="1"><a href="#gc-relationship">The relationship</a></li><li data-order="2"><a href="#gc-serving-phases">Serving phases</a></li><li data-order="3"><a href="#gc-what-prism-adds">What Prism adds</a></li><li data-order="4"><a href="#gc-ownership">Ownership</a></li><li data-order="5"><a href="#gc-validation">Validation</a></li><li data-order="1"><a href="#pr-purpose">The purpose</a></li><li data-order="2"><a href="#pr-how">How it works</a></li><li data-order="3"><a href="#pr-current">Current surface</a></li></ol></aside></main></body></html>
+</aside>
+<footer class="site-footer">
+<p>Prism Engine is independently developed by <strong>Julian Torres</strong>. Released under the project's license. <a href="/colophon/">Colophon</a> · <a href="https://github.com/Tribunus-dev/prism-engine">Repository</a></p>
+</footer>
+<script>
+
+// Prism Observatory v1 — SelectionController.
+// Generated by prism-docs-ssg. Do not edit by hand.
+//
+// The sole owner of the addressable selection state. Parses
+// selection from the URL, validates, normalizes, writes back,
+// and broadcasts to subscribers. The URL is the source of truth.
+
+(function () {
+  'use strict';
+
+  // ---------- Schema (declarative) ----------
+
+  // The known selection dimensions. Each is optional. The URL
+  // carries them as query parameters. Unknown parameters are
+  // ignored. The reducer normalizes the URL after a write.
+  var SCHEMA = {
+    stage:        { kind: 'integer', min: 1, max: 12 },
+    density:      { kind: 'enum',    values: ['overview', 'technical', 'raw-artifact'] },
+    tensor:       { kind: 'string',  pattern: /^[a-zA-Z0-9._-]+$/ },
+    capability:   { kind: 'string',  pattern: /^capability\.[a-zA-Z0-9._-]+$/ },
+    evidence:     { kind: 'string',  pattern: /^evidence\.[a-zA-Z0-9._-]+$/ },
+    specimen:     { kind: 'string',  pattern: /^observatory\.specimen\.[a-zA-Z0-9._-]+$/ }
+  };
+
+  // ---------- Reducer ----------
+
+  function readFromUrl() {
+    var u;
+    try { u = new URL(window.location.href); }
+    catch (e) { return {}; }
+    var out = {};
+    var keys = Object.keys(SCHEMA);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      var raw = u.searchParams.get(k);
+      if (raw == null) continue;
+      var parsed = parseValue(k, raw);
+      if (parsed !== undefined) out[k] = parsed;
+    }
+    return out;
+  }
+
+  function parseValue(key, raw) {
+    var def = SCHEMA[key];
+    if (!def) return undefined;
+    if (def.kind === 'integer') {
+      var n = parseInt(raw, 10);
+      if (isNaN(n)) return undefined;
+      if (def.min != null && n < def.min) return undefined;
+      if (def.max != null && n > def.max) return undefined;
+      return n;
+    }
+    if (def.kind === 'enum') {
+      if (def.values.indexOf(raw) === -1) return undefined;
+      return raw;
+    }
+    if (def.kind === 'string') {
+      if (def.pattern && !def.pattern.test(raw)) return undefined;
+      return raw;
+    }
+    return undefined;
+  }
+
+  function writeToUrl(selection) {
+    var u;
+    try { u = new URL(window.location.href); }
+    catch (e) { return; }
+    var keys = Object.keys(SCHEMA);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (selection[k] == null) {
+        u.searchParams.delete(k);
+      } else {
+        u.searchParams.set(k, String(selection[k]));
+      }
+    }
+    // Use replaceState so the browser history is not polluted.
+    try {
+      window.history.replaceState(null, '', u.toString());
+    } catch (e) { /* no-op */ }
+  }
+
+  // ---------- Broadcast ----------
+
+  var subscribers = [];
+  var current = readFromUrl();
+
+  function broadcast(prev) {
+    for (var i = 0; i < subscribers.length; i++) {
+      try { subscribers[i](current, prev); }
+      catch (e) { /* a single subscriber failure must not break the others */ }
+    }
+  }
+
+  // ---------- Public API ----------
+
+  function subscribe(callback) {
+    if (typeof callback !== 'function') return function () {};
+    subscribers.push(callback);
+    // Fire once on subscribe so the new subscriber sees the
+    // current state without waiting for the next change.
+    try { callback(current, current); } catch (e) { /* no-op */ }
+    return function unsubscribe() {
+      var idx = subscribers.indexOf(callback);
+      if (idx !== -1) subscribers.splice(idx, 1);
+    };
+  }
+
+  function set(partial) {
+    if (partial == null || typeof partial !== 'object') return;
+    var prev = {};
+    for (var k in current) prev[k] = current[k];
+    var next = {};
+    for (var k in current) next[k] = current[k];
+    var keys = Object.keys(partial);
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i];
+      if (!(k in SCHEMA)) continue;
+      var v = partial[k];
+      if (v == null) {
+        delete next[k];
+      } else {
+        var parsed = parseValue(k, String(v));
+        if (parsed !== undefined) next[k] = parsed;
+      }
+    }
+    current = next;
+    writeToUrl(current);
+    broadcast(prev);
+  }
+
+  function get() {
+    var out = {};
+    for (var k in current) out[k] = current[k];
+    return out;
+  }
+
+  // ---------- Wire up popstate ----------
+
+  window.addEventListener('popstate', function () {
+    var prev = current;
+    current = readFromUrl();
+    broadcast(prev);
+  });
+
+  // ---------- Expose ----------
+
+  window.prismSelection = {
+    subscribe: subscribe,
+    set: set,
+    get: get,
+    schema: SCHEMA
+  };
+})();
+
+</script>
+</body>
+</html>

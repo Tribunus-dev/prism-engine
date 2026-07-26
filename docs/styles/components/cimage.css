@@ -1,0 +1,245 @@
+/* Prism Engine Observatory v1 — ComputeImage specimen.
+ *
+ * The 6-stratum visual. The cimage is one file, divided into
+ * six named strata; the visitor sees the structure on the
+ * Specimen page. Each stratum is a labeled block; the absent
+ * strata are visually distinct (muted, italic) so the visitor
+ * does not infer a capability that is not present.
+ *
+ * Spec §6.4 / §10.1: the six strata are
+ *   1. Metadata
+ *   2. Logical Tensors
+ *   3. Physical Layouts
+ *   4. Execution Views
+ *   5. Plan and Receipts
+ *   6. Payloads
+ *
+ * The strata are aspects of one artifact. A cimage has all
+ * six, or it is not a cimage. The visual makes the structure
+ * visible without claiming the cimage has every property
+ * filled in.
+ */
+
+.specimen {
+  margin: var(--space-7) 0;
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--color-rule);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.specimen-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+.specimen-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  margin: 0;
+}
+.specimen-id {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+  margin-left: auto;
+}
+
+.specimen-summary {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  margin: 0 0 var(--space-5);
+  max-width: 64ch;
+}
+
+/* The sanitization notice. A bordered panel that names
+ * the sanitization, links to the §4.8 contract, and
+ * precedes the redaction manifest. */
+.sanitization-notice {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-state-qualifying-bg);
+  border: 1px solid var(--color-state-qualifying);
+  border-left: 3px solid var(--color-state-qualifying);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+}
+.sanitization-notice::before {
+  content: "Sanitized";
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-state-qualifying);
+  margin-right: var(--space-3);
+  font-weight: var(--font-weight-bold);
+}
+.sanitization-notice a {
+  color: var(--color-fg);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/* The 6-stratum visual. A grid of stratum cards, one per
+ * stratum. Absent strata are visually muted. */
+.cimage-strata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stratum-card {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.stratum-card[data-state="absent"] {
+  border-left-color: var(--color-rule-strong);
+  background: var(--color-bg);
+  opacity: 0.7;
+}
+
+.stratum-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.stratum-card-number {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+}
+.stratum-card-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+.stratum-card-state {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.stratum-card[data-state="present"] .stratum-card-state {
+  color: var(--color-state-implemented);
+}
+.stratum-card[data-state="absent"] .stratum-card-state {
+  color: var(--color-fg-subtle);
+  font-style: italic;
+}
+
+.stratum-card-description {
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+  line-height: var(--line-height-base);
+  margin: 0;
+}
+
+.stratum-card-data {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  background: var(--color-bg);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-fg);
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: var(--line-height-snug);
+}
+
+.stratum-card-empty {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  font-style: italic;
+  margin: 0;
+  padding: var(--space-2) 0;
+}
+
+/* The redaction manifest. A JSON pre block, with a header
+ * that names the schema. */
+.redaction-manifest {
+  margin: var(--space-5) 0;
+  padding: 0;
+}
+.redaction-manifest-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.redaction-manifest-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+}
+.redaction-manifest-meta {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+/* The "Remaining verifiable" list. A grid of three columns
+ * showing which claims are verifiable, which are not, and
+ * which are unverified by name. */
+.remaining-verifiable {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+}
+.verifiable-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+}
+.verifiable-item[data-state="verifiable"] {
+  border-left: 3px solid var(--color-state-validated);
+}
+.verifiable-item[data-state="not-verifiable"] {
+  border-left: 3px solid var(--color-state-planned);
+  opacity: 0.75;
+}
+.verifiable-item-key {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+}
+.verifiable-item-state {
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-fg-muted);
+}
+.verifiable-item[data-state="verifiable"] .verifiable-item-state {
+  color: var(--color-state-validated);
+  font-style: normal;
+  font-weight: var(--font-weight-medium);
+}

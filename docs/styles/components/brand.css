@@ -1,26 +1,72 @@
-/* brand — the prism dispersion mark and wordmark.
+/* Prism Engine Observatory v1 — brand.
  *
- * The mark is a CSS-only gradient block. The wordmark is the
- * canonical name. A brand is a single authority.
+ * The prism dispersion mark and the wordmark. The mark is a
+ * CSS-only gradient block; no image asset. The mark is a single
+ * authority; it has one role: to be the prism.
+ *
+ * The mark refracts. A vertical hairline down the center
+ * separates the cyan side (left) from the magenta side (right).
+ * The two halves are otherwise identical, so the mark is
+ * recognisable at any size.
  */
 
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  gap: var(--space-3);
   color: var(--color-fg);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: none;
+  text-decoration: none;
+  font-size: var(--font-size-md);
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
-
-.brand:hover { text-decoration: none; }
+.brand:hover {
+  text-decoration: none;
+  opacity: 0.85;
+}
 
 .brand-mark {
   display: inline-block;
-  width: 1.25rem;
-  height: 1.25rem;
-  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-warm));
-  border-radius: 4px;
+  position: relative;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-accent) 49.5%,
+    var(--color-bg) 49.5%,
+    var(--color-bg) 50.5%,
+    var(--color-accent-warm) 50.5%,
+    var(--color-accent-warm) 100%
+  );
+  box-shadow:
+    0 0 0 1px var(--color-rule-strong),
+    0 0 12px rgba(106, 212, 255, 0.15);
+  flex-shrink: 0;
 }
 
-.brand-name { font-size: var(--font-size-md); }
+.brand-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  white-space: nowrap;
+}
+
+.brand-tagline {
+  display: none;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  letter-spacing: var(--letter-spacing-wide);
+  color: var(--color-fg-subtle);
+  text-transform: uppercase;
+  margin-left: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--color-rule);
+}
+
+@media (min-width: 900px) {
+  .brand-tagline { display: inline; }
+}

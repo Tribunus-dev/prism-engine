@@ -1,24 +1,61 @@
-/* code — code blocks used in run pages and ADR bodies.
+/* Prism Engine Observatory v1 — code.
  *
- * The pre / code treatment is in foundation/typography.css.
- * This file adds the run-specific shell around commands.
+ * Fenced code blocks and inline code. The block has a subtle
+ * left-rail in the accent color so it reads as a distinct
+ * surface, not just a panel.
+ *
+ * Spec §9: monospace is for identities, hashes, digests,
+ * commands, schemas, values, machine-state labels, and code.
+ * The base typography in foundation/typography.css already
+ * declares the monospace stack and the inline-code styling;
+ * this file is the block-level treatment.
  */
 
-pre.command {
-  background: var(--color-surface);
-  border: 1px solid var(--color-rule);
-  border-radius: 6px;
-  padding: 1rem 1.25rem;
-  margin: 1rem 0;
+pre {
   position: relative;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  overflow-x: auto;
+  margin: var(--space-4) 0;
+  line-height: var(--line-height-snug);
+  font-size: 0.92em;
 }
 
-pre.command::before {
-  content: "TERMINAL";
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  white-space: pre;
+}
+
+/* Code with a language label — the .code-label is a small
+ * monospace tag in the top-right corner of the block. */
+pre.code-with-label {
+  padding-top: var(--space-7);
+}
+.code-label {
   position: absolute;
-  top: 0.5rem;
-  right: 0.75rem;
-  font-size: 0.7rem;
-  color: var(--color-muted);
-  letter-spacing: 0.1em;
+  top: var(--space-2);
+  right: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+/* Inline code, refined beyond the foundation's defaults. */
+:not(pre) > code {
+  font-size: 0.9em;
+  padding: 0.15em 0.4em;
+  background: var(--color-surface-1);
+  color: var(--color-accent);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
 }

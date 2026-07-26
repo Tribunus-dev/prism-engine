@@ -1,25 +1,134 @@
-/* hero — the page-level headline and lede.
+/* Prism Engine Observatory v1 — hero.
  *
- * The hero is the page's first projection. It uses the
- * chapter's intent as the headline, the page's blurb as the
- * lede, and the chapter-toc as a side panel.
+ * The page-level headline and lede. The hero is the first
+ * projection; it sets the page's intent and tone. The
+ * headline is the page's argument; the blurb is the page's
+ * invitation. The two together are what the visitor reads
+ * before deciding to scroll.
+ *
+ * Spec §6.1: the home page hero is "Compile intelligence into
+ * something you can inspect." That headline is the page's
+ * declaration; every other page has its own argument.
+ *
+ * The hero is generous. The headline is the largest type on
+ * the page. The blurb is the lead, in muted color, max-width
+ * to keep the line length readable. The hairline below the
+ * hero separates it from the body without committing to a
+ * heavy divider.
  */
 
 .hero {
-  padding: 4rem var(--gutter) 2rem;
+  position: relative;
+  padding: var(--space-8) var(--gutter) var(--space-7);
   max-width: var(--max-width);
   margin: 0 auto;
+  /* Faint top hairline and a cyan ambient halo behind the
+   * headline, anchoring the hero to the page. Subordinated
+   * to the headline. */
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, var(--max-width));
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-rule-strong) 30%,
+    var(--color-rule-strong) 70%,
+    transparent
+  );
+}
+
+.hero-home {
+  /* The home hero gets the prism ambient — a wider halo
+   * behind the headline, both ends of the dispersion. */
+  padding-top: var(--space-9);
+  padding-bottom: var(--space-8);
+}
+.hero-home::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  max-width: 36rem;
+  height: 100%;
+  background: radial-gradient(
+    ellipse 50% 50% at 50% 30%,
+    rgba(106, 212, 255, 0.06) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+.hero-eyebrow {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+  margin-bottom: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
 }
 
 .hero-headline {
-  font-size: var(--font-size-3xl);
-  margin: 0 0 1rem;
-  line-height: 1.15;
+  font-size: clamp(2rem, 5vw, var(--font-size-4xl));
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.03em;
+  margin: 0 0 var(--space-4);
+  max-width: 22ch;
+  /* Subtle gradient on the headline. The text is mostly
+   * foreground; the gradient is a hint, not a statement. */
+  background: linear-gradient(
+    135deg,
+    var(--color-fg) 0%,
+    var(--color-fg) 70%,
+    var(--color-accent) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .hero-blurb {
-  font-size: var(--font-size-lg);
-  color: var(--color-muted);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-loose);
+  color: var(--color-fg-muted);
   margin: 0;
-  max-width: 48rem;
+  max-width: 56ch;
 }
+
+.hero-args {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.hero-arg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+}
+.hero-arg:hover {
+  border-color: var(--color-accent);
+  text-decoration: none;
+}
+.hero-arg-arrow { color: var(--color-fg-subtle); }

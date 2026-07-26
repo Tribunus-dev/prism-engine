@@ -40,15 +40,15 @@ use prism_docs_runtime::systems::render_coordinator_system::RenderedPages;
 use thiserror::Error;
 
 use prism_docs_ssg::build_identity::build_identity;
-use prism_docs_ssg::css::{aggregate_css, CssError};
+use prism_docs_ssg::css::{aggregate_styles, CssError};
 use prism_docs_ssg::data_layer::{DataLayer, DataLayerError};
 use prism_docs_ssg::fixtures;
-use prism_docs_ssg::headers::render_headers;
 use prism_docs_ssg::hydration::HYDRATION_JS;
 use prism_docs_ssg::manuscript::{load_manuscript, ManuscriptError};
 use prism_docs_ssg::new_render::{render_all as render_all_new, write_pages, RenderContext, RenderError};
-use prism_docs_ssg::redirects::render_redirects;
 use prism_docs_ssg::selection_controller::SELECTION_CONTROLLER_JS;
+use prism_docs_ssg::theme_provider::THEME_PROVIDER_JS;
+use prism_docs_ssg::transitions_orchestrator::TRANSITIONS_ORCHESTRATOR_JS;
 
 #[derive(Parser, Debug)]
 #[command(name = "prism-docs-ssg", about = "Prism docs site generator")]
@@ -264,13 +264,13 @@ fn run(cli: Cli) -> Result<(), SsgError> {
     }
 
     // Aggregate CSS.
-    let css_bundle = aggregate_css(&cli.styles)?;
+    let styles_bundle = aggregate_styles(&cli.styles)?;
     let css_out_dir = cli.out.join("styles");
     std::fs::create_dir_all(&css_out_dir).map_err(|e| SsgError::Io {
         path: css_out_dir.clone(),
         source: e,
     })?;
-    for (rel, contents) in &css_bundle.files {
+    for (rel, contents) in &styles_bundle.css_files {
         let target = css_out_dir.join(rel);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| SsgError::Io {
@@ -283,15 +283,30 @@ fn run(cli: Cli) -> Result<(), SsgError> {
             source: e,
         })?;
     }
+    // Copy non-CSS assets (self-hosted fonts) through.
+    for (rel, src) in &styles_bundle.assets {
+        let target = css_out_dir.join(rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| SsgError::Io {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
+        }
+        std::fs::copy(src, &target).map_err(|e| SsgError::Io {
+            path: target.clone(),
+            source: e,
+        })?;
+    }
     let site_css_path = cli.out.join("site.css");
-    std::fs::write(&site_css_path, &css_bundle.combined).map_err(|e| SsgError::Io {
+    std::fs::write(&site_css_path, &styles_bundle.combined).map_err(|e| SsgError::Io {
         path: site_css_path.clone(),
         source: e,
     })?;
     eprintln!(
-        "prism-docs-ssg: wrote {} CSS files (combined: {} bytes)",
-        css_bundle.files.len(),
-        css_bundle.combined.len()
+        "prism-docs-ssg: wrote {} CSS files + {} assets (combined: {} bytes)",
+        styles_bundle.css_files.len(),
+        styles_bundle.assets.len(),
+        styles_bundle.combined.len()
     );
 
     // Emit hydration JS.
@@ -311,27 +326,10 @@ fn run(cli: Cli) -> Result<(), SsgError> {
     })?;
     eprintln!("prism-docs-ssg: wrote {}", sc_path.display());
 
-    // ----- Emit deployable artifacts (Cloudflare Pages) -----
-    // _redirects — the §7.2 redirect table. Real HTTP 301s.
-    // _headers — the §15.4 security + cache policy. Real
-    // response headers served at the edge.
-    // build.json — the §12 A16 build identity, served at
-    // the site root so the post-production smoke test can
-    // verify the live build.
-    let redirects_path = cli.out.join("_redirects");
-    std::fs::write(&redirects_path, render_redirects()).map_err(|e| SsgError::Io {
-        path: redirects_path.clone(),
-        source: e,
-    })?;
-    eprintln!("prism-docs-ssg: wrote {}", redirects_path.display());
-
-    let headers_path = cli.out.join("_headers");
-    std::fs::write(&headers_path, render_headers()).map_err(|e| SsgError::Io {
-        path: headers_path.clone(),
-        source: e,
-    })?;
-    eprintln!("prism-docs-ssg: wrote {}", headers_path.display());
-
+    // build.json — the §12 A16 build identity, served at the
+    // site root so a deployment smoke test can verify the
+    // live build. The static-site publication layer (GitHub
+    // Pages) serves this as a regular asset.
     // Re-load the data layer (already validated) to build the
     // build identity. Re-loading is cheap; the alternative is
     // threading the validated layer through every prior step.
@@ -366,9 +364,12 @@ fn run(cli: Cli) -> Result<(), SsgError> {
 
 /// Run the new Observatory v1 renderer. Loads the data layer,
 /// reads the manuscript, renders every canonical page, and
-/// emits the deployable artifacts (`_redirects`, `_headers`,
-/// `build.json`, the SelectionController JS, and a
-/// per-component CSS aggregation from `docs/styles/`).
+/// emits the deployable artifacts (`build.json`, the
+/// SelectionController JS, the aggregated `site.css`, and the
+/// per-component CSS in `docs/styles/`). No `_redirects` or
+/// `_headers` files are emitted: the v1 site has no legacy URL
+/// surface, and GitHub Pages (per ADR-032 v2) does not honor
+/// custom response headers.
 fn run_new_render(cli: &Cli) -> Result<(), SsgError> {
     eprintln!(
         "prism-docs-ssg [new]: loading data layer from {}",
@@ -410,14 +411,15 @@ fn run_new_render(cli: &Cli) -> Result<(), SsgError> {
         rendered.len()
     );
 
-    // Aggregate CSS into site.css + per-component files.
-    let css_bundle = aggregate_css(&cli.styles)?;
+    // Aggregate CSS into site.css + per-component files, and
+    // copy non-CSS assets (self-hosted fonts) through.
+    let styles_bundle = aggregate_styles(&cli.styles)?;
     let css_out_dir = cli.out.join("styles");
     std::fs::create_dir_all(&css_out_dir).map_err(|e| SsgError::Io {
         path: css_out_dir.clone(),
         source: e,
     })?;
-    for (rel, contents) in &css_bundle.files {
+    for (rel, contents) in &styles_bundle.css_files {
         let target = css_out_dir.join(rel);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| SsgError::Io {
@@ -430,15 +432,29 @@ fn run_new_render(cli: &Cli) -> Result<(), SsgError> {
             source: e,
         })?;
     }
+    for (rel, src) in &styles_bundle.assets {
+        let target = css_out_dir.join(rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| SsgError::Io {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
+        }
+        std::fs::copy(src, &target).map_err(|e| SsgError::Io {
+            path: target.clone(),
+            source: e,
+        })?;
+    }
     let site_css_path = cli.out.join("site.css");
-    std::fs::write(&site_css_path, &css_bundle.combined).map_err(|e| SsgError::Io {
+    std::fs::write(&site_css_path, &styles_bundle.combined).map_err(|e| SsgError::Io {
         path: site_css_path.clone(),
         source: e,
     })?;
     eprintln!(
-        "prism-docs-ssg [new]: wrote {} CSS files (combined: {} bytes)",
-        css_bundle.files.len(),
-        css_bundle.combined.len()
+        "prism-docs-ssg [new]: wrote {} CSS files + {} assets (combined: {} bytes)",
+        styles_bundle.css_files.len(),
+        styles_bundle.assets.len(),
+        styles_bundle.combined.len()
     );
 
     // SelectionController JS (the non-rendering URL-addressable
@@ -449,18 +465,63 @@ fn run_new_render(cli: &Cli) -> Result<(), SsgError> {
         source: e,
     })?;
 
-    // Deployable artifacts: _redirects, _headers, build.json.
-    let redirects_path = cli.out.join("_redirects");
-    std::fs::write(&redirects_path, render_redirects()).map_err(|e| SsgError::Io {
-        path: redirects_path.clone(),
-        source: e,
-    })?;
-    let headers_path = cli.out.join("_headers");
-    std::fs::write(&headers_path, render_headers()).map_err(|e| SsgError::Io {
-        path: headers_path.clone(),
+    // ThemeProvider JS (the dark/light owner per §9).
+    let theme_path = cli.out.join("theme.js");
+    std::fs::write(&theme_path, THEME_PROVIDER_JS).map_err(|e| SsgError::Io {
+        path: theme_path.clone(),
         source: e,
     })?;
 
+    // TransitionsOrchestrator JS (the WASM dispatcher per §9).
+    // The orchestrator loads `prism_transitions.js` (the
+    // wasm-bindgen glue) on idle. The glue and the .wasm
+    // binary are emitted by the build script
+    // (scripts/build-site.sh), not by this binary, because
+    // the WASM toolchain is heavier than the SSG's host
+    // toolchain. If the orchestrator is loaded but the
+    // WASM isn't there yet, it logs a warning and falls
+    // back to the CSS-only transitions.
+    let orchestrator_path = cli.out.join("transitions-orchestrator.js");
+    std::fs::write(&orchestrator_path, TRANSITIONS_ORCHESTRATOR_JS).map_err(|e| SsgError::Io {
+        path: orchestrator_path.clone(),
+        source: e,
+    })?;
+
+    // Copy the pre-built WASM artifacts to docs/transitions/
+    // if they exist. The build script (build-site.sh) builds
+    // them and drops them at <repo>/target/wasm-bindgen-out/.
+    // The SSG just copies; it does not build.
+    let wasm_src = Path::new("target/wasm-bindgen-out");
+    if wasm_src.exists() {
+        let wasm_dst = cli.out.join("transitions");
+        std::fs::create_dir_all(&wasm_dst).map_err(|e| SsgError::Io {
+            path: wasm_dst.clone(),
+            source: e,
+        })?;
+        for entry in std::fs::read_dir(wasm_src).map_err(|e| SsgError::Io {
+            path: wasm_src.to_path_buf(),
+            source: e,
+        })? {
+            let entry = entry.map_err(|e| SsgError::Io {
+                path: wasm_src.to_path_buf(),
+                source: e,
+            })?;
+            let src = entry.path();
+            let dst = wasm_dst.join(entry.file_name());
+            if src.is_file() {
+                std::fs::copy(&src, &dst).map_err(|e| SsgError::Io {
+                    path: dst.clone(),
+                    source: e,
+                })?;
+                eprintln!("prism-docs-ssg [new]: copied WASM artifact {}", entry.file_name().to_string_lossy());
+            }
+        }
+    }
+
+    // build.json — the §12 A16 build identity, served at the
+    // site root so a deployment smoke test can verify the
+    // live build. The publication layer (GitHub Pages) serves
+    // it as a regular asset.
     let id = build_identity(&data, &site, Some(build_id), &build_kind);
     let build_json = id
         .to_json()
@@ -474,7 +535,7 @@ fn run_new_render(cli: &Cli) -> Result<(), SsgError> {
         source: e,
     })?;
 
-    eprintln!("prism-docs-ssg [new]: wrote _redirects, _headers, build.json, selection-controller.js");
+    eprintln!("prism-docs-ssg [new]: wrote build.json, selection-controller.js, theme.js");
     eprintln!("prism-docs-ssg [new]: done");
     Ok(())
 }

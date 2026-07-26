@@ -1,0 +1,103 @@
+/* Prism Engine Observatory v1 — Lab Note.
+ *
+ * A Lab Note is a research claim, not a public capability.
+ * Each note has three parts: hypothesis, observation, and
+ * next experiment. The card makes the three parts visible
+ * and distinct; the visitor does not read a wall of text.
+ *
+ * Spec §6.14: a Lab Note is illustrative; the published notes
+ * are read from the data layer; the manuscript names the kind
+ * of note the layer holds. The card visual treats the note
+ * honestly: a research claim, named, with its evidence class.
+ */
+
+.lab-notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--space-5);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lab-note {
+  position: relative;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.lab-note-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.lab-note-eyebrow {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-accent-warm);
+}
+
+.lab-note-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.lab-note-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.lab-note-section-label {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.lab-note-section-label::before {
+  /* A small color square marks the section. Hypothesis is
+   * the warm color (the claim); observation is muted (the
+   * data); next-experiment is cyan (the proposed move). */
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 1px;
+  margin-right: var(--space-2);
+  vertical-align: 0.05em;
+  background: currentColor;
+}
+
+.lab-note-section[data-kind="hypothesis"] .lab-note-section-label {
+  color: var(--color-accent-warm);
+}
+.lab-note-section[data-kind="observation"] .lab-note-section-label {
+  color: var(--color-fg-muted);
+}
+.lab-note-section[data-kind="next-experiment"] .lab-note-section-label {
+  color: var(--color-accent);
+}
+
+.lab-note-section-body {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  color: var(--color-fg);
+  margin: 0;
+}

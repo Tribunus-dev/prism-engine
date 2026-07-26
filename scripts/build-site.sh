@@ -1,28 +1,41 @@
 #!/usr/bin/env bash
 # scripts/build-site.sh — Prism Observatory v1 build entry point.
 #
-# Per ADR-032 D2 (Strategy A: Pages builds, pinned toolchain).
-# This script is the single source of build truth; the Cloudflare
-# Pages dashboard "build command" field points here. The dashboard
-# is not the source; this script is.
+# Per ADR-032 v2 (GitHub Pages publication layer, GitHub Actions
+# build pipeline). This script is the single source of build truth;
+# the GitHub Actions workflow runs it on push to `main` and on
+# every pull request. The workflow file is not the source of
+# build configuration; this script is.
 #
 # Pipeline:
-#   1. Install the pinned Rust toolchain (rust-toolchain.toml) and
-#      WASM build tooling (wasm32-unknown-unknown, wasm-bindgen-cli,
-#      wasm-opt) at the versions recorded in
-#      crates/prism-docs-runtime/Cargo.toml and
-#      docs/scripts/build-wasm.sh.
-#   2. Build the WASM hydration bundle at docs/pkg/.
-#   3. Run the SSG with --validate, which reads and validates the
-#      data layer against the JSON Schemas before rendering.
-#   4. Emit _redirects, _headers, and build.json at the site root
-#      (per ADR-032 D3, D5, D6, and the §12 A16 build identity gate).
+#   1. Validate the data layer against the JSON Schemas. A
+#      validation failure aborts the build with a non-zero exit.
+#   2. Build the prism-transitions WebAssembly module. The
+#      module holds the state-driven motion choreography
+#      per §9 (Visual Direction). wasm-bindgen emits the
+#      JS glue alongside the .wasm binary; both land in
+#      docs/transitions/. If the wasm32 target is not
+#      installed, the build continues with CSS-only
+#      transitions (the no-JS fallback).
+#   3. Run the SSG with the validated data layer, the manuscript,
+#      and the styles. The SSG writes the rendered site to docs/,
+#      copies the WASM artifacts to docs/transitions/, and emits
+#      `build.json` (the build identity, per OBSERVATORY_V1_
+#      SPEC.md §12 A16), `selection-controller.js` (the URL-
+#      addressable selection reducer per §5.3 and §8), and
+#      `theme.js` (the dark/light ThemeProvider per §9).
+#
+# The output directory is the `docs/` directory of the
+# repository, served by GitHub Pages. The build is a normal
+# static site: HTML, CSS, JavaScript, JSON. No `_redirects` or
+# `_headers` files are emitted; the v1 site has no legacy URL
+# surface and no custom response headers (per ADR-032 v2).
 #
 # Usage:
-#   scripts/build-site.sh [--release|--debug] [--validate-only]
+#   scripts/build-site.sh [--release|--debug] [--out <dir>]
 #
-# The default build kind is --release. Pass --validate-only to
-# run the validators and exit before emitting site output.
+# The default build kind is --release. The default output
+# directory is `docs/`.
 
 set -euo pipefail
 
@@ -32,106 +45,102 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 BUILD_KIND="release"
-VALIDATE_ONLY=0
+OUT_DIR="$REPO_ROOT/docs"
+DATA_ROOT="$REPO_ROOT/docs/data"
+SCHEMA_DIR="$REPO_ROOT/schemas"
+MANUSCRIPT="$REPO_ROOT/OBSERVATORY_V1_MANUSCRIPT.md"
+STYLES_DIR="$REPO_ROOT/docs/styles"
 
 for arg in "$@"; do
   case "$arg" in
     --release) BUILD_KIND="release" ;;
     --debug)   BUILD_KIND="debug" ;;
-    --validate-only) VALIDATE_ONLY=1 ;;
+    --out)     OUT_DIR="$2"; shift ;;
     --help|-h)
-      echo "Usage: $0 [--release|--debug] [--validate-only]"
+      echo "Usage: $0 [--release|--debug] [--out <dir>]"
       exit 0
       ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done
 
-# Pinned toolchain version. Override with RUSTUP_TOOLCHAIN if set.
-RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-1.81.0}"
+# ---------- 1. Validate the data layer ----------
 
-# Paths.
-RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
-DATA_ROOT="$REPO_ROOT/docs/data"
-SCHEMA_DIR="$REPO_ROOT/schemas"
-OUT_DIR="$REPO_ROOT/docs"
-WASM_OUT_DIR="$OUT_DIR/pkg"
+echo "build-site.sh: validating data layer at $DATA_ROOT against $SCHEMA_DIR"
+cargo run -p prism-docs-ssg --quiet -- \
+  --data "$DATA_ROOT" \
+  --schemas "$SCHEMA_DIR" \
+  --manuscript "$MANUSCRIPT" \
+  --styles "$STYLES_DIR" \
+  --out "$OUT_DIR" \
+  --validate-only
 
-# ---------- 1. Install pinned toolchain (Strategy A) ----------
+# ---------- 2. Build the prism-transitions WASM ----------
+#
+# The choreography module compiles to wasm32-unknown-unknown.
+# wasm-bindgen emits an ES module (prism_transitions.js) and
+# the .wasm binary (prism_transitions_bg.wasm). The
+# orchestrator JS (transitions-orchestrator.js) loads the
+# module on idle and dispatches state-driven motion.
 
-echo "build-site.sh: installing Rust toolchain (channel $RUSTUP_TOOLCHAIN)"
-if [ ! -x "$RUSTUP_HOME/bin/rustup" ]; then
-  echo "build-site.sh: rustup not found at $RUSTUP_HOME/bin/rustup" >&2
-  echo "build-site.sh: install rustup or set RUSTUP_HOME" >&2
+WASM_OUT="$OUT_DIR/transitions"
+if rustup target list --installed 2>/dev/null | grep -q wasm32-unknown-unknown; then
+  echo "build-site.sh: building prism-transitions WASM"
+  RUSTC="$(rustup which rustc 2>/dev/null || which rustc)"
+  RUSTC="$RUSTC" cargo build \
+    -p prism-transitions \
+    --target wasm32-unknown-unknown \
+    --release \
+    --features wasm 2>&1 | tail -3
+  WASM_BLOB="$(ls -t target/wasm32-unknown-unknown/release/prism_transitions.wasm | head -1)"
+  if [ -n "$WASM_BLOB" ] && [ -f "$WASM_BLOB" ]; then
+    mkdir -p "$WASM_OUT"
+    "$(rustup which wasm-bindgen 2>/dev/null || which wasm-bindgen)" \
+      "$WASM_BLOB" \
+      --out-dir "$WASM_OUT" \
+      --target web \
+      --no-typescript >/dev/null
+    echo "build-site.sh: WASM artifacts in $WASM_OUT"
+  else
+    echo "build-site.sh: WASM build produced no blob; CSS-only fallback" >&2
+  fi
+else
+  echo "build-site.sh: wasm32 target not installed; CSS-only transitions"
+fi
+
+# ---------- 3. Run the SSG ----------
+
+echo "build-site.sh: rendering site to $OUT_DIR"
+cargo run -p prism-docs-ssg --quiet -- \
+  --data "$DATA_ROOT" \
+  --schemas "$SCHEMA_DIR" \
+  --manuscript "$MANUSCRIPT" \
+  --styles "$STYLES_DIR" \
+  --out "$OUT_DIR"
+
+# ---------- 4. Verify deployable artifacts ----------
+
+for f in build.json selection-controller.js site.css index.html; do
+  if [ ! -f "$OUT_DIR/$f" ]; then
+    echo "build-site.sh: SSG did not emit $f" >&2
+    exit 1
+  fi
+done
+
+# The theme.js file is also expected.
+if [ ! -f "$OUT_DIR/theme.js" ]; then
+  echo "build-site.sh: SSG did not emit theme.js" >&2
   exit 1
 fi
-"$RUSTUP_HOME/bin/rustup" toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component rustfmt --component clippy
-"$RUSTUP_HOME/bin/rustup" target add wasm32-unknown-unknown --toolchain "$RUSTUP_TOOLCHAIN"
 
-# Pin the build's toolchain for this script's child commands.
-export PATH="$RUSTUP_HOME/toolchains/$RUSTUP_TOOLCHAIN-x86_64-apple-darwin/bin:$RUSTUP_HOME/toolchains/$RUSTUP_TOOLCHAIN-aarch64-apple-darwin/bin:$PATH"
-export RUSTUP_TOOLCHAIN
-export RUSTC_VERSION="$("$RUSTUP_HOME/toolchains/$RUSTUP_TOOLCHAIN-$(uname -m | sed 's/x86_64/x86_64-apple-darwin/;s/aarch64/aarch64-apple-darwin/')/bin/rustc" --version 2>/dev/null || echo "rustc $RUSTUP_TOOLCHAIN")"
-
-# wasm-bindgen-cli at the version pinned in the runtime crate.
-WASM_BINDGEN_VERSION="$(
-  grep -E '^wasm-bindgen[[:space:]]*=' "$REPO_ROOT/crates/prism-docs-runtime/Cargo.toml" \
-    | head -1 \
-    | sed -E 's/.*"([0-9.]+).*/\1/'
-)"
-if [ -z "$WASM_BINDGEN_VERSION" ]; then
-  echo "build-site.sh: could not find wasm-bindgen version in Cargo.toml" >&2
-  exit 1
-fi
-echo "build-site.sh: installing wasm-bindgen-cli $WASM_BINDGEN_VERSION"
-cargo install --locked wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION" --quiet
-
-# ---------- 2. Build WASM hydration bundle ----------
-
-echo "build-site.sh: building WASM hydration bundle"
-bash "$REPO_ROOT/docs/scripts/build-wasm.sh"
-
-# ---------- 3. Run the SSG with validation ----------
-
-SSG_ARGS=(
-  --content "$REPO_ROOT/docs/content"
-  --styles  "$REPO_ROOT/docs/styles"
-  --out     "$OUT_DIR"
-  --data    "$DATA_ROOT"
-  --schemas "$SCHEMA_DIR"
-  --"$BUILD_KIND"
-  --validate
-)
-
-if [ "$VALIDATE_ONLY" = "1" ]; then
-  SSG_ARGS+=(--validate-only)
-fi
-
-echo "build-site.sh: running SSG"
-cargo run -p prism-docs-ssg -- "${SSG_ARGS[@]}"
-
-# ---------- 4. Generate _redirects, _headers, build.json ----------
-
-# The SSG already writes these files when run normally. The
-# --validate-only path skips the render and the file writes;
-# the validators have already exercised the table sources.
-if [ "$VALIDATE_ONLY" = "0" ]; then
-  if [ ! -f "$OUT_DIR/_redirects" ]; then
-    echo "build-site.sh: SSG did not emit _redirects" >&2
-    exit 1
-  fi
-  if [ ! -f "$OUT_DIR/_headers" ]; then
-    echo "build-site.sh: SSG did not emit _headers" >&2
-    exit 1
-  fi
-  if [ ! -f "$OUT_DIR/build.json" ]; then
-    echo "build-site.sh: SSG did not emit build.json" >&2
-    exit 1
-  fi
-  echo "build-site.sh: deployable artifacts present:"
-  echo "  $OUT_DIR/_redirects"
-  echo "  $OUT_DIR/_headers"
-  echo "  $OUT_DIR/build.json"
+echo "build-site.sh: deployable artifacts present:"
+echo "  $OUT_DIR/build.json"
+echo "  $OUT_DIR/selection-controller.js"
+echo "  $OUT_DIR/theme.js"
+echo "  $OUT_DIR/site.css"
+echo "  $OUT_DIR/index.html (+ 12 canonical pages + 404.html)"
+if [ -d "$WASM_OUT" ]; then
+  echo "  $WASM_OUT/ (WebAssembly transitions module)"
 fi
 
 echo "build-site.sh: done"

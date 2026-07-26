@@ -1,0 +1,173 @@
+/* Prism Engine Observatory v1 — state badge.
+ *
+ * The single visual component for status. Each state is
+ * communicated in three forms at once: text (the label),
+ * shape (a glyph that disambiguates the state), and color
+ * (the prism's response to the state). Per the spec, no
+ * status depends on color alone.
+ *
+ * The glyph is rendered via ::before so the markup stays a
+ * single <span class="state state-{name}">{label}</span>.
+ * Screen readers see the text; color-blind visitors see the
+ * shape; forced-colors agents get the system colors.
+ *
+ * The shapes:
+ *   - planned     ○  empty circle   — spectral, not yet present
+ *   - implemented  ●  filled circle  — present, in source
+ *   - qualifying   ◐  half-filled    — in motion, in progress
+ *   - validated    ✓  checkmark      — materially present
+ *   - released     ▣  tag            — carried; published
+ *   - unreleased   ▢  empty tag      — not yet public
+ *
+ * The distribution badge (.dist) reuses the same color and
+ * shape language with a slightly lower intensity.
+ */
+
+.state,
+.dist {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 0.3em 0.65em;
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  background: var(--color-surface-1);
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.state::before,
+.dist::before {
+  /* The shape glyph. Forced-color agents swap the unicode
+   * shape for a system-drawn one in the @media block below. */
+  content: "○";
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-bold);
+  font-size: 1.1em;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* Maturity states. -------------------------------------------------------- */
+
+.state-planned {
+  color: var(--color-state-planned);
+  border-color: var(--color-state-planned);
+  background: var(--color-state-planned-bg);
+}
+.state-planned::before { content: "○"; }
+
+.state-implemented {
+  color: var(--color-state-implemented);
+  border-color: var(--color-state-implemented);
+  background: var(--color-state-implemented-bg);
+}
+.state-implemented::before { content: "●"; }
+
+.state-qualifying {
+  color: var(--color-state-qualifying);
+  border-color: var(--color-state-qualifying);
+  background: var(--color-state-qualifying-bg);
+  /* Qualifying is in motion. A subtle pulse to signal that.
+   * Respects prefers-reduced-motion (see below). */
+  animation: state-qualifying-pulse 2400ms var(--motion-ease) infinite;
+}
+.state-qualifying::before { content: "◐"; }
+
+.state-validated {
+  color: var(--color-state-validated);
+  border-color: var(--color-state-validated);
+  background: var(--color-state-validated-bg);
+  /* Validated is materially present. A solid border, no
+   * animation. The check is the affordance. */
+  border-width: var(--border-medium);
+}
+.state-validated::before { content: "✓"; }
+
+@keyframes state-qualifying-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.65; }
+}
+
+/* Distribution states. ----------------------------------------------------- */
+
+.dist-released {
+  color: var(--color-state-released);
+  border-color: var(--color-state-released);
+  background: var(--color-state-released-bg);
+}
+.dist-released::before { content: "▣"; }
+
+.dist-unreleased {
+  color: var(--color-state-unreleased);
+  border-color: var(--color-state-unreleased);
+  background: var(--color-state-unreleased-bg);
+}
+.dist-unreleased::before { content: "▢"; }
+
+/* In tables, the badges sit at the start of the cell. */
+td > .state,
+td > .dist {
+  margin-right: var(--space-2);
+}
+
+/* Compound state — when a row carries both maturity and
+ * distribution, stack them with a small gap. */
+.state-dist {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Forced-colors. Replace unicode shapes with drawn ones that
+ * forced-colors agents can render reliably. */
+@media (forced-colors: active) {
+  .state::before,
+  .dist::before {
+    /* Hide the unicode shape; we'll use a CSS-drawn marker. */
+    content: "";
+    width: 0.8em;
+    height: 0.8em;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+  }
+  .state-planned::before,
+  .dist-unreleased::before {
+    /* empty circle */
+    background: transparent;
+  }
+  .state-implemented::before,
+  .dist-released::before {
+    /* filled circle */
+    background: currentColor;
+  }
+  .state-qualifying::before {
+    /* half-filled — drawn as a left-half overlay */
+    background: linear-gradient(
+      to right,
+      currentColor 0%,
+      currentColor 50%,
+      transparent 50%,
+      transparent 100%
+    );
+  }
+  .state-validated::before {
+    /* checkmark drawn as a CSS shape */
+    background: currentColor;
+    border-radius: 0;
+    width: 0.6em;
+    height: 0.9em;
+    border: 0;
+    transform: rotate(45deg) translateY(-1px);
+    clip-path: polygon(
+      0 60%, 30% 100%, 100% 0%, 100% 30%, 30% 100%, 0 60%
+    );
+  }
+}

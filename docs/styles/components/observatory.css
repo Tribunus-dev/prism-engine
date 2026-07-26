@@ -1,0 +1,173 @@
+/* Prism Engine Observatory v1 — The Life of a ComputeImage.
+ *
+ * The Observatory is the 12-stage canonical journey, exposed
+ * as a grid of stage cards. Each card has a number, a title,
+ * and a one-sentence description. The selection state (which
+ * stage is current) persists in the URL via the
+ * SelectionController.
+ *
+ * Spec §6.8: the Observatory exposes the published specimen.
+ * The instrument panel is fully present; the data behind it
+ * is whatever the corpus has. Stages 1-7 are populated; stages
+ * 8-12 are gap-stated (the corpus has no execution receipts).
+ *
+ * The grid is 4 columns on desktop, 2 on tablet, 1 on mobile.
+ * The current stage is visually lifted: stronger border, soft
+ * glow. The visitor can step through the stages in order, or
+ * jump to a non-adjacent stage.
+ */
+
+.observatory-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.observatory-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+  min-height: 8rem;
+}
+.observatory-stage:hover,
+.observatory-stage:focus-visible {
+  border-color: var(--color-rule-strong);
+  background: var(--color-surface-2);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.observatory-stage-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.observatory-stage-number {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+  flex-shrink: 0;
+}
+
+.observatory-stage-state {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+  margin-left: auto;
+}
+
+.observatory-stage-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  line-height: var(--line-height-snug);
+}
+
+.observatory-stage-description {
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  line-height: var(--line-height-base);
+  margin: 0;
+}
+
+/* The current (selected) stage. */
+.observatory-stage[data-state="selected"] {
+  border-color: var(--color-accent);
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-glow);
+}
+.observatory-stage[data-state="selected"] .observatory-stage-number {
+  color: var(--color-accent);
+}
+
+/* The state of a stage. A stage is either populated by the
+ * corpus, or gap-stated. */
+.observatory-stage[data-corpus="populated"] .observatory-stage-state {
+  color: var(--color-state-validated);
+}
+.observatory-stage[data-corpus="gap"] .observatory-stage-state {
+  color: var(--color-state-unreleased);
+  font-style: italic;
+}
+
+/* Responsive. */
+@media (max-width: 1100px) {
+  .observatory-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .observatory-stages { grid-template-columns: 1fr; }
+}
+
+/* The instrument panel. A wider card that shows the
+ * currently selected stage's instrument. Hidden when no
+ * stage is selected. The visual is the centerpiece of the
+ * Observatory. */
+.observatory-instrument {
+  margin: var(--space-5) 0;
+  padding: var(--space-5);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  min-height: 12rem;
+}
+.observatory-instrument-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
+}
+.observatory-instrument-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+.observatory-instrument-state {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-state-unreleased);
+  font-style: italic;
+}
+.observatory-instrument[data-state="populated"] .observatory-instrument-state {
+  color: var(--color-state-validated);
+  font-style: normal;
+}
+.observatory-instrument-body {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  color: var(--color-fg-muted);
+}
+.observatory-instrument-body p { max-width: 64ch; }
+.observatory-instrument-empty {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-subtle);
+  font-style: italic;
+  margin: 0;
+}

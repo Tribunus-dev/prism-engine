@@ -150,6 +150,7 @@ resolver = "2"
 
 members = [
     ".",
+    "compute-core",
     "evidence-schema",
     "prism-ffi",
     "prism-mcp-model",
@@ -200,6 +201,7 @@ members = [
     "crates/prism-docs-content",
     "crates/prism-docs-runtime",
     "crates/prism-docs-ssg",
+    "crates/prism-transitions",
 ]
 
 [workspace.package]

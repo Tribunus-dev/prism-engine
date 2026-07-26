@@ -1,16 +1,51 @@
-/* site-header — the top-of-page brand and navigation bar.
+/* Prism Engine Observatory v1 — site header.
  *
- * Layout: brand on the left, nav on the right, separated by a
- * hairline rule. Used on every page.
+ * The top-of-page bar: brand on the left, primary nav on the
+ * right, separated from the page body by a hairline. The
+ * header is not sticky in v1; the page body owns the scroll.
+ * Sticky behavior is a follow-on if review indicates it.
+ *
+ * The header sits on a slightly elevated surface so the rule
+ * beneath it reads as a section divider, not a cell border.
  */
 
 .site-header {
+  position: relative;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 1rem var(--gutter);
-  border-bottom: 1px solid var(--color-rule);
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--gutter);
   background: var(--color-bg);
+  border-bottom: 1px solid var(--color-rule);
+  /* The faint top-edge highlight suggests depth without
+   * committing to a "raised" treatment. */
+  box-shadow: 0 1px 0 rgba(106, 212, 255, 0.04);
 }
 
-.site-header .brand { margin-right: auto; }
+.site-header .brand {
+  margin-right: auto;
+}
+
+/* The horizontal nav slot. On narrow viewports, the nav
+ * wraps below the brand; the gap above the nav row is the
+ * row gap, no special margin needed. */
+.site-header > nav {
+  flex: 0 1 auto;
+}
+
+@media (max-width: 600px) {
+  .site-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .site-header .brand {
+    margin-right: 0;
+  }
+  .site-nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

@@ -1,16 +1,109 @@
-/* page — the main content column for a page route.
+/* Prism Engine Observatory v1 — page.
  *
- * One page-column per page. Chapters and claims compose into
- * it. The page blurb sits at the top.
+ * The main content column. Every page renders into a single
+ * .page-body. The body is the canonical column; chapters and
+ * claims compose into it.
+ *
+ * The body is wide enough for a comfortable reading line
+ * (max-width-narrow on long-form pages; max-width on technical
+ * pages with code and tables).
  */
 
 .page-body {
   max-width: var(--max-width);
   margin: 0 auto;
-  padding: var(--gutter-tight) var(--gutter) 4rem;
+  padding: var(--space-6) var(--gutter) var(--space-8);
 }
 
-.page-blurb {
-  font-size: var(--font-size-lg);
-  color: var(--color-muted);
+.page-body-wide {
+  max-width: var(--max-width-wide);
+  margin: 0 auto;
+  padding: var(--space-6) var(--gutter) var(--space-8);
+}
+
+.page-body-narrow {
+  max-width: var(--max-width-narrow);
+  margin: 0 auto;
+  padding: var(--space-6) var(--gutter) var(--space-8);
+}
+
+/* The page footer. One element. */
+.site-footer {
+  max-width: var(--max-width);
+  margin: var(--space-6) auto var(--space-6);
+  padding: var(--space-5) var(--gutter);
+  border-top: 1px solid var(--color-rule);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.site-footer a { color: var(--color-fg); }
+.site-footer .muted { color: var(--color-fg-subtle); }
+.site-footer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* 404 — the page-not-found surface. Same shell as the other
+ * pages, with a distinctive hero and a useful list of links
+ * the visitor can use to recover. */
+.page-not-found {
+  text-align: center;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--space-7) 0;
+}
+.page-not-found h1 {
+  font-size: var(--font-size-2xl);
+}
+.page-not-found p {
+  margin-left: auto;
+  margin-right: auto;
+}
+.page-not-found .fallback-links {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-5) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  justify-content: center;
+}
+.page-not-found .search-form {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-5) auto;
+  max-width: 28rem;
+  justify-content: center;
+}
+.page-not-found .search-form input {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  color: var(--color-fg);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--font-size-base);
+}
+.page-not-found .search-form input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+.page-not-found .search-form button {
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border: 0;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
 }

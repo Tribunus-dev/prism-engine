@@ -1,95 +1,778 @@
 
-/* --- foundation/layout.css --- */
-/* Prism Engine docs — layout primitives.
+/* --- foundation/fonts.css --- */
+/* Prism Engine Observatory v1 — self-hosted fonts.
  *
- * The max-width column, gutters, and the standard horizontal
- * flow. Components compose these.
+ * Per spec §A19 (no third-party requests of any kind), the
+ * site serves its own font files from /styles/fonts/. No
+ * requests to fonts.gstatic.com, no Google Fonts CSS, no
+ * anything. The visitor's browser fetches the font files from
+ * the same origin as the page.
+ *
+ * The Ubuntu font family is licensed under the Ubuntu Font
+ * Licence 1.0 — see Ubuntu-LICENCE.txt. Source: Canonical's
+ * fonts-ubuntu 0.83 (Jammy) source tarball, hosted at
+ * archive.ubuntu.com/ubuntu/pool/main/f/fonts-ubuntu/.
+ *
+ * Weights exposed:
+ *   Ubuntu Light        (300)
+ *   Ubuntu Regular      (400)
+ *   Ubuntu Medium       (500)
+ *   Ubuntu Bold         (700)
+ *   + matching italics
+ *   Ubuntu Mono Regular (400)
+ *   Ubuntu Mono Bold    (700)
+ *   + matching italics
+ *
+ * font-display: swap — text renders immediately with the
+ * system fallback; the local face replaces it once loaded.
+ * We do not block the first paint on font readiness.
+ *
+ * The system stack in tokens.css is the fallback layer: even
+ * with the network down, the page is readable.
+ */
+
+/* Ubuntu — sans, primary */
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Light.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 300;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-LightItalic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Italic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-MediumItalic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/Ubuntu-BoldItalic.ttf") format("truetype");
+}
+
+/* Ubuntu Mono — monospaced identities */
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-Regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-Italic.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-Bold.ttf") format("truetype");
+}
+@font-face {
+  font-family: "Ubuntu Mono";
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/styles/fonts/UbuntuMono-BoldItalic.ttf") format("truetype");
+}
+
+
+/* --- foundation/layout.css --- */
+/* Prism Engine Observatory v1 — layout primitives.
+ *
+ * The page column, the gutters, and the standard horizontal
+ * and vertical flows. Components compose these.
+ *
+ * Spec §9: the site breathes. There is rhythm between darkness
+ * and illumination, dense technical panels and open explanatory
+ * space. The layout primitives are the bones of that rhythm.
  */
 
 * { box-sizing: border-box; }
 
+html, body { width: 100%; }
+
+/* The page column. Three widths: narrow (prose), default,
+ * wide (status, observatory, lab). The visitor reads the
+ * column; everything outside it is page-ambient. */
+.page-column-narrow {
+  max-width: var(--max-width-narrow);
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+}
 .page-column {
   max-width: var(--max-width);
   margin: 0 auto;
   padding: 0 var(--gutter);
 }
-
 .page-column-wide {
   max-width: var(--max-width-wide);
   margin: 0 auto;
   padding: 0 var(--gutter);
 }
 
-.flow > * + * { margin-top: 1rem; }
-.flow-tight > * + * { margin-top: 0.5rem; }
-.flow-loose > * + * { margin-top: 2rem; }
+/* Flow primitives. The names are verbs, not values: `flow`
+ * means "stack these vertically with breathing room." */
+.flow > * + * { margin-top: var(--space-4); }
+.flow-tight > * + * { margin-top: var(--space-2); }
+.flow-loose > * + * { margin-top: var(--space-6); }
 
-.row { display: flex; gap: var(--gutter); }
-.row-tight { display: flex; gap: var(--gutter-tight); }
-.row-loose { display: flex; gap: var(--gutter-loose); }
+/* Row primitives. The names are directions: `row` is a
+ * horizontal flex with the default gutter. */
+.row {
+  display: flex;
+  gap: var(--gutter);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.row-tight {
+  display: flex;
+  gap: var(--gutter-tight);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.row-loose {
+  display: flex;
+  gap: var(--gutter-loose);
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
 
-.stack { display: flex; flex-direction: column; gap: var(--gutter-tight); }
-.stack-loose { display: flex; flex-direction: column; gap: var(--gutter-loose); }
+/* Stack primitives. Vertical flex with the default gutter. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.stack-tight {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.stack-loose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Grid primitives. Use these for repeating structures. */
+.grid {
+  display: grid;
+  gap: var(--gutter);
+}
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* At small viewports, the multi-column grids collapse to one. */
+@media (max-width: 720px) {
+  .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .row, .row-tight, .row-loose { flex-direction: column; }
+}
+
+/* Section spacing. Sections in the page body are separated
+ * by a hairline rule and a generous gap. The first section
+ * has no top border. */
+.section {
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--color-rule);
+}
+.section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+.section-loose {
+  padding: var(--space-7) 0;
+  border-top: 1px solid var(--color-rule);
+}
+.section-loose:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+/* Inline-cluster: a horizontal flex with wrap, tight gap, baseline. */
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  align-items: center;
+}
+
+/* Bar: a horizontal element with a label and a value,
+ * baseline-aligned. Used in metadata lists. */
+.bar {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--color-rule);
+}
+.bar:last-child { border-bottom: 0; }
+.bar-label {
+  font-size: var(--font-size-sm);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.bar-value {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+  text-align: right;
+}
+
+/* Center helpers. */
+.center { text-align: center; }
+.center-block { margin-left: auto; margin-right: auto; }
+
+/* Visually hidden (a11y). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skip link. The first focusable element on every page. */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 0;
+  background: var(--color-accent);
+  color: var(--color-bg);
+  padding: var(--space-3) var(--space-4);
+  border-radius: 0 0 var(--radius-md) 0;
+  z-index: var(--z-overlay);
+  font-weight: var(--font-weight-bold);
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 0;
+  text-decoration: none;
+}
+
+/* ---------------------------------------------------------------- *
+ * 8. Mobile polish.
+ *
+ *    Audited at 320 (iPhone SE), 375 (iPhone 12 mini), 414
+ *    (iPhone 12), 600 (large phone), 720 (tablet portrait),
+ *    900 (tablet landscape), 1100 (laptop), 1280 (desktop).
+ *
+ *    The principles: tight gutters; the column never overflows
+ *    the viewport; tables, code, and stratum cards are
+ *    readable; the Observatory grid collapses 4 → 2 → 1; the
+ *    site header stacks; the secondary nav reflows.
+ * ---------------------------------------------------------------- */
+
+/* Tighten gutters below 720 so prose has breathing room
+ * without running into the edge. */
+@media (max-width: 720px) {
+  :root {
+    --gutter:       var(--space-4);
+    --gutter-loose: var(--space-5);
+  }
+}
+
+/* Below 540, gutters get even tighter. The site's max-width
+ * is 64rem (1024px); at 320 viewport, we need the prose
+ * inside the gutter, not pushed to the edge. */
+@media (max-width: 540px) {
+  :root {
+    --gutter:       var(--space-3);
+    --gutter-loose: var(--space-4);
+  }
+}
+
+/* Below 380, the prose column has minimum 1rem padding even
+ * at the extreme small. */
+@media (max-width: 380px) {
+  :root {
+    --gutter: 1rem;
+  }
+  .hero, .hero-home {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .hero-headline {
+    font-size: clamp(1.5rem, 8vw, 2rem);
+  }
+}
+
+/* Tables: at narrow widths, allow horizontal scroll within
+ * the cell, not the page. */
+@media (max-width: 720px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .chapter-body, .page-body {
+    overflow-x: hidden;
+  }
+}
+
+/* The observatory instrument panel: at narrow widths, the
+ * header's flex children stack to keep the rule tight. */
+@media (max-width: 600px) {
+  .observatory-instrument-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-2);
+  }
+  .observatory-instrument-title {
+    font-size: var(--font-size-md);
+  }
+}
+
+/* The redaction manifest and stratum data blocks: ensure
+ * they break words instead of overflowing the column. */
+.stratum-card-data,
+.redaction-manifest pre,
+pre {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Long URLs, paths, and code identifiers in prose wrap. */
+p code, li code, td code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* The site header's nav links: at very narrow viewports,
+ * keep them on one row but use smaller padding so the five
+ * primary items fit on a 360px viewport. */
+@media (max-width: 380px) {
+  .site-nav-link {
+    padding: var(--space-1) var(--space-2);
+    font-size: 0.7rem;
+  }
+}
+
+/* Touch target sizing. Anything interactive below 600px
+ * viewport gets a minimum 44x44 hit area. */
+@media (max-width: 600px) {
+  .theme-toggle,
+  .site-nav-link,
+  .hero-arg,
+  .observatory-stage {
+    min-height: 44px;
+  }
+  .observatory-stage {
+    padding: var(--space-3) var(--space-4);
+  }
+}
+
+/* Page body overflow protection. Unconditional: a long
+ * monospace token in a paragraph or a wide stratum-data
+ * block can never push the page wider than the viewport.
+ * The element itself clips; its children use overflow-x:
+ * auto to allow scroll within themselves. */
+.page-body, .page-body-wide, .page-body-narrow, .chapter-body {
+  overflow-x: hidden;
+  /* Establish a containing block for absolutely-positioned
+   * descendants (the hero halo, the instrument panel). */
+  position: relative;
+}
+
+/* The 404 search form: on narrow viewports, full width. */
+@media (max-width: 600px) {
+  .search-form input[type="search"] {
+    width: 100%;
+  }
+}
+
+/* Print: the site still needs to print, even if no one
+ * uses this. Light paper, no ambient, rules are visible. */
+@media print {
+  :root {
+    --color-bg: #ffffff;
+    --color-fg: #000000;
+    --color-fg-muted: #333;
+    --color-fg-subtle: #666;
+    --color-rule: #ccc;
+    --color-accent: #000;
+  }
+  body {
+    background: white !important;
+  }
+  .site-header, .site-footer, .hero::after, .hero::before {
+    box-shadow: none;
+    background-image: none;
+  }
+  a { color: inherit; text-decoration: underline; }
+  .observatory-stage, .stratum-card, .verifiable-item, .lab-note, .milestone {
+    break-inside: avoid;
+  }
+}
+
+
+/* --- foundation/tokens-light.css --- */
+/* Prism Engine Observatory v1 — light theme override.
+ *
+ * The dark theme is the default (in tokens.css). This file
+ * redeclares every color token for the light theme under a
+ * `[data-theme="light"]` selector. The cascade resolves
+ * lexical order: tokens-light.css sorts after tokens.css, so
+ * the override wins whenever the attribute is set.
+ *
+ * Light theme follows the same rules as dark: status is
+ * communicated in text + shape + color; ambient is sparse;
+ * rules are visible at all times. WCAG AA contrast is the
+ * floor for every text/background pair. The prism dispersion
+ * (cyan + magenta) is deepened, not brightened — light
+ * backgrounds can't carry pure white-readable cyan without
+ * vibration.
+ *
+ * The page sets `data-theme` on `<html>` before paint via the
+ * ThemeProvider (selection-controller.js). The choice persists
+ * in localStorage and respects prefers-color-scheme on first
+ * visit.
+ */
+
+[data-theme="light"] {
+  /* Surfaces. The warm-paper light variant. */
+  --color-bg:           #faf9f6;  /* paper */
+  --color-surface-1:    #ffffff;  /* the chapter; the instrument panel */
+  --color-surface-2:    #f1f0ec;  /* the elevated card */
+  --color-surface-3:    #e7e6e0;  /* the active card; the selected stage */
+
+  /* Text. High contrast against the warm paper. */
+  --color-fg:           #18181f;
+  --color-fg-muted:     #4d4d63;
+  --color-fg-subtle:    #7878a0;
+
+  /* Rule. Visible at all times, hairline weight. */
+  --color-rule:         #d8d7d0;
+  --color-rule-strong:  #b8b7b0;
+
+  /* Accent. The prism dispersion, deepened for light-paper
+   * contrast. The cool and warm ends of the prism. */
+  --color-accent:       #0066aa;  /* cyan, deepened: links, in-motion, implemented */
+  --color-accent-warm:  #8a2d99;  /* magenta, deepened: qualifying, in-flight */
+
+  /* Status colors. Each carries enough contrast against the
+   * warm paper to read at AA. The state-badge component
+   * re-uses the text + shape signal that survives the color
+   * shift, so a state is never color-only. */
+  --color-state-planned:      #7878a0;  /* cool gray, low contrast */
+  --color-state-implemented:  #0066aa;  /* cool cyan, present */
+  --color-state-qualifying:   #8a2d99;  /* warm magenta, in flight */
+  --color-state-validated:    #2d7a3a;  /* forest green, materially present */
+  --color-state-released:     #0066aa;  /* cool cyan, carried; tagged */
+  --color-state-unreleased:   #7878a0;  /* cool gray, not yet public */
+
+  /* Status surface tints — the hue at low alpha over the
+   * paper. Computed for the light surface. */
+  --color-state-planned-bg:      rgba(120, 120, 160, 0.10);
+  --color-state-implemented-bg:  rgba(0, 102, 170, 0.10);
+  --color-state-qualifying-bg:   rgba(138, 45, 153, 0.10);
+  --color-state-validated-bg:    rgba(45, 122, 58, 0.12);
+  --color-state-released-bg:     rgba(0, 102, 170, 0.10);
+  --color-state-unreleased-bg:   rgba(120, 120, 160, 0.08);
+
+  /* Focus ring. Slightly more visible on light paper. */
+  --color-focus:        #0066aa;
+  --color-focus-ring:   rgba(0, 102, 170, 0.30);
+
+  /* Shadows. Lighter and smaller; light paper doesn't need
+   * the same depth cue that dark surfaces do. */
+  --shadow-sm:  0 1px 0 rgba(20, 20, 30, 0.08);
+  --shadow-md:  0 2px 8px rgba(20, 20, 30, 0.10);
+  --shadow-lg:  0 8px 24px rgba(20, 20, 30, 0.12);
+}
+
+/* Ambient gradient, light variant. The dark version uses
+ * cyan/magenta at 4% over a void. Light paper can't carry
+ * even that without vibrating; the gradients are halved and
+ * the magenta is shifted toward a calmer rose. */
+[data-theme="light"] body {
+  background-image:
+    radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      rgba(0, 102, 170, 0.025) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 50% 100%,
+      rgba(138, 45, 153, 0.020) 0%,
+      transparent 60%
+    );
+}
+
+/* Selection. Light paper inverts to a deeper accent. */
+[data-theme="light"] ::selection {
+  background: var(--color-accent);
+  color: #ffffff;
+}
+
+/* Site header hairline is slightly heavier on light paper so
+ * the rule is visible. */
+[data-theme="light"] .site-header {
+  border-bottom-color: var(--color-rule-strong);
+}
 
 
 /* --- foundation/tokens.css --- */
-/* Prism Engine docs — design tokens.
+/* Prism Engine Observatory v1 — design tokens.
  *
- * This is the foundation for every component. Tokens are
- * stable; component CSS reads them. Editing a token is a
- * constitutional change because every component depends on
- * it.
+ * One source of truth for color, type, space, motion, and shape.
+ * Every component reads from these tokens. Editing a token is a
+ * constitutional change: every component depends on it.
+ *
+ * The spec is OBSERVATORY_V1_SPEC.md §9 (Visual Direction).
+ * v1 ships dark only. Light theme is a follow-on.
+ *
+ * Typography: Ubuntu is the primary typeface. Monospace is
+ * reserved for identities, hashes, digests, commands, schemas,
+ * values, machine-state labels, and code. Prose never uses
+ * monospace; identities never use proportional.
+ *
+ * Status is communicated in three forms at once: text, shape,
+ * and color. The shape variation is what makes the state
+ * visible to a color-blind visitor, a screen reader (via the
+ * text label), and a printed page (no color at all). See
+ * state-badge.css for the per-status rules.
  */
 
 :root {
-  /* Color palette. The accent is the prism dispersion color;
-   * the muted gray is the observatory ambient. */
-  --color-bg: #0c0c10;
-  --color-fg: #e8e8ee;
-  --color-accent: #6ad4ff;
-  --color-accent-warm: #c56ad4;
-  --color-muted: #8a8a9c;
-  --color-rule: #1c1c24;
-  --color-surface: #11111a;
-  --color-claim-bg: #11111a;
+  /* ---------------------------------------------------------------- *
+   * 1. Color — the prism dispersion and the observatory ambient.
+   * ---------------------------------------------------------------- */
 
-  /* Typography. The system font stack is the default; mono
-   * is for receipts, commands, and identifiers. */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
-  --font-size-base: 16px;
-  --font-size-sm: 0.85rem;
-  --font-size-md: 1rem;
-  --font-size-lg: 1.1rem;
-  --font-size-xl: 1.4rem;
-  --font-size-2xl: 1.8rem;
-  --font-size-3xl: 2.5rem;
-  --line-height-base: 1.55;
+  /* Surfaces. Three levels of elevation, plus the base. */
+  --color-bg:           #0a0a10;  /* the page; the void behind the subject */
+  --color-surface-1:    #131320;  /* the chapter; the instrument panel */
+  --color-surface-2:    #1c1c2e;  /* the elevated card; the highlighted cell */
+  --color-surface-3:    #262638;  /* the active card; the selected stage */
 
-  /* Layout. The max-width is the canonical page column. */
-  --max-width: 64rem;
-  --max-width-wide: 80rem;
-  --gutter: 2rem;
-  --gutter-tight: 1rem;
-  --gutter-loose: 3rem;
+  /* Text. High contrast for primary, lower for muted. */
+  --color-fg:           #ebebf2;  /* primary text */
+  --color-fg-muted:     #a0a0b8;  /* secondary text; timestamps; source paths */
+  --color-fg-subtle:    #6c6c84;  /* tertiary text; labels in tables; the prism dispersion ambient */
 
-  /* Z-index scale. Components must read from this scale, not
-   * invent their own. */
-  --z-base: 0;
-  --z-elevated: 10;
-  --z-overlay: 100;
-  --z-modal: 1000;
+  /* Rule. The hairline between sections, between rows, between
+   * panels. Visible at all times; never decorative. */
+  --color-rule:         #2a2a3e;
+  --color-rule-strong:  #3a3a52;
+
+  /* Accent. The prism dispersion color: cyan. The warm side:
+   * magenta. Together they are the prism's two ends. */
+  --color-accent:       #6ad4ff;  /* cyan: links, in-motion, implemented */
+  --color-accent-warm:  #c56ad4;  /* magenta: qualifying, in-flight, illustrative */
+
+  /* Status colors. Each one has a paired text/shape variant
+   * in state-badge.css. Color is reinforcement; text and
+   * shape are the primary signal. */
+  --color-state-planned:      #6c6c84;  /* gray; spectral, low contrast */
+  --color-state-implemented:  #6ad4ff;  /* cyan; active; present */
+  --color-state-qualifying:   #c56ad4;  /* warm; in flight; qualifying */
+  --color-state-validated:    #5fd97a;  /* green; materially present */
+  --color-state-released:     #6ad4ff;  /* cyan; carried; tagged */
+  --color-state-unreleased:   #6c6c84;  /* gray; not yet public */
+
+  /* Status surface tints — used for state badges' backgrounds
+   * when a badge sits on a chapter or a card. The hue is the
+   * status color at 12% opacity over the surface-1. */
+  --color-state-planned-bg:      rgba(108, 108, 132, 0.12);
+  --color-state-implemented-bg:  rgba(106, 212, 255, 0.14);
+  --color-state-qualifying-bg:   rgba(197, 106, 212, 0.14);
+  --color-state-validated-bg:    rgba(95, 217, 122, 0.16);
+  --color-state-released-bg:     rgba(106, 212, 255, 0.14);
+  --color-state-unreleased-bg:   rgba(108, 108, 132, 0.10);
+
+  /* Focus ring. The visible focus indicator. WCAG 2.4.7. */
+  --color-focus:        #6ad4ff;
+  --color-focus-ring:   rgba(106, 212, 255, 0.35);
+
+  /* ---------------------------------------------------------------- *
+   * 2. Type — Ubuntu (primary), monospace (identities, code).
+   * ---------------------------------------------------------------- */
+
+  --font-sans: "Ubuntu", "Ubuntu Web", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "Ubuntu Mono", "JetBrains Mono", "SF Mono", "Menlo",
+               "Consolas", "Liberation Mono", monospace;
+
+  /* Modular scale, 1.25 ratio, anchored at 16px.
+   * Used directly in components; never recomputed locally. */
+  --font-size-xs:   0.78rem;   /* 12.5px — fine print, table cells */
+  --font-size-sm:   0.875rem;  /* 14px   — meta, footnotes, source paths */
+  --font-size-base: 1rem;      /* 16px   — body */
+  --font-size-md:   1.125rem;  /* 18px   — blurb, lead */
+  --font-size-lg:   1.375rem;  /* 22px   — chapter title */
+  --font-size-xl:   1.75rem;   /* 28px   — section title (large) */
+  --font-size-2xl:  2.25rem;   /* 36px   — section title (huge) */
+  --font-size-3xl:  3rem;      /* 48px   — hero headline */
+  --font-size-4xl:  4rem;      /* 64px   — display, sparingly */
+
+  --line-height-tight:  1.15;  /* headlines, hero */
+  --line-height-snug:   1.3;   /* h3, h4 */
+  --line-height-base:   1.55;  /* body */
+  --line-height-loose:  1.7;   /* long-form prose */
+
+  --letter-spacing-tight:  -0.025em;  /* large headlines */
+  --letter-spacing-base:   0;        /* body */
+  --letter-spacing-wide:   0.04em;   /* small caps, labels, brand wordmark */
+  --letter-spacing-mono:   -0.01em;  /* mono slightly tighter */
+
+  --font-weight-regular: 400;
+  --font-weight-medium:  500;
+  --font-weight-bold:    700;
+
+  /* ---------------------------------------------------------------- *
+   * 3. Space — a 4px base unit, exposed as a named scale.
+   * ---------------------------------------------------------------- */
+
+  --space-1:    0.25rem;   /* 4px  — fine */
+  --space-2:    0.5rem;    /* 8px  — tight */
+  --space-3:    0.75rem;   /* 12px — small */
+  --space-4:    1rem;      /* 16px — base */
+  --space-5:    1.5rem;    /* 24px — medium */
+  --space-6:    2rem;      /* 32px — large */
+  --space-7:    3rem;      /* 48px — section */
+  --space-8:    4rem;      /* 64px — page */
+  --space-9:    6rem;      /* 96px — hero */
+
+  /* ---------------------------------------------------------------- *
+   * 4. Layout — the canonical page column and gutters.
+   * ---------------------------------------------------------------- */
+
+  --max-width-narrow:   44rem;  /* 704px — prose, single column */
+  --max-width:          64rem;  /* 1024px — default page column */
+  --max-width-wide:     80rem;  /* 1280px — observatory, lab, status */
+  --max-width-display:  96rem;  /* 1536px — display, if ever needed */
+
+  --gutter:             var(--space-5);
+  --gutter-tight:       var(--space-4);
+  --gutter-loose:       var(--space-6);
+
+  /* ---------------------------------------------------------------- *
+   * 5. Shape — radii, borders, shadows. Sparse and honest.
+   * ---------------------------------------------------------------- */
+
+  --radius-sm:    3px;     /* tags, inline code */
+  --radius-md:    6px;     /* cards, inputs */
+  --radius-lg:    10px;    /* panels, hero blocks */
+  --radius-pill:  999px;   /* status pills */
+
+  --border-thin:    1px;
+  --border-medium:  2px;
+  --border-thick:   3px;     /* status pill border; selected card indicator */
+
+  --shadow-sm:  0 1px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md:  0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.45);
+
+  /* The selected-card glow. Cyan-tinted, low intensity. */
+  --shadow-glow: 0 0 0 1px var(--color-accent), 0 0 24px var(--color-focus-ring);
+
+  /* ---------------------------------------------------------------- *
+   * 6. Motion — state-bearing only, never decorative. §9.
+   *    prefers-reduced-motion collapses motion to zero.
+   * ---------------------------------------------------------------- */
+
+  --motion-fast:   120ms;
+  --motion-base:   200ms;
+  --motion-slow:   360ms;
+  --motion-ease:   cubic-bezier(0.2, 0.0, 0.2, 1);
+  --motion-ease-out:  cubic-bezier(0.0, 0.0, 0.2, 1);
+
+  /* ---------------------------------------------------------------- *
+   * 7. Z-index — components read from this scale, not invent.
+   * ---------------------------------------------------------------- */
+
+  --z-base:      0;
+  --z-elevated:  10;
+  --z-sticky:    100;
+  --z-overlay:   1000;
+  --z-modal:     2000;
+}
+
+/* prefers-reduced-motion: motion collapses to zero. §9. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast:  0ms;
+    --motion-base:  0ms;
+    --motion-slow:  0ms;
+  }
 }
 
 
 /* --- foundation/typography.css --- */
-/* Prism Engine docs — typography.
+/* Prism Engine Observatory v1 — typography.
  *
  * One source of truth for body, headings, code, links, and
  * lists. Components override only what is specific to them.
+ *
+ * Spec §9: Ubuntu is the primary typeface. Monospaced typography
+ * is reserved for identities, hashes, digests, commands, schemas,
+ * values, machine-state labels, and code. Prose never uses
+ * monospace. Identities never use proportional.
+ *
+ * The font stack is declared in tokens.css. The system fallbacks
+ * ensure the site is readable on every system; the spec name
+ * (Ubuntu) is the first preference.
  */
 
-html, body {
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
   margin: 0;
   padding: 0;
   background: var(--color-bg);
@@ -97,89 +780,347 @@ html, body {
   font-family: var(--font-sans);
   font-size: var(--font-size-base);
   line-height: var(--line-height-base);
+  font-weight: var(--font-weight-regular);
+  font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
+  min-height: 100vh;
+  /* Subtle ambient gradient. Anchors the visitor; is not the
+   * "gradient soup" §9 forbids. Stays below all content. */
+  background-image:
+    radial-gradient(
+      ellipse 80% 50% at 50% 0%,
+      rgba(106, 212, 255, 0.04) 0%,
+      transparent 60%
+    ),
+    radial-gradient(
+      ellipse 60% 40% at 50% 100%,
+      rgba(197, 106, 212, 0.03) 0%,
+      transparent 60%
+    );
+  background-attachment: fixed;
 }
 
+/* Headings — Ubuntu, with letter-spacing tightening on the
+ * larger sizes. The h1 is reserved for the page hero; chapter
+ * titles use h3 by convention (rendered as a styled H3, not
+ * an H1, to keep the document outline honest). */
 h1, h2, h3, h4, h5, h6 {
-  margin: 0 0 0.5em;
-  font-weight: 700;
-  line-height: 1.2;
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  letter-spacing: var(--letter-spacing-tight);
   color: var(--color-fg);
 }
 
-h1 { font-size: var(--font-size-3xl); }
-h2 { font-size: var(--font-size-2xl); }
-h3 { font-size: var(--font-size-xl); }
-h4 { font-size: var(--font-size-lg); }
-h5, h6 { font-size: var(--font-size-md); }
+h1 {
+  font-size: var(--font-size-3xl);
+  letter-spacing: -0.03em;
+}
+h2 {
+  font-size: var(--font-size-2xl);
+  letter-spacing: -0.02em;
+}
+h3 {
+  font-size: var(--font-size-xl);
+  letter-spacing: -0.015em;
+  line-height: var(--line-height-snug);
+}
+h4 {
+  font-size: var(--font-size-lg);
+  letter-spacing: -0.01em;
+  line-height: var(--line-height-snug);
+}
+h5, h6 {
+  font-size: var(--font-size-md);
+  letter-spacing: 0;
+  line-height: var(--line-height-snug);
+}
 
-p { margin: 0 0 1em; }
+/* Body text. Generous line height for long-form. */
+p {
+  margin: 0 0 var(--space-4);
+  max-width: 64ch;
+}
 
+p:last-child { margin-bottom: 0; }
+
+/* Long-form prose. Used on the Start page. */
+.prose p {
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-loose);
+  max-width: 64ch;
+}
+
+/* Lead paragraph. The first paragraph under a hero or a
+ * chapter title. Slightly larger, slightly muted. */
+.lead {
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-loose);
+  color: var(--color-fg-muted);
+  max-width: 64ch;
+  margin-bottom: var(--space-5);
+}
+
+/* Muted text. For source paths, dates, footnotes, secondary
+ * information. */
+.muted, small, .small {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.text-subtle { color: var(--color-fg-subtle); }
+
+/* Strong and emphasis. */
+strong, b {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+}
+em, i { font-style: italic; }
+
+/* Links. The accent color, no underline by default, an
+ * underline on hover and focus for affordance. */
 a {
   color: var(--color-accent);
   text-decoration: none;
+  transition: color var(--motion-fast) var(--motion-ease);
 }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+a:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
 
-code, pre {
+/* Monospace. The identity typography. Per §9: prose never
+ * uses monospace; identities never use proportional. */
+code, pre, kbd, samp {
   font-family: var(--font-mono);
-  font-size: 0.95em;
+  font-size: 0.92em;
+  letter-spacing: var(--letter-spacing-mono);
+  font-feature-settings: "calt" 0;
 }
 
 code {
-  background: var(--color-surface);
-  padding: 0.1em 0.35em;
-  border-radius: 3px;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  padding: 0.1em 0.4em;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-rule);
+  /* Inline code: slightly tighter line height so it sits
+   * visually centered with the surrounding prose. */
+  line-height: 1.2;
+}
+
+a code, .accent code {
+  color: var(--color-accent);
+  background: transparent;
+  border-color: transparent;
 }
 
 pre {
   display: block;
-  background: var(--color-surface);
-  padding: 1rem 1.25rem;
-  border-radius: 6px;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
   overflow-x: auto;
-  margin: 1rem 0;
+  margin: var(--space-4) 0;
+  line-height: var(--line-height-snug);
 }
 
-pre code { background: transparent; padding: 0; }
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 0.95em;
+  /* Long lines of code stay on one line; let the pre scroll. */
+  white-space: pre;
+}
 
-ul, ol { margin: 0 0 1em; padding-left: 1.5rem; }
-li { margin: 0.25em 0; }
+/* Keyboard input. */
+kbd {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-rule-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.1em 0.4em;
+  font-size: 0.85em;
+  box-shadow: 0 1px 0 var(--color-rule-strong);
+}
 
-hr { border: 0; border-top: 1px solid var(--color-rule); margin: 2rem 0; }
+/* Lists. */
+ul, ol {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+}
+li {
+  margin: var(--space-1) 0;
+  line-height: var(--line-height-base);
+}
+li > ul, li > ol { margin: var(--space-1) 0; }
 
-strong, b { font-weight: 700; }
-em, i { font-style: italic; }
+/* Definition lists. */
+dl { margin: 0 0 var(--space-4); }
+dt {
+  font-weight: var(--font-weight-bold);
+  margin-top: var(--space-3);
+}
+dd {
+  margin: var(--space-1) 0 0 var(--space-4);
+  color: var(--color-fg-muted);
+}
 
-small { font-size: var(--font-size-sm); color: var(--color-muted); }
+/* Horizontal rule. The spec filters these from the prose; this
+ * style is here for components that may use it (none currently). */
+hr {
+  border: 0;
+  border-top: 1px solid var(--color-rule);
+  margin: var(--space-6) 0;
+}
+
+/* Blockquote. */
+blockquote {
+  margin: var(--space-5) 0;
+  padding: var(--space-3) var(--space-5);
+  border-left: 3px solid var(--color-accent);
+  color: var(--color-fg-muted);
+  font-style: italic;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* Tables. Default table styling. The status-table component
+ * provides the per-status treatment. */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: var(--space-4) 0;
+}
+th, td {
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-rule);
+  vertical-align: top;
+}
+th {
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  font-size: var(--font-size-sm);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+/* Selection. Highlight matches the prism. */
+::selection {
+  background: var(--color-accent);
+  color: var(--color-bg);
+}
+
+/* Forced-colors mode. §9 / §A20 / §A17: status must remain
+ * visible. Windows High Contrast Mode and other forced-colors
+ * agents use system colors; we hand them our system palette. */
+@media (forced-colors: active) {
+  :root {
+    --color-bg:            Canvas;
+    --color-surface-1:     Canvas;
+    --color-surface-2:     Canvas;
+    --color-fg:            CanvasText;
+    --color-fg-muted:      CanvasText;
+    --color-fg-subtle:     CanvasText;
+    --color-rule:          CanvasText;
+    --color-rule-strong:   CanvasText;
+    --color-accent:        LinkText;
+    --color-accent-warm:   LinkText;
+    --color-focus:         Highlight;
+    --color-state-planned:     GrayText;
+    --color-state-implemented: LinkText;
+    --color-state-qualifying:  LinkText;
+    --color-state-validated:   Highlight;
+    --color-state-released:    LinkText;
+    --color-state-unreleased:  GrayText;
+  }
+  a:focus-visible {
+    outline: 3px solid Highlight;
+  }
+  .state, .dist {
+    border: 1px solid CanvasText !important;
+    forced-color-adjust: none;
+  }
+}
 
 
 /* --- components/brand.css --- */
-/* brand — the prism dispersion mark and wordmark.
+/* Prism Engine Observatory v1 — brand.
  *
- * The mark is a CSS-only gradient block. The wordmark is the
- * canonical name. A brand is a single authority.
+ * The prism dispersion mark and the wordmark. The mark is a
+ * CSS-only gradient block; no image asset. The mark is a single
+ * authority; it has one role: to be the prism.
+ *
+ * The mark refracts. A vertical hairline down the center
+ * separates the cyan side (left) from the magenta side (right).
+ * The two halves are otherwise identical, so the mark is
+ * recognisable at any size.
  */
 
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  gap: var(--space-3);
   color: var(--color-fg);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: none;
+  text-decoration: none;
+  font-size: var(--font-size-md);
+  transition: opacity var(--motion-fast) var(--motion-ease);
 }
-
-.brand:hover { text-decoration: none; }
+.brand:hover {
+  text-decoration: none;
+  opacity: 0.85;
+}
 
 .brand-mark {
   display: inline-block;
-  width: 1.25rem;
-  height: 1.25rem;
-  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-warm));
-  border-radius: 4px;
+  position: relative;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    135deg,
+    var(--color-accent) 0%,
+    var(--color-accent) 49.5%,
+    var(--color-bg) 49.5%,
+    var(--color-bg) 50.5%,
+    var(--color-accent-warm) 50.5%,
+    var(--color-accent-warm) 100%
+  );
+  box-shadow:
+    0 0 0 1px var(--color-rule-strong),
+    0 0 12px rgba(106, 212, 255, 0.15);
+  flex-shrink: 0;
 }
 
-.brand-name { font-size: var(--font-size-md); }
+.brand-name {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  white-space: nowrap;
+}
+
+.brand-tagline {
+  display: none;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-regular);
+  letter-spacing: var(--letter-spacing-wide);
+  color: var(--color-fg-subtle);
+  text-transform: uppercase;
+  margin-left: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 1px solid var(--color-rule);
+}
+
+@media (min-width: 900px) {
+  .brand-tagline { display: inline; }
+}
 
 
 /* --- components/capability.css --- */
@@ -287,69 +1228,434 @@ small { font-size: var(--font-size-sm); color: var(--color-muted); }
 
 
 /* --- components/chapter.css --- */
-/* chapter — a single chapter section on a page.
+/* Prism Engine Observatory v1 — chapter.
  *
- * One section per chapter. The header carries the title and
- * reading time; the body is the rendered markdown.
+ * A single chapter section on a page. The header carries the
+ * title; the body is the rendered manuscript prose. Chapters
+ * are separated by a hairline and a generous gap. The first
+ * chapter on a page has no top border; the visitor reads
+ * down without a divider above the first section.
+ *
+ * Per the spec: chapters are local to a page, never repeated
+ * across pages, never global. There is no chapter-dump.
+ *
+ * The chapter number is an optional ordinal that anchors the
+ * visitor's reading position. The chapter intent is a one-line
+ * claim that frames the body.
  */
 
 .chapter {
-  margin: 3rem 0;
-  padding: 1.5rem 0;
-  border-top: 1px solid var(--color-rule);
+  margin: var(--space-7) 0;
+  padding: 0;
+  border: 0;
 }
 
 .chapter:first-of-type {
-  border-top: 0;
-  padding-top: 0;
+  margin-top: 0;
 }
 
 .chapter-header {
   display: flex;
   align-items: baseline;
-  gap: 1rem;
-  margin-bottom: 0.5rem;
+  gap: var(--space-3) var(--space-4);
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
   flex-wrap: wrap;
 }
 
-.chapter-title {
-  font-size: var(--font-size-2xl);
-  margin: 0;
+.chapter-number {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  color: var(--color-fg-subtle);
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 
-.chapter-reading {
-  color: var(--color-muted);
-  font-size: var(--font-size-sm);
+.chapter-title {
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.015em;
+  line-height: var(--line-height-snug);
+  margin: 0;
+  color: var(--color-fg);
+  flex: 1 1 auto;
+}
+
+.chapter-meta {
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  font-family: var(--font-mono);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
 }
 
 .chapter-intent {
-  font-size: 1.05rem;
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-snug);
   color: var(--color-fg);
-  margin: 0.5rem 0;
-}
-
-.chapter-blurb {
-  color: var(--color-muted);
-  margin: 0.5rem 0;
+  margin: 0 0 var(--space-4);
+  max-width: 64ch;
 }
 
 .chapter-body {
-  margin-top: 1rem;
+  max-width: 64ch;
+}
+
+.chapter-body > * + * {
+  margin-top: var(--space-3);
 }
 
 .chapter-body h2 {
-  font-size: var(--font-size-xl);
-  margin-top: 2rem;
-}
-
-.chapter-body h3 {
   font-size: var(--font-size-lg);
-  margin-top: 1.5rem;
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-3);
+}
+.chapter-body h3 {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-2);
 }
 
-.chapter-missing-body {
-  color: var(--color-muted);
+.chapter-body ul,
+.chapter-body ol {
+  padding-left: var(--space-5);
+}
+
+.chapter-body li {
+  margin: var(--space-1) 0;
+}
+
+.chapter-body li::marker {
+  color: var(--color-fg-subtle);
+}
+
+/* A markdown table inside a chapter body. The status-table
+ * component is the canonical capability view; this is the
+ * generic in-prose table style. */
+.chapter-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--space-4) 0;
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.chapter-body th,
+.chapter-body td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
+  text-align: left;
+  vertical-align: top;
+}
+.chapter-body th {
+  background: var(--color-surface-1);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+}
+.chapter-body td em {
+  color: var(--color-fg);
   font-style: italic;
+  font-weight: var(--font-weight-medium);
+}
+.chapter-body tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/* A "where to begin" call-out: three or so links to the
+ * visitor's next move. Rendered as a horizontal flex of
+ * cards. */
+.where-to-begin {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+.where-to-begin-item {
+  padding: var(--space-4);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  transition: border-color var(--motion-fast) var(--motion-ease),
+              background var(--motion-fast) var(--motion-ease);
+}
+.where-to-begin-item:hover,
+.where-to-begin-item:focus-within {
+  border-color: var(--color-accent);
+  background: var(--color-surface-2);
+}
+.where-to-begin-item a {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+.where-to-begin-item-title {
+  display: block;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin-bottom: var(--space-1);
+}
+.where-to-begin-item-blurb {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+}
+
+
+/* --- components/cimage.css --- */
+/* Prism Engine Observatory v1 — ComputeImage specimen.
+ *
+ * The 6-stratum visual. The cimage is one file, divided into
+ * six named strata; the visitor sees the structure on the
+ * Specimen page. Each stratum is a labeled block; the absent
+ * strata are visually distinct (muted, italic) so the visitor
+ * does not infer a capability that is not present.
+ *
+ * Spec §6.4 / §10.1: the six strata are
+ *   1. Metadata
+ *   2. Logical Tensors
+ *   3. Physical Layouts
+ *   4. Execution Views
+ *   5. Plan and Receipts
+ *   6. Payloads
+ *
+ * The strata are aspects of one artifact. A cimage has all
+ * six, or it is not a cimage. The visual makes the structure
+ * visible without claiming the cimage has every property
+ * filled in.
+ */
+
+.specimen {
+  margin: var(--space-7) 0;
+  padding: var(--space-6) 0;
+  border-top: 1px solid var(--color-rule);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.specimen-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+}
+.specimen-title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  margin: 0;
+}
+.specimen-id {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+  margin-left: auto;
+}
+
+.specimen-summary {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  margin: 0 0 var(--space-5);
+  max-width: 64ch;
+}
+
+/* The sanitization notice. A bordered panel that names
+ * the sanitization, links to the §4.8 contract, and
+ * precedes the redaction manifest. */
+.sanitization-notice {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-state-qualifying-bg);
+  border: 1px solid var(--color-state-qualifying);
+  border-left: 3px solid var(--color-state-qualifying);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+}
+.sanitization-notice::before {
+  content: "Sanitized";
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-state-qualifying);
+  margin-right: var(--space-3);
+  font-weight: var(--font-weight-bold);
+}
+.sanitization-notice a {
+  color: var(--color-fg);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+/* The 6-stratum visual. A grid of stratum cards, one per
+ * stratum. Absent strata are visually muted. */
+.cimage-strata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr));
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.stratum-card {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.stratum-card[data-state="absent"] {
+  border-left-color: var(--color-rule-strong);
+  background: var(--color-bg);
+  opacity: 0.7;
+}
+
+.stratum-card-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.stratum-card-number {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+}
+.stratum-card-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+.stratum-card-state {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.stratum-card[data-state="present"] .stratum-card-state {
+  color: var(--color-state-implemented);
+}
+.stratum-card[data-state="absent"] .stratum-card-state {
+  color: var(--color-fg-subtle);
+  font-style: italic;
+}
+
+.stratum-card-description {
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-muted);
+  line-height: var(--line-height-base);
+  margin: 0;
+}
+
+.stratum-card-data {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  background: var(--color-bg);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-fg);
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: var(--line-height-snug);
+}
+
+.stratum-card-empty {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  font-style: italic;
+  margin: 0;
+  padding: var(--space-2) 0;
+}
+
+/* The redaction manifest. A JSON pre block, with a header
+ * that names the schema. */
+.redaction-manifest {
+  margin: var(--space-5) 0;
+  padding: 0;
+}
+.redaction-manifest-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.redaction-manifest-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+}
+.redaction-manifest-meta {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+/* The "Remaining verifiable" list. A grid of three columns
+ * showing which claims are verifiable, which are not, and
+ * which are unverified by name. */
+.remaining-verifiable {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+  padding: 0;
+  list-style: none;
+}
+.verifiable-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+}
+.verifiable-item[data-state="verifiable"] {
+  border-left: 3px solid var(--color-state-validated);
+}
+.verifiable-item[data-state="not-verifiable"] {
+  border-left: 3px solid var(--color-state-planned);
+  opacity: 0.75;
+}
+.verifiable-item-key {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+}
+.verifiable-item-state {
+  font-size: var(--font-size-xs);
+  font-style: italic;
+  color: var(--color-fg-muted);
+}
+.verifiable-item[data-state="verifiable"] .verifiable-item-state {
+  color: var(--color-state-validated);
+  font-style: normal;
+  font-weight: var(--font-weight-medium);
 }
 
 
@@ -414,29 +1720,66 @@ small { font-size: var(--font-size-sm); color: var(--color-muted); }
 
 
 /* --- components/code.css --- */
-/* code — code blocks used in run pages and ADR bodies.
+/* Prism Engine Observatory v1 — code.
  *
- * The pre / code treatment is in foundation/typography.css.
- * This file adds the run-specific shell around commands.
+ * Fenced code blocks and inline code. The block has a subtle
+ * left-rail in the accent color so it reads as a distinct
+ * surface, not just a panel.
+ *
+ * Spec §9: monospace is for identities, hashes, digests,
+ * commands, schemas, values, machine-state labels, and code.
+ * The base typography in foundation/typography.css already
+ * declares the monospace stack and the inline-code styling;
+ * this file is the block-level treatment.
  */
 
-pre.command {
-  background: var(--color-surface);
-  border: 1px solid var(--color-rule);
-  border-radius: 6px;
-  padding: 1rem 1.25rem;
-  margin: 1rem 0;
+pre {
   position: relative;
+  background: var(--color-surface-1);
+  color: var(--color-fg);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  overflow-x: auto;
+  margin: var(--space-4) 0;
+  line-height: var(--line-height-snug);
+  font-size: 0.92em;
 }
 
-pre.command::before {
-  content: "TERMINAL";
+pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  white-space: pre;
+}
+
+/* Code with a language label — the .code-label is a small
+ * monospace tag in the top-right corner of the block. */
+pre.code-with-label {
+  padding-top: var(--space-7);
+}
+.code-label {
   position: absolute;
-  top: 0.5rem;
-  right: 0.75rem;
-  font-size: 0.7rem;
-  color: var(--color-muted);
-  letter-spacing: 0.1em;
+  top: var(--space-2);
+  right: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+}
+
+/* Inline code, refined beyond the foundation's defaults. */
+:not(pre) > code {
+  font-size: 0.9em;
+  padding: 0.15em 0.4em;
+  background: var(--color-surface-1);
+  color: var(--color-accent);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
 }
 
 
@@ -606,72 +1949,718 @@ pre.command::before {
 
 
 /* --- components/hero.css --- */
-/* hero — the page-level headline and lede.
+/* Prism Engine Observatory v1 — hero.
  *
- * The hero is the page's first projection. It uses the
- * chapter's intent as the headline, the page's blurb as the
- * lede, and the chapter-toc as a side panel.
+ * The page-level headline and lede. The hero is the first
+ * projection; it sets the page's intent and tone. The
+ * headline is the page's argument; the blurb is the page's
+ * invitation. The two together are what the visitor reads
+ * before deciding to scroll.
+ *
+ * Spec §6.1: the home page hero is "Compile intelligence into
+ * something you can inspect." That headline is the page's
+ * declaration; every other page has its own argument.
+ *
+ * The hero is generous. The headline is the largest type on
+ * the page. The blurb is the lead, in muted color, max-width
+ * to keep the line length readable. The hairline below the
+ * hero separates it from the body without committing to a
+ * heavy divider.
  */
 
 .hero {
-  padding: 4rem var(--gutter) 2rem;
+  position: relative;
+  padding: var(--space-8) var(--gutter) var(--space-7);
   max-width: var(--max-width);
   margin: 0 auto;
+  /* Faint top hairline and a cyan ambient halo behind the
+   * headline, anchoring the hero to the page. Subordinated
+   * to the headline. */
+}
+
+.hero::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, var(--max-width));
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-rule-strong) 30%,
+    var(--color-rule-strong) 70%,
+    transparent
+  );
+}
+
+.hero-home {
+  /* The home hero gets the prism ambient — a wider halo
+   * behind the headline, both ends of the dispersion. */
+  padding-top: var(--space-9);
+  padding-bottom: var(--space-8);
+}
+.hero-home::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 60%;
+  max-width: 36rem;
+  height: 100%;
+  background: radial-gradient(
+    ellipse 50% 50% at 50% 30%,
+    rgba(106, 212, 255, 0.06) 0%,
+    transparent 70%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
+
+.hero-eyebrow {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+  margin-bottom: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
 }
 
 .hero-headline {
-  font-size: var(--font-size-3xl);
-  margin: 0 0 1rem;
-  line-height: 1.15;
+  font-size: clamp(2rem, 5vw, var(--font-size-4xl));
+  line-height: var(--line-height-tight);
+  letter-spacing: -0.03em;
+  margin: 0 0 var(--space-4);
+  max-width: 22ch;
+  /* Subtle gradient on the headline. The text is mostly
+   * foreground; the gradient is a hint, not a statement. */
+  background: linear-gradient(
+    135deg,
+    var(--color-fg) 0%,
+    var(--color-fg) 70%,
+    var(--color-accent) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .hero-blurb {
-  font-size: var(--font-size-lg);
-  color: var(--color-muted);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-loose);
+  color: var(--color-fg-muted);
   margin: 0;
-  max-width: 48rem;
+  max-width: 56ch;
+}
+
+.hero-args {
+  margin-top: var(--space-5);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.hero-arg {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+}
+.hero-arg:hover {
+  border-color: var(--color-accent);
+  text-decoration: none;
+}
+.hero-arg-arrow { color: var(--color-fg-subtle); }
+
+
+/* --- components/lab-note.css --- */
+/* Prism Engine Observatory v1 — Lab Note.
+ *
+ * A Lab Note is a research claim, not a public capability.
+ * Each note has three parts: hypothesis, observation, and
+ * next experiment. The card makes the three parts visible
+ * and distinct; the visitor does not read a wall of text.
+ *
+ * Spec §6.14: a Lab Note is illustrative; the published notes
+ * are read from the data layer; the manuscript names the kind
+ * of note the layer holds. The card visual treats the note
+ * honestly: a research claim, named, with its evidence class.
+ */
+
+.lab-notes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: var(--space-5);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lab-note {
+  position: relative;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.lab-note-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.lab-note-eyebrow {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-accent-warm);
+}
+
+.lab-note-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+
+.lab-note-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.lab-note-section-label {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.lab-note-section-label::before {
+  /* A small color square marks the section. Hypothesis is
+   * the warm color (the claim); observation is muted (the
+   * data); next-experiment is cyan (the proposed move). */
+  content: "";
+  display: inline-block;
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 1px;
+  margin-right: var(--space-2);
+  vertical-align: 0.05em;
+  background: currentColor;
+}
+
+.lab-note-section[data-kind="hypothesis"] .lab-note-section-label {
+  color: var(--color-accent-warm);
+}
+.lab-note-section[data-kind="observation"] .lab-note-section-label {
+  color: var(--color-fg-muted);
+}
+.lab-note-section[data-kind="next-experiment"] .lab-note-section-label {
+  color: var(--color-accent);
+}
+
+.lab-note-section-body {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  color: var(--color-fg);
+  margin: 0;
+}
+
+
+/* --- components/milestone.css --- */
+/* Prism Engine Observatory v1 — Roadmap milestone.
+ *
+ * The Roadmap contains only future milestones. Each milestone
+ * is a card with: title, work (what would close it), exit
+ * criterion (the test that decides it is done), and current
+ * state. The current state is a state badge; the exit
+ * criterion is monospace; the work is prose.
+ *
+ * The milestone card sits inside a chapter. The visual
+ * treatment is honest: every milestone is *Planned* in v1
+ * (the corpus is empty); the cards are dense technical
+ * panels, not aspirational marketing.
+ */
+
+.roadmap-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.milestone {
+  position: relative;
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  display: grid;
+  grid-template-columns: 3.5rem 1fr;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.milestone-number {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+  text-align: center;
+  padding: var(--space-2) 0;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+}
+
+.milestone-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.milestone-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.milestone-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+.milestone-state {
+  flex-shrink: 0;
+}
+
+.milestone-row {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  font-size: var(--font-size-sm);
+}
+.milestone-row-label {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+}
+.milestone-row-value {
+  color: var(--color-fg);
+  line-height: var(--line-height-base);
+  margin: 0;
+}
+.milestone-row-value code {
+  font-size: 0.92em;
+}
+
+@media (max-width: 540px) {
+  .milestone {
+    grid-template-columns: 1fr;
+  }
+  .milestone-number {
+    justify-self: start;
+    width: 3rem;
+  }
+  .milestone-row {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
 }
 
 
 /* --- components/nav.css --- */
-/* nav — the site navigation list.
+/* Prism Engine Observatory v1 — primary nav.
  *
- * The nav lists every page. A page is the nav entity, not a
- * hand-rolled <a>. The renderer emits one link per page.
+ * The primary nav is exactly five items per the spec (§1,
+ * §6.5). The current route is marked with aria-current and
+ * rendered with a stronger color and an underline. Hovering
+ * a nav link reveals the focus ring; focus-visible shows it
+ * permanently.
+ *
+ * The nav wraps to a second row at small viewports. The brand
+ * sits on its own line, then the nav links flow.
  */
 
 .site-nav {
   display: flex;
-  gap: 1.25rem;
   flex-wrap: wrap;
+  gap: var(--space-1) var(--space-5);
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .site-nav-link {
-  color: var(--color-muted);
-  font-size: var(--font-size-md);
+  position: relative;
+  display: inline-block;
+  padding: var(--space-2) 0;
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: color var(--motion-fast) var(--motion-ease);
 }
-
+.site-nav-link::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--color-accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--motion-base) var(--motion-ease);
+}
+.site-nav-link:hover,
+.site-nav-link:focus-visible {
+  color: var(--color-fg);
+  text-decoration: none;
+}
+.site-nav-link:hover::after,
+.site-nav-link:focus-visible::after {
+  transform: scaleX(1);
+}
 .site-nav-link[aria-current="page"] {
   color: var(--color-fg);
+}
+.site-nav-link[aria-current="page"]::after {
+  transform: scaleX(1);
+  background: var(--color-accent);
+}
+
+.site-nav-link[rel="external"]::before {
+  content: "↗";
+  display: inline-block;
+  margin-right: 0.35em;
+  color: var(--color-fg-subtle);
+  font-weight: var(--font-weight-regular);
+  font-size: 0.85em;
+}
+
+
+/* --- components/observatory.css --- */
+/* Prism Engine Observatory v1 — The Life of a ComputeImage.
+ *
+ * The Observatory is the 12-stage canonical journey, exposed
+ * as a grid of stage cards. Each card has a number, a title,
+ * and a one-sentence description. The selection state (which
+ * stage is current) persists in the URL via the
+ * SelectionController.
+ *
+ * Spec §6.8: the Observatory exposes the published specimen.
+ * The instrument panel is fully present; the data behind it
+ * is whatever the corpus has. Stages 1-7 are populated; stages
+ * 8-12 are gap-stated (the corpus has no execution receipts).
+ *
+ * The grid is 4 columns on desktop, 2 on tablet, 1 on mobile.
+ * The current stage is visually lifted: stronger border, soft
+ * glow. The visitor can step through the stages in order, or
+ * jump to a non-adjacent stage.
+ */
+
+.observatory-stages {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: var(--space-5) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.observatory-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease);
+  min-height: 8rem;
+}
+.observatory-stage:hover,
+.observatory-stage:focus-visible {
+  border-color: var(--color-rule-strong);
+  background: var(--color-surface-2);
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.observatory-stage-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.observatory-stage-number {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg-subtle);
+  letter-spacing: var(--letter-spacing-wide);
+  flex-shrink: 0;
+}
+
+.observatory-stage-state {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+  margin-left: auto;
+}
+
+.observatory-stage-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  line-height: var(--line-height-snug);
+}
+
+.observatory-stage-description {
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  line-height: var(--line-height-base);
+  margin: 0;
+}
+
+/* The current (selected) stage. */
+.observatory-stage[data-state="selected"] {
+  border-color: var(--color-accent);
+  background: var(--color-surface-2);
+  box-shadow: var(--shadow-glow);
+}
+.observatory-stage[data-state="selected"] .observatory-stage-number {
+  color: var(--color-accent);
+}
+
+/* The state of a stage. A stage is either populated by the
+ * corpus, or gap-stated. */
+.observatory-stage[data-corpus="populated"] .observatory-stage-state {
+  color: var(--color-state-validated);
+}
+.observatory-stage[data-corpus="gap"] .observatory-stage-state {
+  color: var(--color-state-unreleased);
+  font-style: italic;
+}
+
+/* Responsive. */
+@media (max-width: 1100px) {
+  .observatory-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .observatory-stages { grid-template-columns: 1fr; }
+}
+
+/* The instrument panel. A wider card that shows the
+ * currently selected stage's instrument. Hidden when no
+ * stage is selected. The visual is the centerpiece of the
+ * Observatory. */
+.observatory-instrument {
+  margin: var(--space-5) 0;
+  padding: var(--space-5);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius-md);
+  min-height: 12rem;
+}
+.observatory-instrument-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
+}
+.observatory-instrument-title {
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-fg);
+  margin: 0;
+  flex: 1 1 auto;
+}
+.observatory-instrument-state {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-state-unreleased);
+  font-style: italic;
+}
+.observatory-instrument[data-state="populated"] .observatory-instrument-state {
+  color: var(--color-state-validated);
+  font-style: normal;
+}
+.observatory-instrument-body {
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  color: var(--color-fg-muted);
+}
+.observatory-instrument-body p { max-width: 64ch; }
+.observatory-instrument-empty {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-fg-subtle);
+  font-style: italic;
+  margin: 0;
 }
 
 
 /* --- components/page.css --- */
-/* page — the main content column for a page route.
+/* Prism Engine Observatory v1 — page.
  *
- * One page-column per page. Chapters and claims compose into
- * it. The page blurb sits at the top.
+ * The main content column. Every page renders into a single
+ * .page-body. The body is the canonical column; chapters and
+ * claims compose into it.
+ *
+ * The body is wide enough for a comfortable reading line
+ * (max-width-narrow on long-form pages; max-width on technical
+ * pages with code and tables).
  */
 
 .page-body {
   max-width: var(--max-width);
   margin: 0 auto;
-  padding: var(--gutter-tight) var(--gutter) 4rem;
+  padding: var(--space-6) var(--gutter) var(--space-8);
 }
 
-.page-blurb {
-  font-size: var(--font-size-lg);
-  color: var(--color-muted);
+.page-body-wide {
+  max-width: var(--max-width-wide);
+  margin: 0 auto;
+  padding: var(--space-6) var(--gutter) var(--space-8);
+}
+
+.page-body-narrow {
+  max-width: var(--max-width-narrow);
+  margin: 0 auto;
+  padding: var(--space-6) var(--gutter) var(--space-8);
+}
+
+/* The page footer. One element. */
+.site-footer {
+  max-width: var(--max-width);
+  margin: var(--space-6) auto var(--space-6);
+  padding: var(--space-5) var(--gutter);
+  border-top: 1px solid var(--color-rule);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.site-footer a { color: var(--color-fg); }
+.site-footer .muted { color: var(--color-fg-subtle); }
+.site-footer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* 404 — the page-not-found surface. Same shell as the other
+ * pages, with a distinctive hero and a useful list of links
+ * the visitor can use to recover. */
+.page-not-found {
+  text-align: center;
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: var(--space-7) 0;
+}
+.page-not-found h1 {
+  font-size: var(--font-size-2xl);
+}
+.page-not-found p {
+  margin-left: auto;
+  margin-right: auto;
+}
+.page-not-found .fallback-links {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-5) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  justify-content: center;
+}
+.page-not-found .search-form {
+  display: flex;
+  gap: var(--space-2);
+  margin: var(--space-5) auto;
+  max-width: 28rem;
+  justify-content: center;
+}
+.page-not-found .search-form input {
+  flex: 1;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  color: var(--color-fg);
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: var(--font-size-base);
+}
+.page-not-found .search-form input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px var(--color-focus-ring);
+}
+.page-not-found .search-form button {
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border: 0;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
 }
 
 
@@ -778,23 +2767,568 @@ pre.command::before {
 }
 
 
-/* --- components/site-header.css --- */
-/* site-header — the top-of-page brand and navigation bar.
+/* --- components/secondary-nav.css --- */
+/* Prism Engine Observatory v1 — secondary nav.
  *
- * Layout: brand on the left, nav on the right, separated by a
- * hairline rule. Used on every page.
+ * The sidebar that lives between the page body and the footer.
+ * It lists the canonical routes the visitor can reach from any
+ * page. The current page is marked with aria-current.
+ *
+ * The secondary nav is a quiet list, not a TOC. It is not a
+ * page-local chapter list (§6.5 forbids those); it is the
+ * site's route map. It appears at the foot of every page,
+ * after the page body and before the footer.
+ */
+
+.secondary-nav {
+  max-width: var(--max-width);
+  margin: var(--space-7) auto var(--space-6);
+  padding: 0 var(--gutter);
+}
+
+.secondary-nav-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 0 var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-rule);
+}
+
+.secondary-nav-title {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-subtle);
+  margin: 0;
+}
+
+.secondary-nav-meta {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-subtle);
+}
+
+.secondary-nav ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-2) var(--space-5);
+}
+
+.secondary-nav li {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-snug);
+}
+
+.secondary-nav a {
+  display: inline-block;
+  padding: var(--space-1) 0;
+  color: var(--color-fg-muted);
+  text-decoration: none;
+  transition: color var(--motion-fast) var(--motion-ease);
+}
+.secondary-nav a:hover,
+.secondary-nav a:focus-visible {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+.secondary-nav a[aria-current="page"] {
+  color: var(--color-fg);
+  font-weight: var(--font-weight-medium);
+}
+
+
+/* --- components/site-header.css --- */
+/* Prism Engine Observatory v1 — site header.
+ *
+ * The top-of-page bar: brand on the left, primary nav on the
+ * right, separated from the page body by a hairline. The
+ * header is not sticky in v1; the page body owns the scroll.
+ * Sticky behavior is a follow-on if review indicates it.
+ *
+ * The header sits on a slightly elevated surface so the rule
+ * beneath it reads as a section divider, not a cell border.
  */
 
 .site-header {
+  position: relative;
+  z-index: var(--z-sticky);
   display: flex;
   align-items: center;
-  gap: 1.5rem;
-  padding: 1rem var(--gutter);
-  border-bottom: 1px solid var(--color-rule);
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-4) var(--gutter);
   background: var(--color-bg);
+  border-bottom: 1px solid var(--color-rule);
+  /* The faint top-edge highlight suggests depth without
+   * committing to a "raised" treatment. */
+  box-shadow: 0 1px 0 rgba(106, 212, 255, 0.04);
 }
 
-.site-header .brand { margin-right: auto; }
+.site-header .brand {
+  margin-right: auto;
+}
+
+/* The horizontal nav slot. On narrow viewports, the nav
+ * wraps below the brand; the gap above the nav row is the
+ * row gap, no special margin needed. */
+.site-header > nav {
+  flex: 0 1 auto;
+}
+
+@media (max-width: 600px) {
+  .site-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .site-header .brand {
+    margin-right: 0;
+  }
+  .site-nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+
+/* --- components/state-badge.css --- */
+/* Prism Engine Observatory v1 — state badge.
+ *
+ * The single visual component for status. Each state is
+ * communicated in three forms at once: text (the label),
+ * shape (a glyph that disambiguates the state), and color
+ * (the prism's response to the state). Per the spec, no
+ * status depends on color alone.
+ *
+ * The glyph is rendered via ::before so the markup stays a
+ * single <span class="state state-{name}">{label}</span>.
+ * Screen readers see the text; color-blind visitors see the
+ * shape; forced-colors agents get the system colors.
+ *
+ * The shapes:
+ *   - planned     ○  empty circle   — spectral, not yet present
+ *   - implemented  ●  filled circle  — present, in source
+ *   - qualifying   ◐  half-filled    — in motion, in progress
+ *   - validated    ✓  checkmark      — materially present
+ *   - released     ▣  tag            — carried; published
+ *   - unreleased   ▢  empty tag      — not yet public
+ *
+ * The distribution badge (.dist) reuses the same color and
+ * shape language with a slightly lower intensity.
+ */
+
+.state,
+.dist {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  line-height: 1;
+  padding: 0.3em 0.65em;
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  background: var(--color-surface-1);
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.state::before,
+.dist::before {
+  /* The shape glyph. Forced-color agents swap the unicode
+   * shape for a system-drawn one in the @media block below. */
+  content: "○";
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-bold);
+  font-size: 1.1em;
+  line-height: 1;
+  display: inline-block;
+}
+
+/* Maturity states. -------------------------------------------------------- */
+
+.state-planned {
+  color: var(--color-state-planned);
+  border-color: var(--color-state-planned);
+  background: var(--color-state-planned-bg);
+}
+.state-planned::before { content: "○"; }
+
+.state-implemented {
+  color: var(--color-state-implemented);
+  border-color: var(--color-state-implemented);
+  background: var(--color-state-implemented-bg);
+}
+.state-implemented::before { content: "●"; }
+
+.state-qualifying {
+  color: var(--color-state-qualifying);
+  border-color: var(--color-state-qualifying);
+  background: var(--color-state-qualifying-bg);
+  /* Qualifying is in motion. A subtle pulse to signal that.
+   * Respects prefers-reduced-motion (see below). */
+  animation: state-qualifying-pulse 2400ms var(--motion-ease) infinite;
+}
+.state-qualifying::before { content: "◐"; }
+
+.state-validated {
+  color: var(--color-state-validated);
+  border-color: var(--color-state-validated);
+  background: var(--color-state-validated-bg);
+  /* Validated is materially present. A solid border, no
+   * animation. The check is the affordance. */
+  border-width: var(--border-medium);
+}
+.state-validated::before { content: "✓"; }
+
+@keyframes state-qualifying-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.65; }
+}
+
+/* Distribution states. ----------------------------------------------------- */
+
+.dist-released {
+  color: var(--color-state-released);
+  border-color: var(--color-state-released);
+  background: var(--color-state-released-bg);
+}
+.dist-released::before { content: "▣"; }
+
+.dist-unreleased {
+  color: var(--color-state-unreleased);
+  border-color: var(--color-state-unreleased);
+  background: var(--color-state-unreleased-bg);
+}
+.dist-unreleased::before { content: "▢"; }
+
+/* In tables, the badges sit at the start of the cell. */
+td > .state,
+td > .dist {
+  margin-right: var(--space-2);
+}
+
+/* Compound state — when a row carries both maturity and
+ * distribution, stack them with a small gap. */
+.state-dist {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Forced-colors. Replace unicode shapes with drawn ones that
+ * forced-colors agents can render reliably. */
+@media (forced-colors: active) {
+  .state::before,
+  .dist::before {
+    /* Hide the unicode shape; we'll use a CSS-drawn marker. */
+    content: "";
+    width: 0.8em;
+    height: 0.8em;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+  }
+  .state-planned::before,
+  .dist-unreleased::before {
+    /* empty circle */
+    background: transparent;
+  }
+  .state-implemented::before,
+  .dist-released::before {
+    /* filled circle */
+    background: currentColor;
+  }
+  .state-qualifying::before {
+    /* half-filled — drawn as a left-half overlay */
+    background: linear-gradient(
+      to right,
+      currentColor 0%,
+      currentColor 50%,
+      transparent 50%,
+      transparent 100%
+    );
+  }
+  .state-validated::before {
+    /* checkmark drawn as a CSS shape */
+    background: currentColor;
+    border-radius: 0;
+    width: 0.6em;
+    height: 0.9em;
+    border: 0;
+    transform: rotate(45deg) translateY(-1px);
+    clip-path: polygon(
+      0 60%, 30% 100%, 100% 0%, 100% 30%, 30% 100%, 0 60%
+    );
+  }
+}
+
+
+/* --- components/status-table.css --- */
+/* Prism Engine Observatory v1 — status table.
+ *
+ * The capability table. Four columns: target/backend, state,
+ * source, evidence. The state column is a stack of state
+ * badges (maturity + distribution). The source column is a
+ * monospace path. The evidence column is a one-sentence
+ * description.
+ *
+ * The table is honest. Empty cells are visually distinct
+ * (italic muted text) so the visitor does not infer a
+ * capability that is not present.
+ *
+ * The home page emits a 4-row preview table inside the
+ * "Current Reality" chapter. The Status page emits the full
+ * table grouped by kind (targets, backends, models, routes).
+ * Both share the same selectors.
+ */
+
+.status-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: var(--space-5) 0;
+  font-size: var(--font-size-sm);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.status-table thead {
+  background: var(--color-surface-2);
+}
+
+.status-table th {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+  text-align: left;
+  border-bottom: 1px solid var(--color-rule);
+  background: transparent;
+}
+
+.status-table td {
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-rule);
+  vertical-align: top;
+  color: var(--color-fg);
+}
+
+.status-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.status-table tbody tr:hover {
+  background: var(--color-surface-2);
+}
+
+/* The target column. Names the artifact. */
+.status-table td.target {
+  font-weight: var(--font-weight-medium);
+  color: var(--color-fg);
+  min-width: 14rem;
+}
+
+.status-table td.target-meta {
+  display: block;
+  font-size: var(--font-size-xs);
+  font-family: var(--font-mono);
+  color: var(--color-fg-subtle);
+  margin-top: var(--space-1);
+  letter-spacing: var(--letter-spacing-wide);
+}
+
+/* The state column. A stack of badges. */
+.status-table td.state {
+  white-space: nowrap;
+}
+
+.status-table td.state .state-dist {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+/* The source column. Monospace path. */
+.status-table td.source {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  color: var(--color-fg-muted);
+  max-width: 24rem;
+  word-break: break-all;
+}
+
+.status-table td.source code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: var(--color-fg-muted);
+}
+
+/* The evidence column. One or two sentences. */
+.status-table td.evidence {
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+  max-width: 32rem;
+}
+
+.status-table td.evidence-empty {
+  color: var(--color-fg-subtle);
+  font-style: italic;
+}
+
+/* The kind heading that introduces a group of rows on the
+ * Status page (Targets, Backends, Models, Routes). */
+.status-group-heading {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: -0.01em;
+  margin: var(--space-7) 0 var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-rule);
+  color: var(--color-fg);
+}
+
+.status-group-heading:first-of-type {
+  margin-top: var(--space-5);
+}
+
+/* Wide viewport: the table breathes more. */
+@media (min-width: 900px) {
+  .status-table {
+    font-size: var(--font-size-base);
+  }
+  .status-table th,
+  .status-table td {
+    padding: var(--space-3) var(--space-5);
+  }
+}
+
+/* Honest-limits note after the table. */
+.honest-limits {
+  margin-top: var(--space-6);
+  padding: var(--space-5);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-left: 3px solid var(--color-fg-subtle);
+  border-radius: var(--radius-md);
+  color: var(--color-fg-muted);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-base);
+}
+
+.honest-limits h2 {
+  font-size: var(--font-size-md);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+  margin: 0 0 var(--space-3);
+}
+.honest-limits p { margin: 0 0 var(--space-3); max-width: none; }
+.honest-limits p:last-child { margin-bottom: 0; }
+
+
+/* --- components/theme-toggle.css --- */
+/* Prism Engine Observatory v1 — theme toggle.
+ *
+ * A small button in the site header that switches between
+ * dark and light themes. The choice persists in localStorage
+ * (per §A22 / user preference), and respects
+ * prefers-color-scheme on first visit.
+ *
+ * The toggle is keyboard-reachable, has a visible focus
+ * ring, and uses an aria-pressed state to communicate its
+ * current value. The icon is text (not SVG) so the dark/light
+ * hint is plain and accessible. The text is also the
+ * state; the icon is reinforcement.
+ */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--motion-ease),
+    background var(--motion-fast) var(--motion-ease);
+}
+.theme-toggle:hover {
+  border-color: var(--color-accent);
+  background: var(--color-surface-2);
+}
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+.theme-toggle[aria-pressed="true"] {
+  border-color: var(--color-accent);
+}
+
+.theme-toggle-icon {
+  display: inline-block;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  line-height: 1;
+  width: 1em;
+  height: 1em;
+  text-align: center;
+  /* The shape is hand-drawn in CSS so it survives forced-colors
+   * mode (per §9 / WCAG 2.4.7). */
+}
+
+/* In dark theme, the icon is a moon (the dimmer). */
+:root .theme-toggle-icon::before { content: "☾"; }
+
+/* In light theme, the icon is a sun (the brighter). */
+[data-theme="light"] .theme-toggle-icon::before { content: "☀"; }
+
+.theme-toggle-label {
+  /* The label is "Theme" on desktop, hidden on small viewports. */
+}
+@media (max-width: 540px) {
+  .theme-toggle-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
+/* A "no-flash" guard. The script that sets the data-theme
+ * attribute runs before paint. If the user has not chosen
+ * (and prefers-color-scheme is light), the body briefly
+ * shows a transition-into-light. */
+html { color-scheme: dark light; }
+[data-theme="light"] { color-scheme: light; }
 
 
 /* --- components/toc.css --- */

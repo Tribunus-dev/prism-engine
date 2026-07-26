@@ -1,47 +1,183 @@
-/* Prism Engine docs — design tokens.
+/* Prism Engine Observatory v1 — design tokens.
  *
- * This is the foundation for every component. Tokens are
- * stable; component CSS reads them. Editing a token is a
- * constitutional change because every component depends on
- * it.
+ * One source of truth for color, type, space, motion, and shape.
+ * Every component reads from these tokens. Editing a token is a
+ * constitutional change: every component depends on it.
+ *
+ * The spec is OBSERVATORY_V1_SPEC.md §9 (Visual Direction).
+ * v1 ships dark only. Light theme is a follow-on.
+ *
+ * Typography: Ubuntu is the primary typeface. Monospace is
+ * reserved for identities, hashes, digests, commands, schemas,
+ * values, machine-state labels, and code. Prose never uses
+ * monospace; identities never use proportional.
+ *
+ * Status is communicated in three forms at once: text, shape,
+ * and color. The shape variation is what makes the state
+ * visible to a color-blind visitor, a screen reader (via the
+ * text label), and a printed page (no color at all). See
+ * state-badge.css for the per-status rules.
  */
 
 :root {
-  /* Color palette. The accent is the prism dispersion color;
-   * the muted gray is the observatory ambient. */
-  --color-bg: #0c0c10;
-  --color-fg: #e8e8ee;
-  --color-accent: #6ad4ff;
-  --color-accent-warm: #c56ad4;
-  --color-muted: #8a8a9c;
-  --color-rule: #1c1c24;
-  --color-surface: #11111a;
-  --color-claim-bg: #11111a;
+  /* ---------------------------------------------------------------- *
+   * 1. Color — the prism dispersion and the observatory ambient.
+   * ---------------------------------------------------------------- */
 
-  /* Typography. The system font stack is the default; mono
-   * is for receipts, commands, and identifiers. */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
-  --font-size-base: 16px;
-  --font-size-sm: 0.85rem;
-  --font-size-md: 1rem;
-  --font-size-lg: 1.1rem;
-  --font-size-xl: 1.4rem;
-  --font-size-2xl: 1.8rem;
-  --font-size-3xl: 2.5rem;
-  --line-height-base: 1.55;
+  /* Surfaces. Three levels of elevation, plus the base. */
+  --color-bg:           #0a0a10;  /* the page; the void behind the subject */
+  --color-surface-1:    #131320;  /* the chapter; the instrument panel */
+  --color-surface-2:    #1c1c2e;  /* the elevated card; the highlighted cell */
+  --color-surface-3:    #262638;  /* the active card; the selected stage */
 
-  /* Layout. The max-width is the canonical page column. */
-  --max-width: 64rem;
-  --max-width-wide: 80rem;
-  --gutter: 2rem;
-  --gutter-tight: 1rem;
-  --gutter-loose: 3rem;
+  /* Text. High contrast for primary, lower for muted. */
+  --color-fg:           #ebebf2;  /* primary text */
+  --color-fg-muted:     #a0a0b8;  /* secondary text; timestamps; source paths */
+  --color-fg-subtle:    #6c6c84;  /* tertiary text; labels in tables; the prism dispersion ambient */
 
-  /* Z-index scale. Components must read from this scale, not
-   * invent their own. */
-  --z-base: 0;
-  --z-elevated: 10;
-  --z-overlay: 100;
-  --z-modal: 1000;
+  /* Rule. The hairline between sections, between rows, between
+   * panels. Visible at all times; never decorative. */
+  --color-rule:         #2a2a3e;
+  --color-rule-strong:  #3a3a52;
+
+  /* Accent. The prism dispersion color: cyan. The warm side:
+   * magenta. Together they are the prism's two ends. */
+  --color-accent:       #6ad4ff;  /* cyan: links, in-motion, implemented */
+  --color-accent-warm:  #c56ad4;  /* magenta: qualifying, in-flight, illustrative */
+
+  /* Status colors. Each one has a paired text/shape variant
+   * in state-badge.css. Color is reinforcement; text and
+   * shape are the primary signal. */
+  --color-state-planned:      #6c6c84;  /* gray; spectral, low contrast */
+  --color-state-implemented:  #6ad4ff;  /* cyan; active; present */
+  --color-state-qualifying:   #c56ad4;  /* warm; in flight; qualifying */
+  --color-state-validated:    #5fd97a;  /* green; materially present */
+  --color-state-released:     #6ad4ff;  /* cyan; carried; tagged */
+  --color-state-unreleased:   #6c6c84;  /* gray; not yet public */
+
+  /* Status surface tints — used for state badges' backgrounds
+   * when a badge sits on a chapter or a card. The hue is the
+   * status color at 12% opacity over the surface-1. */
+  --color-state-planned-bg:      rgba(108, 108, 132, 0.12);
+  --color-state-implemented-bg:  rgba(106, 212, 255, 0.14);
+  --color-state-qualifying-bg:   rgba(197, 106, 212, 0.14);
+  --color-state-validated-bg:    rgba(95, 217, 122, 0.16);
+  --color-state-released-bg:     rgba(106, 212, 255, 0.14);
+  --color-state-unreleased-bg:   rgba(108, 108, 132, 0.10);
+
+  /* Focus ring. The visible focus indicator. WCAG 2.4.7. */
+  --color-focus:        #6ad4ff;
+  --color-focus-ring:   rgba(106, 212, 255, 0.35);
+
+  /* ---------------------------------------------------------------- *
+   * 2. Type — Ubuntu (primary), monospace (identities, code).
+   * ---------------------------------------------------------------- */
+
+  --font-sans: "Ubuntu", "Ubuntu Web", -apple-system, BlinkMacSystemFont,
+               "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: "Ubuntu Mono", "JetBrains Mono", "SF Mono", "Menlo",
+               "Consolas", "Liberation Mono", monospace;
+
+  /* Modular scale, 1.25 ratio, anchored at 16px.
+   * Used directly in components; never recomputed locally. */
+  --font-size-xs:   0.78rem;   /* 12.5px — fine print, table cells */
+  --font-size-sm:   0.875rem;  /* 14px   — meta, footnotes, source paths */
+  --font-size-base: 1rem;      /* 16px   — body */
+  --font-size-md:   1.125rem;  /* 18px   — blurb, lead */
+  --font-size-lg:   1.375rem;  /* 22px   — chapter title */
+  --font-size-xl:   1.75rem;   /* 28px   — section title (large) */
+  --font-size-2xl:  2.25rem;   /* 36px   — section title (huge) */
+  --font-size-3xl:  3rem;      /* 48px   — hero headline */
+  --font-size-4xl:  4rem;      /* 64px   — display, sparingly */
+
+  --line-height-tight:  1.15;  /* headlines, hero */
+  --line-height-snug:   1.3;   /* h3, h4 */
+  --line-height-base:   1.55;  /* body */
+  --line-height-loose:  1.7;   /* long-form prose */
+
+  --letter-spacing-tight:  -0.025em;  /* large headlines */
+  --letter-spacing-base:   0;        /* body */
+  --letter-spacing-wide:   0.04em;   /* small caps, labels, brand wordmark */
+  --letter-spacing-mono:   -0.01em;  /* mono slightly tighter */
+
+  --font-weight-regular: 400;
+  --font-weight-medium:  500;
+  --font-weight-bold:    700;
+
+  /* ---------------------------------------------------------------- *
+   * 3. Space — a 4px base unit, exposed as a named scale.
+   * ---------------------------------------------------------------- */
+
+  --space-1:    0.25rem;   /* 4px  — fine */
+  --space-2:    0.5rem;    /* 8px  — tight */
+  --space-3:    0.75rem;   /* 12px — small */
+  --space-4:    1rem;      /* 16px — base */
+  --space-5:    1.5rem;    /* 24px — medium */
+  --space-6:    2rem;      /* 32px — large */
+  --space-7:    3rem;      /* 48px — section */
+  --space-8:    4rem;      /* 64px — page */
+  --space-9:    6rem;      /* 96px — hero */
+
+  /* ---------------------------------------------------------------- *
+   * 4. Layout — the canonical page column and gutters.
+   * ---------------------------------------------------------------- */
+
+  --max-width-narrow:   44rem;  /* 704px — prose, single column */
+  --max-width:          64rem;  /* 1024px — default page column */
+  --max-width-wide:     80rem;  /* 1280px — observatory, lab, status */
+  --max-width-display:  96rem;  /* 1536px — display, if ever needed */
+
+  --gutter:             var(--space-5);
+  --gutter-tight:       var(--space-4);
+  --gutter-loose:       var(--space-6);
+
+  /* ---------------------------------------------------------------- *
+   * 5. Shape — radii, borders, shadows. Sparse and honest.
+   * ---------------------------------------------------------------- */
+
+  --radius-sm:    3px;     /* tags, inline code */
+  --radius-md:    6px;     /* cards, inputs */
+  --radius-lg:    10px;    /* panels, hero blocks */
+  --radius-pill:  999px;   /* status pills */
+
+  --border-thin:    1px;
+  --border-medium:  2px;
+  --border-thick:   3px;     /* status pill border; selected card indicator */
+
+  --shadow-sm:  0 1px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md:  0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-lg:  0 8px 24px rgba(0, 0, 0, 0.45);
+
+  /* The selected-card glow. Cyan-tinted, low intensity. */
+  --shadow-glow: 0 0 0 1px var(--color-accent), 0 0 24px var(--color-focus-ring);
+
+  /* ---------------------------------------------------------------- *
+   * 6. Motion — state-bearing only, never decorative. §9.
+   *    prefers-reduced-motion collapses motion to zero.
+   * ---------------------------------------------------------------- */
+
+  --motion-fast:   120ms;
+  --motion-base:   200ms;
+  --motion-slow:   360ms;
+  --motion-ease:   cubic-bezier(0.2, 0.0, 0.2, 1);
+  --motion-ease-out:  cubic-bezier(0.0, 0.0, 0.2, 1);
+
+  /* ---------------------------------------------------------------- *
+   * 7. Z-index — components read from this scale, not invent.
+   * ---------------------------------------------------------------- */
+
+  --z-base:      0;
+  --z-elevated:  10;
+  --z-sticky:    100;
+  --z-overlay:   1000;
+  --z-modal:     2000;
+}
+
+/* prefers-reduced-motion: motion collapses to zero. §9. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast:  0ms;
+    --motion-base:  0ms;
+    --motion-slow:  0ms;
+  }
 }
