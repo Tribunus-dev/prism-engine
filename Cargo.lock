@@ -2667,6 +2667,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism-docs-audit"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "flate2",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "walkdir",
+]
+
+[[package]]
 name = "prism-docs-content"
 version = "0.1.0"
 dependencies = [

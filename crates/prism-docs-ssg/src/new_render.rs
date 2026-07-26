@@ -881,6 +881,36 @@ fn wrap_in_shell_with_title(
         "<meta name=\"build-id\" content=\"{}\">\n",
         html_escape(&ctx.build_id)
     ));
+    // Open Graph + Twitter card metadata. Per A15 every
+    // page should carry these so the site is shareable on
+    // social surfaces. Values come from the site summary.
+    html.push_str(&format!(
+        "<meta property=\"og:title\" content=\"{}\">\n",
+        html_escape(title)
+    ));
+    html.push_str(&format!(
+        "<meta property=\"og:description\" content=\"{}\">\n",
+        html_escape(&ctx.site.site_tagline)
+    ));
+    html.push_str(&format!(
+        "<meta property=\"og:type\" content=\"website\">\n"
+    ));
+    html.push_str(&format!(
+        "<meta property=\"og:url\" content=\"{}{}\">\n",
+        canonical,
+        route_canonical(&current_route_from_label(page_label, ctx))
+    ));
+    html.push_str(&format!(
+        "<meta name=\"twitter:card\" content=\"summary\">\n"
+    ));
+    html.push_str(&format!(
+        "<meta name=\"twitter:title\" content=\"{}\">\n",
+        html_escape(title)
+    ));
+    html.push_str(&format!(
+        "<meta name=\"twitter:description\" content=\"{}\">\n",
+        html_escape(&ctx.site.site_tagline)
+    ));
     html.push_str("<link rel=\"stylesheet\" href=\"/site.css\">\n");
     // No-flash theme guard. Runs synchronously in <head>
     // before paint, so the visitor never sees the wrong
@@ -904,6 +934,11 @@ fn wrap_in_shell_with_title(
         "<body data-prism-route=\"{}\" data-prism-hydrated=\"false\">\n",
         route_attr_for(page_label, ctx)
     ));
+    // The skip link. The first focusable element on every
+    // page, positioned absolutely off-screen until
+    // focused. Per A10 the visitor must be able to bypass
+    // navigation with a single tab.
+    html.push_str("<a href=\"#top\" class=\"skip-link\">Skip to main content</a>\n");
     html.push_str("<header class=\"site-header\">\n");
     html.push_str(&format!(
         "<a class=\"brand\" href=\"/\"><span class=\"brand-mark\" aria-hidden=\"true\"></span><span class=\"brand-name\">{}</span></a>\n",
@@ -929,9 +964,10 @@ fn wrap_in_shell_with_title(
         "<p>Prism Engine is independently developed by <strong>Julian Torres</strong>. Released under the project's license. <a href=\"/colophon/\">Colophon</a> · <a href=\"https://github.com/Tribunus-dev/prism-engine\">Repository</a></p>\n"
     ));
     html.push_str("</footer>\n");
-    html.push_str("<script>\n");
-    html.push_str(selection_controller);
-    html.push_str("\n</script>\n");
+    // No inline script here. The selection controller is
+    // loaded from the external /selection-controller.js
+    // file (defer) per §A19. The body closes; the
+    // scripts in <head> handle the rest.
     html.push_str("</body>\n</html>\n");
     html
 }

@@ -1,0 +1,25 @@
+[package]
+name = "prism-docs-audit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A-list axiom verification runner for Prism Observatory v1. Takes a built site (or a live URL) and produces a 22-row pass/fail/skip table for OBSERVATORY_V1_SPEC.md §12. The runner is the cheap, repeatable gate that turns the spec's axioms from prose into CI."
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "prism-docs-audit"
+path = "src/main.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }
+flate2 = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }

@@ -201,6 +201,7 @@ members = [
     "crates/prism-docs-runtime",
     "crates/prism-docs-ssg",
     "crates/prism-transitions",
+    "crates/prism-docs-audit",
 ]
 
 [workspace.package]

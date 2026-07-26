@@ -143,4 +143,25 @@ if [ -d "$WASM_OUT" ]; then
   echo "  $WASM_OUT/ (WebAssembly transitions module)"
 fi
 
+# ---------- 5. Run the A-list axiom audit ----------
+
+# The audit runner takes the built site and produces a
+# 22-row pass/fail/skip table for OBSERVATORY_V1_SPEC.md
+# §12. It is a CI gate: blocking failures exit non-zero.
+# Warnings and skips are reported but do not stop the
+# build; they go to the H-list review queue.
+
+echo "build-site.sh: running A-list axiom audit"
+AUDIT_REPORT="$OUT_DIR/audit-report.md"
+cargo run -p prism-docs-audit --quiet -- \
+  --site "$OUT_DIR" \
+  --out "$AUDIT_REPORT" 2>&1 | tail -25
+AUDIT_EXIT=$?
+if [ $AUDIT_EXIT -ne 0 ]; then
+  echo "build-site.sh: A-list audit failed (exit $AUDIT_EXIT)" >&2
+  echo "build-site.sh: see $AUDIT_REPORT" >&2
+  exit $AUDIT_EXIT
+fi
+echo "build-site.sh: A-list audit report at $AUDIT_REPORT"
+
 echo "build-site.sh: done"
