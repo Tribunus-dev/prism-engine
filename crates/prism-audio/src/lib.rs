@@ -4,6 +4,13 @@ pub mod rvq;
 pub mod streaming;
 pub mod temporal_attention;
 
+/// Audio ASR pipeline — canonical authority for the audio
+/// automatic-speech-recognition front-end (config, mel
+/// preprocessing, encoder placeholder, feature injection).
+/// Replaces the engine's `compute-core/src/ecs/audio/` surface;
+/// see `changelogs/2026-07-27-engine-subsystem-deletion-audio.md`.
+pub mod asr_pipeline;
+
 #[derive(Debug, Clone)]
 pub enum AudioOp {
     // 1D convolution (temporal)
