@@ -33,7 +33,7 @@ use prism_ecs_core::{Entity, EntityKind, World};
 
 use crate::inference::{InferencePhase, InferenceWorkMetadata, KvCacheBinding};
 use crate::ports::{
-    Admission, ResultPayload, RuntimeError, SnapshotPayload, WorldSnapshot,
+    Admission, RuntimeError, SnapshotPayload, WorldSnapshot,
 };
 use crate::modality::{ModalityExecution, ModalityFailure, ModalityWork};
 
@@ -600,7 +600,7 @@ pub fn capture_world_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::CommandWatermarks;
+    use crate::ports::{CommandStore, CommandWatermarks, LeaseCoordinator};
     use crate::test_adapters::{InMemoryCommandStore, InMemoryLeaseCoordinator};
     use prism_ecs_constitutional::lifecycle::ArtifactLifecycle;
     use prism_ecs_constitutional::residency::{

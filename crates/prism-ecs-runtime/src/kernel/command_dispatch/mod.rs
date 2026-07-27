@@ -51,8 +51,6 @@ pub mod submit;
 
 // Re-exports for the kernel's public surface (matches the original
 // `pub use` block in `kernel/mod.rs`).
-pub use envelope::{
-    Command, CommandDispatchContext, CommandEnvelope, CommandResult, CommitOutcome,
-};
+pub use envelope::{Command, CommandDispatchContext, CommandEnvelope, CommandResult, CommitOutcome};
 pub use replay::apply_recovered_command;
 pub use submit::{capture_world_snapshot, submit};

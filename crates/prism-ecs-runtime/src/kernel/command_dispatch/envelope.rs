@@ -26,8 +26,7 @@ use prism_ecs_core::{EntityKind, StateStream, TraceContext, World};
 
 use crate::inference::InferenceWorkMetadata;
 use crate::ports::{CommandStore, LeaseCoordinator, ResultPayload, RuntimeError};
-
-use super::markers::{AdmittedMarker, PlannedMarker, PublishedMarker};
+use crate::kernel::markers::{AdmittedMarker, PlannedMarker, PublishedMarker};
 
 // ── Typed command surface ───────────────────────────────────────────────────
 
@@ -205,7 +204,8 @@ impl CommandEnvelope {
 /// from `&Arc<RuntimeKernelInner>` in the kernel handle and dropped at
 /// the end of the call. Fields that the submit path does not need
 /// (backend resources, provider selector) are intentionally omitted.
-pub(super) struct CommandDispatchContext<'a> {
+#[allow(dead_code)] // `trace`/`state_stream` are wired for future dispatch telemetry.
+pub struct CommandDispatchContext<'a> {
     pub world: &'a Arc<std::sync::RwLock<World>>,
     pub command_store: &'a dyn CommandStore,
     pub lease_coordinator: &'a dyn LeaseCoordinator,

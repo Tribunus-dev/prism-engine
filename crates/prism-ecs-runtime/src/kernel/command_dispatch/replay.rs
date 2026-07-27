@@ -19,15 +19,17 @@
 //! write lock) but does not perform any external effect.
 
 use prism_ecs_constitutional::lifecycle_command::LifecycleCommandResult;
-use prism_ecs_core::{Entity, World};
+use prism_ecs_core::Entity;
 
 use crate::modality::{ModalityExecution, ModalityFailure};
 use crate::ports::{CompletedCommand, RuntimeError};
 
-use super::envelope::{Command, CommandDispatchContext, CommandEnvelope, CommandResult};
+use super::envelope::{
+    execute_lifecycle, Command, CommandDispatchContext, CommandEnvelope, CommandResult,
+};
 use super::submit::{
     execute_advance_inference, execute_bind_inference_kv, execute_cancel_txn,
-    execute_create_modality_work, execute_lifecycle, execute_register_model, execute_spawn,
+    execute_create_modality_work, execute_register_model, execute_spawn,
 };
 
 /// Replay a command that was already committed — no journal, no
