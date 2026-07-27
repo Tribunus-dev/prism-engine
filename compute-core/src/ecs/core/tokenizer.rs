@@ -1,41 +1,11 @@
-//! Real tokenizer for encoding text to token IDs using pure Rust BPE.
+//! Engine shim: re-exports `TribunusTokenizer` from the canonical
+//! `prism_ecs_server::engine::bpe_tokenizer` module.
 //!
-//! Delegates to prism_ecs_server::engine::bpe_tokenizer::Tokenizer.
+//! Absorption note: this file used to define its own `TribunusTokenizer`
+//! wrapper. The canonical wrapper now lives in
+//! `crates/prism-ecs-server/src/engine/bpe_tokenizer/loader.rs` alongside
+//! the `Tokenizer` it wraps. The engine path is preserved as a re-export
+//! so existing callers (`tribunus_compute_core::tokenizer::TribunusTokenizer`)
+//! keep working without import changes.
 
-use prism_ecs_server::engine::bpe_tokenizer::Tokenizer;
-use std::path::Path;
-
-/// A HuggingFace-compatible tokenizer loaded from tokenizer.json.
-pub struct TribunusTokenizer {
-    inner: Tokenizer,
-}
-
-impl TribunusTokenizer {
-    /// Load a tokenizer from a directory containing `tokenizer.json`.
-    pub fn from_dir(dir: &Path) -> Result<Self, String> {
-        let path = dir.join("tokenizer.json");
-        if !path.exists() {
-            return Err(format!("tokenizer file not found: {}", path.display()));
-        }
-        let inner = Tokenizer::from_file(&path)
-            .map_err(|e| format!("failed to load tokenizer from {}: {}", path.display(), e))?;
-        Ok(Self { inner })
-    }
-
-    /// Encode a prompt string into token IDs (u32).
-    pub fn encode(&self, text: &str) -> Result<Vec<u32>, String> {
-        let encoding = self
-            .inner
-            .encode(text, false)
-            .map_err(|e| format!("tokenizer encode failed: {}", e))?;
-        Ok(encoding.ids)
-    }
-
-    /// Decode token IDs back to text.
-    pub fn decode(&self, tokens: &[u32]) -> Result<String, String> {
-        let ids: Vec<u32> = tokens.to_vec();
-        self.inner
-            .decode(&ids, true)
-            .map_err(|e| format!("tokenizer decode failed: {}", e))
-    }
-}
+pub use prism_ecs_server::engine::bpe_tokenizer::TribunusTokenizer;
