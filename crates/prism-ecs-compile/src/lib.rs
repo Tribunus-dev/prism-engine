@@ -50,6 +50,7 @@ pub mod living_cimage;
 pub mod living_ecs;
 pub mod living_promotion;
 pub mod model_export;
+pub mod models;
 pub mod progressive_ternary;
 pub mod representation_cache;
 pub mod search;
