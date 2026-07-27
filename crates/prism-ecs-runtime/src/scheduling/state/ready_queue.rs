@@ -30,17 +30,11 @@
 
 use std::collections::HashSet;
 
-// ---------------------------------------------------------------------------
-// Placeholder engine types
-// ---------------------------------------------------------------------------
+use super::phase::EmittedPhase;
 
-/// Placeholder for `compute-core::ecs::compute_image::phase_dag::EmittedPhase`.
-/// Replaced when `phase_dag` moves into `prism-ecs-compile`.
-/// Wire shape (phase_id: String) is preserved.
-#[derive(Debug, Clone)]
-pub struct EmittedPhase {
-    pub phase_id: String,
-}
+// ---------------------------------------------------------------------------
+// Placeholder engine types (phase_dag-related; moved when phase_dag migrates)
+// ---------------------------------------------------------------------------
 
 /// Placeholder for `compute-core::ecs::compute_image::phase_dag::EmittedPhaseGraph`.
 /// Replaced when `phase_dag` moves into `prism-ecs-compile`.
