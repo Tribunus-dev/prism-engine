@@ -5,7 +5,7 @@ use crate::ecs::inference::inference_step_state::StepReceiptLedger;
 use crate::ecs::kv_cache::KvCache;
 use crate::ecs::kv_cache::LiveKvCache;
 use crate::ecs::runtime::resources::kv_cache_coordinator::CompressedKvCache;
-use crate::ecs::scheduling::receipts::PhaseReceipt;
+use prism_ecs_runtime::scheduling::evidence::scheduling_receipts::PhaseReceipt;
 use crate::executor::SinkState;
 use crate::profiled_executor::WorkingSetManager;
 use crate::quantization::turboquant_kv::KvQuantMode as TqKvQuantMode;
