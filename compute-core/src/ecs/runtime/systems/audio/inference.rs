@@ -42,7 +42,7 @@ use crate::ecs::runtime::world::{Entity, World};
 /// downstream systems (e.g. text-model prefill) can inject them via
 /// [`inject_audio_features`].
 ///
-/// [`inject_audio_features`]: crate::ecs::audio::inject_audio_features
+/// [`inject_audio_features`]: prism_audio::asr_pipeline::injection::inject_audio_features
 #[derive(Debug, Clone)]
 pub struct AudioFeatures {
     /// Handle into `ARRAY_REGISTRY` for the encoded feature tensor.
@@ -305,8 +305,11 @@ impl AudioInferenceSystem {
             .ok_or_else(|| "AudioEncoderResource not available".to_string())?;
 
         // Preprocess audio → mel spectrogram.
-        let mel_spec = crate::ecs::audio::preprocess_audio(&audio_input, &encoder.config)
-            .map_err(|e| format!("preprocess_audio: {e}"))?;
+        let mel_spec = prism_audio::asr_pipeline::preprocess::preprocess_audio(
+            &audio_input,
+            &encoder.config,
+        )
+        .map_err(|e| format!("preprocess_audio: {e}"))?;
 
         // Encode mel → feature tokens.
         let features = encoder

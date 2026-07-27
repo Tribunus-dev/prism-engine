@@ -22,6 +22,11 @@ pub mod cimage_types;
 
 /// KV cache and scheduler types (ported from compute-core).
 pub mod inference;
+/// Per-image, per-session, and per-step inference state types
+/// (constitutional home for the engine's
+/// `compute-core/src/ecs/inference/*` module — see
+/// `changelogs/2026-07-27-engine-subsystem-deletion-inference.md`).
+pub mod inference_state;
 pub mod kv_cache;
 /// LLM inference server types (ported from src/llm/server.rs).
 pub mod llm_server;

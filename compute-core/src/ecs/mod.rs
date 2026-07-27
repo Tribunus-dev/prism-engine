@@ -30,7 +30,6 @@ pub mod arena_pool;
 pub mod assessment;
 pub mod assistant_graph;
 pub mod attention;
-pub mod audio;
 pub mod audio_preprocess_accelerate;
 pub mod audio_provider;
 pub mod autopsy;
