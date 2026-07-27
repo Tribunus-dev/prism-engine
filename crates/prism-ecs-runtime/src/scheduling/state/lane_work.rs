@@ -57,7 +57,7 @@
 
 use std::time::Instant;
 
-use prism_ecs_kernel::execution_lane::ExecutionLane;
+pub use prism_ecs_kernel::execution_lane::ExecutionLane;
 
 // ---------------------------------------------------------------------------
 // Placeholder engine types
@@ -129,7 +129,18 @@ pub struct CoreAiArtifactKey {
 /// Returned by the dispatch-selection system and used to match
 /// completions. The id is opaque to backends; it is meaningful to
 /// the runtime completion-reconciliation system.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub struct WorkId(pub u64);
 
 // ---------------------------------------------------------------------------
