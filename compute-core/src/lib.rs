@@ -258,8 +258,9 @@ pub use crate::ecs::evidence;
     feature = "prism-backend-ios"
 ))]
 pub use crate::ecs::generation;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub use crate::ecs::inference;
+// `crate::ecs::inference` was deleted in the engine-subsystem deletion
+// pass; the canonical home is `prism_ecs_server::inference_state` (see
+// `changelogs/2026-07-27-engine-subsystem-deletion-inference.md`).
 // `crate::ecs::inference_profile` (TAIP) was absorbed into the constitutional
 // phase-graph surface; the engine no longer re-exports it. See
 // `changelogs/2026-07-25-compute-core-absorption-phase-0-1.md`.
