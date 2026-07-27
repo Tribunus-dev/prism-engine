@@ -9,7 +9,7 @@ use crate::ecs::backend::heterogeneous_executor::HeterogeneousExecutor;
 use crate::ecs::backend::routing::*;
 use crate::ecs::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
 use crate::ecs::compilation::phase_types::PhaseType;
-use crate::ecs::scheduling::outlier_detector::OutlierDetector;
+use prism_ecs_runtime::scheduling::metrics::outlier_detector::OutlierDetector;
 use std::sync::{Arc, Mutex};
 
 /// Default decode-step interval for sampling system state.
