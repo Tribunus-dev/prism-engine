@@ -15,6 +15,7 @@
 //! - [`systems`] — deterministic scheduling behavior (Systems, S bucket).
 //!   Read staged + committed state; stage their own mutations through
 //!   `ConstitutionalWorldTxn`.
+//! - [`evidence`] — admitted, durable, replay-respects (E bucket).
 //! - [`metrics`] — advisory metrics (M bucket). Rebuildable projection;
 //!   not evidence.
 //!
@@ -24,5 +25,13 @@
 //! First code slice: `state::lane_capacity` (`lane_capacity.rs` moved from
 //! the engine on 2026-07-27, with `ExecutionLane` precursor in
 //! `prism-ecs-kernel::execution_lane`).
+//!
+//! State bucket (C): 15 files migrated.
+//! Systems bucket (S): in progress (steps 15-33).
+//! Evidence bucket (E): pending (steps 51-52).
+//! Metrics bucket (M): pending (steps 53-55).
 
+pub mod evidence;
+pub mod metrics;
 pub mod state;
+pub mod systems;
