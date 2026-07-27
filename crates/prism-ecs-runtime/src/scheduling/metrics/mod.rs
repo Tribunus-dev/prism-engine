@@ -11,6 +11,7 @@
 //! (outlier_detector, scheduler_metrics, phase_telemetry) move here
 //! from the engine.
 
+pub mod inference_telemetry;
 pub mod outlier_detector;
 pub mod phase_telemetry;
 pub mod scheduler_metrics;

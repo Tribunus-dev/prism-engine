@@ -4,7 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use crate::ecs::exo::cluster::{find_exo_binary, ExoNode};
-use crate::ecs::scheduling::InferenceTelemetry;
+use prism_ecs_runtime::scheduling::metrics::inference_telemetry::InferenceTelemetry;
 
 /// Result of an autoscaler tick evaluation.
 #[derive(Debug, Clone, Copy, PartialEq)]
