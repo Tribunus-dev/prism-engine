@@ -134,7 +134,6 @@ pub mod model;
 pub mod model_cache;
 pub mod model_runtime;
 pub mod model_store;
-pub mod models;
 pub mod mtp;
 pub mod native_kernel;
 pub mod nf4tile640;
