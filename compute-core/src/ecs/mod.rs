@@ -96,7 +96,10 @@ pub mod gpu_worker;
 pub mod heterogeneous;
 pub mod hybrid_profile;
 pub mod image_provider;
-pub mod inference;
+// `inference/` was deleted in the engine-subsystem deletion pass; the
+// canonical home for per-image / per-session / per-step inference state
+// is `prism_ecs_server::inference_state` (see
+// `changelogs/2026-07-27-engine-subsystem-deletion-inference.md`).
 // `inference_profile/` (TAIP) was deleted in Phase 1; superseded by the
 // constitutional phase-graph surface. See
 // `changelogs/2026-07-25-compute-core-absorption-phase-0-1.md`.
