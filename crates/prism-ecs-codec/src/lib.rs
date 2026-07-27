@@ -1,9 +1,19 @@
-//! A small, deterministic tensor container used at Prism's ECS boundaries.
+//! A small, deterministic tensor container used at Prism's ECS boundaries,
+//! plus the canonical backend-neutral evaluation surface for codec-correct
+//! candidates.
 //!
 //! The container deliberately stores metadata separately from bytes.  It is
 //! suitable for model sidecars and CImage payloads, but does not pretend to be
 //! a model format: safetensors/GGUF ingestion remains responsible for reading
 //! those formats and can pass their validated tensor bytes here.
+//!
+//! The [`evaluator`] submodule owns the canonical authority for the
+//! heterogeneous evaluation surface: backend-neutral contract, codec-correct
+//! fixtures, immutable evidence, admission decisions, and the system that
+//! coordinates evaluation lanes. See [`evaluator::HeterogeneousEvaluatorSystem`]
+//! for the entry point.
+
+pub mod evaluator;
 
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fs, path::Path};
