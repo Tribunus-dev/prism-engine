@@ -1,20 +1,10 @@
-//! Phase engine state (placeholder for the eventual `state::phase`).
+//! Re-export shim — `state::phase` is the canonical home.
 //!
-//! Per inventory v2.1 step 7, `phase_engine_state.rs` merges into
-//! `state::phase.rs`. This file is a temporary home that ships the
-//! types the rest of the state migration depends on. Step 7 will
-//! move these types into `state::phase` and delete this file.
-//!
-//! # Migration provenance
-//!
-//! The legacy home was `compute-core/src/ecs/scheduling/phase_engine_state.rs`.
-//! The engine file is the legacy duplicate; step 58 deletes it.
+//! Per inventory v2.1 step 7, the engine's `phase_engine_state.rs` is
+//! merged into `state::phase`. This file exists as a transitional
+//! re-export so the rest of the constitutional code (and the engine
+//! file's callers, when they migrate) can continue to refer to
+//! `state::phase_engine_state` for one step. The re-exports here
+//! will be deleted when the engine file's callers are updated.
 
-/// Placeholder for `compute-core::ecs::scheduling::phase_engine_state::RuntimeWorkItemHandle`.
-/// Replaced when the engine's `phase_engine_state.rs` types move into
-/// `state::phase` in step 7.
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeWorkItemHandle {
-    /// Opaque work-item identifier.
-    pub id: u64,
-}
+pub use super::phase::{PhaseId, RuntimeWorkItemHandle};

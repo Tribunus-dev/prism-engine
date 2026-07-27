@@ -22,8 +22,7 @@
 //! The engine file is the legacy duplicate; step 58 deletes it when
 //! no engine caller remains. No compatibility facade.
 
-use super::phase::EmittedPhasePlaceholder as EmittedPhase;
-use super::phase_engine_state::RuntimeWorkItemHandle;
+use super::phase::{EmittedPhase, RuntimeWorkItemHandle};
 
 // ---------------------------------------------------------------------------
 // Placeholder engine types
@@ -108,7 +107,7 @@ mod tests {
         let mut step = InferenceStepState { _placeholder: () };
         let phase = EmittedPhase::default();
         let binding = ResolvedPhaseBinding { _placeholder: () };
-        let work_item = RuntimeWorkItemHandle::default();
+        let work_item = RuntimeWorkItemHandle::new(crate::scheduling::state::phase::PhaseId("p1".into()), 0);
 
         let inv = PhaseInvocation::new(
             &image,
