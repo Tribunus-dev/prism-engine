@@ -1,8 +1,6 @@
 #![allow(deprecated)]
 pub mod canonical;
 
-pub mod evaluator;
-
 pub mod adapter;
 pub mod aot;
 pub mod compile_session;
@@ -208,11 +206,6 @@ pub use component::executor::*;
 pub use component::memory::*;
 pub use component::quality::*;
 pub use component::tensor::*;
-pub use evaluator::{
-    AdmissionDecision, AdmissionPolicy, BackendArtifact, BackendEvaluator, BindingPlan,
-    EvaluationConfig, EvaluationError, EvaluationFixture, EvaluationReceiptBundle, EvaluationRole,
-    GeneratedExecutable, HeterogeneousEvaluatorSystem, TemperaturePolicy,
-};
 pub use prism_ecs_core::*;
 
 use crate::ecs::constitutional::command::DomainEvent;
