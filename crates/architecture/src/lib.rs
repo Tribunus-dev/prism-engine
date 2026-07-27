@@ -4,6 +4,7 @@
 //! crates. The runtime and kernel crates cannot enforce rules about
 //! their own callers; only a workspace-level test can check
 //! "no file in the workspace imports the legacy engine scheduling
-//! surface".
+//! or assistant_graph surface".
 
+pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_imports;
