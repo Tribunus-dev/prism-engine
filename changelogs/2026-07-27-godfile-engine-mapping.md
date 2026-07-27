@@ -1,31 +1,63 @@
-# Godfile decomposition + engine mapping — Phase 0
+# Godfile decomposition + engine mapping — Phase 0 (SUPERSEDED)
 
 **Date:** 2026-07-27
 **Status:** Phase 0 (mapping) → ready for Phase 1 dispatch
-**Pattern:** Two-birds-one-stone decomposition. Each godfile is decomposed into
-focused sub-modules by single authority. For each new sub-module, classify it as
-**canonical** (lands in a constitutional crate) or **execution-boundary**
-(stays engine-only with a typed port interface). Engine code that maps to
-canonical sub-modules is absorbed in the same commit.
+**Superseded by:** the "Engine absorption: everything moves" section in `~/.minimax/skills/prism-constitutional-rust-ecs/references/implementation-workflow.md`. The "execution-boundary = stays in engine" framing below is **wrong**. All engine code moves to a constitutional crate. There is no "stays in engine" exception.
 
-## The four criteria for canonical vs execution-boundary
+**Pattern (corrected):** Two-birds-one-stone decomposition. Each godfile is decomposed into focused sub-modules by single authority. For each new sub-module, classify it by **which constitutional crate it lands in**, not by "is it execution-boundary". Engine code that maps to a sub-module is absorbed in the same commit.
 
-This is the only rule that matters. Do not classify by "is it engine code" — the
-compute-core absorption arc is precisely the act of moving engine code into
-constitutional crates. Classify per sub-module using these four criteria
-(extracted from `AGENTS.md`):
+## How to determine which constitutional crate (corrected classification)
 
-1. **Owns hardware handles, file descriptors, OS primitives?** → execution-boundary
-   - Examples: `MetalComputeEncoder`, `ANEProgramHandle`, kqueue/epoll, mmap-backed buffers (when the buffer is the handle, not the byte format), GPU dispatch queues
-2. **Uses `unsafe`?** → hardware crates and `prism-ecs-core` only; otherwise boundary
+This replaces the "four criteria" below. The earlier framing was wrong because it used the criteria to say "this code stays in the engine" — that conclusion is incorrect. The correct use of the criteria is to determine **which constitutional crate** the code lands in:
+
+1. **Pure domain logic, no `unsafe`, no FFI, no raw hardware handles** → high-level constitutional crate
+   - `prism-ecs-constitutional` (authority-bearing domain modules)
+   - `prism-ecs-runtime` (runtime kernel, commands, effects, dispatch, schedule)
+   - `prism-ecs-server` (HTTP/transport/server)
+   - `prism-ecs-compile` (compilation pipeline, IR)
+   - `prism-gguf` (GGUF format / model artifact)
+   - `prism-ane` (ANE program construction)
+   - `prism-ecs-quantization` (quantization)
+   - `prism-ecs-protocol` (wire protocol)
+
+2. **Has `unsafe` but pure domain logic (no hardware FFI)** → `prism-ecs-core` or `prism-ecs-kernel`
+   - Per AGENTS.md: "`unsafe` only in `prism-ecs-core`, `prism-ecs-kernel`, and hardware crates"
+
+3. **Has FFI to a hardware/OS surface (Metal, ANE, CUDA, ROCm, Accelerate, libxpc, MLX, etc.)** → the appropriate hardware crate
+   - `prism-metal-runtime` for Metal FFI
+   - `prism-ane` for ANE program execution
+   - `prism-cuda-runtime` for CUDA
+   - `prism-rocm-runtime` for ROCm
+   - `prism-intel-npu` for Intel NPU
+   - `prism-tt` for Tenstorrent
+   - `prism-igc` for Intel GPU
+   - If no existing hardware crate fits, create a new one — but the FFI is constitutional, it does NOT stay in the engine
+
+4. **Has all of the above (data + unsafe + FFI)** → split per sub-module
+   - Data shapes → high-level constitutional crate
+   - Unsafe but no FFI → core or kernel
+   - FFI → hardware crate
+   - Each sub-module gets exactly one home
+
+**Common wrong patterns to reject (the "execution-boundary" trap):**
+- ❌ "This code uses Metal/MLX, so it stays in the engine" — no, it goes in `prism-metal-runtime` or `prism-ecs-kernel`
+- ❌ "Define a typed port trait and have the engine implement it" — the implementation ALSO goes in a constitutional crate
+- ❌ "Document the execution-boundary in the engine file" — there is no execution-boundary concept
+
+## The OLD "four criteria for canonical vs execution-boundary" (WRONG, superseded)
+
+The text below was the original framing. It is **incorrect** because it used the criteria to say "this code stays in the engine" — that conclusion is wrong. The criteria are still useful for determining *which constitutional crate* the code lands in (per the corrected classification above), but they DO NOT mean "stays in engine". Kept here for historical reference so anyone reading the existing changelogs/source comments understands the context.
+
+1. **Owns hardware handles, file descriptors, OS primitives?** → (old) execution-boundary = stays in engine. **(Corrected)** → goes in the appropriate hardware crate.
+   - Examples: `MetalComputeEncoder`, `ANEProgramHandle`, kqueue/epoll, mmap-backed buffers, GPU dispatch queues
+2. **Uses `unsafe`?** → (old) hardware crates and `prism-ecs-core` only; otherwise boundary. **(Corrected)** → `prism-ecs-core` or `prism-ecs-kernel` is its home, not the engine.
    - Per AGENTS.md: "No `unsafe` in constitutional, runtime, server, or protocol crates"
-3. **Owns process-local state** (channels, locks, mpsc receivers, `OnceLock`)? → execution-boundary
-   - Examples: `WorkerIngressSystem::run` receivers, heterogeneous executor's tokio actor, per-lane `LaneExecutor` references, the slot lease manager's reader-count tracking
-4. **Raw FFI to a hardware/OS surface?** → execution-boundary
+3. **Owns process-local state** (channels, locks, mpsc receivers, `OnceLock`)? → (old) execution-boundary. **(Corrected)** → the state, the lock, and the data it protects all go in a constitutional crate.
+   - Examples: receivers, tokio actors, per-lane executor references, reader-count tracking
+4. **Raw FFI to a hardware/OS surface?** → (old) execution-boundary. **(Corrected)** → goes in the appropriate hardware crate.
    - Examples: CoreML/Accelerate FFI, MLX bindings, ANE compiler shim, libxpc
 
-Everything else is canonical. Schemas, types, validation, plans, IR, receipts,
-projections, command shapes, replays — all canonical, regardless of origin.
+The corrected model: there is no execution-boundary concept. There is only "where in the constitutional layer this code lands." The engine is a thin orchestration shell, not a code home.
 
 ## Per-godfile mapping
 
