@@ -47,6 +47,13 @@ prism-ane = { path = "../crates/prism-ane", optional = true }
 # not enable those features; the dep itself never pulls in
 # hardware code.
 prism-ecs-compile = { path = "../crates/prism-ecs-compile" }
+# Canonical home of the audio ASR pipeline (config, mel
+# preprocessing, encoder placeholder, feature injection). The
+# engine used to have its own parallel `ecs::audio` surface (now
+# absorbed); this dependency routes all engine callers through
+# the constitutional surface at `prism_audio::asr_pipeline`
+# (see `changelogs/2026-07-27-engine-subsystem-deletion-audio.md`).
+prism-audio = { path = "../crates/prism-audio" }
 block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
