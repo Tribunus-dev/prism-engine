@@ -7,3 +7,4 @@
 //! surface".
 
 pub mod workspace_legacy_imports;
+pub mod workspace_legacy_models_imports;
