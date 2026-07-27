@@ -84,26 +84,7 @@ pub struct HardwareConfig {
 // Slot
 // ---------------------------------------------------------------------------
 
-/// A slot in the batch (one model execution unit).
-///
-/// A `Slot` is a scheduling-state record. The dispatch-selection system
-/// allocates slots from the lane-lease state; the batching system
-/// populates a slot with the request's prompt length and KV-cache
-/// pages. Once a batch commits, every slot in it is in-flight; the
-/// completion-reconciliation system releases slots on completion.
-#[derive(Debug, Clone)]
-pub struct Slot {
-    pub id: usize,
-    pub request_id: Option<u64>,
-    pub tokens_generated: usize,
-    pub kv_cache_start: usize,
-    pub kv_cache_length: usize,
-    /// Target execution backend for this slot.
-    /// 0=MLX, 1=Accelerate, 2=CoreML, 3=ANE/Orion
-    pub backend_id: u32,
-    /// Page IDs allocated from the paged allocator for this slot's KV cache.
-    pub kv_cache_pages: Vec<usize>,
-}
+pub use super::lease::Slot;
 
 // ---------------------------------------------------------------------------
 // Batch
