@@ -24,7 +24,7 @@ use crate::ecs::compiler::lifecycle_coordinator::{LifecycleCoordinator, PolicyCo
 use crate::ecs::compute_image::model_family::gemma4_inspect::inspect_gemma4_checkpoint;
 #[cfg(feature = "prism-backend")]
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
-use crate::ecs::scheduling::compilation_job_bridge::CompilationJobBridge;
+use prism_ecs_runtime::scheduling::systems::compilation_job_bridge::CompilationJobBridge;
 #[cfg(feature = "prism-backend")]
 use memmap2::Mmap;
 #[cfg(feature = "prism-backend")]
