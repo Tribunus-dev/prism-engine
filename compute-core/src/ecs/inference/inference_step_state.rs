@@ -5,8 +5,8 @@
 
 #![cfg(feature = "mlx-backend")]
 
-use crate::ecs::scheduling::activation_binding::CurrentActivation;
-use crate::ecs::scheduling::receipts::PhaseReceipt;
+use prism_ecs_runtime::scheduling::evidence::scheduling_receipts::PhaseReceipt;
+use prism_ecs_runtime::scheduling::state::activation_binding::CurrentActivation;
 use mlx_rs::Array;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

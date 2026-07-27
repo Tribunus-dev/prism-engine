@@ -7,6 +7,7 @@
 //! live here — it lives in `prism-ecs-kernel::backend::*` and re-enters
 //! this state only through the runtime completion-reconciliation system.
 
+pub mod activation_binding;
 pub mod activation_transaction;
 pub mod batch;
 pub mod execution_context;
