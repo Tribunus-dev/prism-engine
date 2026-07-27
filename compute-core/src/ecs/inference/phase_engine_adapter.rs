@@ -6,7 +6,7 @@ use crate::ecs::inference::inference_step_state::{
     InferenceMode, InferenceStepOutput, InferenceStepState,
 };
 #[cfg(feature = "mlx-backend")]
-use crate::ecs::scheduling::phase_engine::PhaseEngine;
+use prism_ecs_runtime::scheduling::systems::phase_engine::PhaseEngine;
 
 /// Thin adapter that turns ProfiledInferenceSession methods into
 /// PhaseEngine invocations.

@@ -21,6 +21,7 @@ pub mod fallback;
 pub mod kv_transaction;
 pub mod lease_allocation;
 pub mod phase_advancement;
+pub mod phase_engine;
 pub mod phase_cancellation;
 pub mod phase_readiness;
 pub mod pipeline_bridge;
