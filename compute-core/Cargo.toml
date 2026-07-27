@@ -20,6 +20,13 @@ prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
 prism-kv-cache = { path = "../crates/prism-kv-cache" }
 prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
 prism-ecs-runtime = { path = "../crates/prism-ecs-runtime" }
+# Canonical home of the assistant graph surface — region declarations,
+# bridge value types, route graphs, authority policies, shared state
+# schema, and the structural validator. The engine used to have its
+# own parallel `ecs::assistant_graph::*` module (now absorbed); this
+# dependency routes all engine callers through the constitutional
+# re-export at `prism_ecs_agent::assistant_graph`.
+prism-ecs-agent = { path = "../crates/prism-ecs-agent" }
 # Prism ANE crate — canonical home for the MIL builder and the two
 # high-level ANE program constructors. The engine used to have its
 # own parallel MIL builder (now absorbed); this dependency routes
