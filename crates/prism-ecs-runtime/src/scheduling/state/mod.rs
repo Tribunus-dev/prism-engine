@@ -8,10 +8,14 @@
 //! this state only through the runtime completion-reconciliation system.
 
 pub mod batch;
+pub mod execution_context;
 pub mod lane_capacity;
 pub mod lane_work;
 pub mod lease;
 pub mod phase;
+pub mod phase_cancellation;
 pub mod phase_engine_state;
 pub mod phase_invocation;
 pub mod ready_queue;
+pub mod request;
+pub mod work_registry;

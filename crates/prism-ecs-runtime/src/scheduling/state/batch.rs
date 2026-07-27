@@ -36,31 +36,11 @@
 // Placeholder engine types
 // ---------------------------------------------------------------------------
 
-/// Placeholder for `compute-core::ecs::scheduling::RequestState` (an
-/// engine-only enum). Replaced when `request` moves in step 12.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum RequestState {
-    Queued,
-    Prefilling,
-    Decoding,
-    Paused,
-    Completed,
-    Cancelled,
-}
+// `Request` and `RequestState` are the canonical types from `state::request`
+// (per inventory step 12). We re-export them so `state::batch` keeps its
+// public surface identical to the engine.
 
-/// Placeholder for `compute-core::ecs::scheduling::Request` (an
-/// engine-only struct). Replaced when `request` moves in step 12.
-/// Wire shape (id, prompt, max_tokens, state) is preserved.
-#[derive(Debug, Clone)]
-pub struct Request {
-    pub id: u64,
-    pub prompt: Vec<u32>,
-    pub max_tokens: usize,
-    pub priority: u8,
-    pub state: RequestState,
-    pub created_at: std::time::Instant,
-    pub slot: Option<usize>,
-}
+pub use super::request::{Request, RequestState};
 
 /// Placeholder for `compute-core::ecs::scheduling::HardwareConfig`
 /// (an engine-only struct). Replaced when the hardware-detection
