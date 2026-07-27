@@ -31,6 +31,7 @@ pub mod accelerate_backend;
 pub use accelerate_backend::{AccelerateBackend, TernaryParityReport};
 pub mod execution_lane;
 pub use execution_lane::ExecutionLane;
+pub mod backend;
 pub mod kernel_generation;
 pub mod moe;
 pub use moe::{request_from_router_logits, weighted_aggregate, MoeDispatchRequest};

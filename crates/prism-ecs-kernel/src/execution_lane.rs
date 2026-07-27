@@ -25,9 +25,12 @@ use serde::{Deserialize, Serialize};
 /// lease, or backend binding.
 ///
 /// Each variant corresponds to a distinct physical or logical execution
-/// surface. The `Hash` and `Eq` derives are required for placement maps
-/// and per-lane capacity tracking in the runtime scheduling state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// surface. The `Hash`, `Eq`, `Ord`, and `PartialOrd` derives are required
+/// for placement maps, per-lane capacity tracking, and BTreeMap-backed
+/// registries in the runtime scheduling state.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum ExecutionLane {
     /// Apple Metal GPU lane (MLX-backed GPU on Apple Silicon).
     MlxGpu,
