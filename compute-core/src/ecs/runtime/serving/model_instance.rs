@@ -8,8 +8,7 @@ use std::collections::HashMap;
 
 use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
 use crate::ecs::compiler::deployment_compiler::ServingProfile;
-use crate::ecs::scheduling::unified_scheduler::SchedulerRunner;
-use crate::ecs::scheduling::SchedulerConfig;
+use prism_ecs_runtime::scheduling::systems::unified_scheduler::{SchedulerConfig, SchedulerRunner};
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
