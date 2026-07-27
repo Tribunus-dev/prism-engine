@@ -55,10 +55,12 @@ use crate::ecs::model_store::{InstalledModel, ModelStore};
 
 use crate::ecs::runtime::world::World;
 #[cfg(feature = "mlx-backend")]
-use crate::ecs::scheduling::token_budget::PhaseKind;
+use prism_ecs_runtime::scheduling::state::token_budget::{
+    PhaseKind, TokenBudgetConfig, TokenBudgetScheduler, TokenWorkUnit,
+};
 #[cfg(feature = "mlx-backend")]
-use crate::ecs::scheduling::{
-    Scheduler, SchedulerConfig, TokenBudgetConfig, TokenBudgetScheduler, TokenWorkUnit,
+use prism_ecs_runtime::scheduling::systems::unified_scheduler::{
+    ScheduleOutput, SchedulerConfig, SchedulerState,
 };
 use crate::ecs::streaming::GenerationHandle;
 #[cfg(feature = "mlx-backend")]
