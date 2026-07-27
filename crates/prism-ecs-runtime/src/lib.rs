@@ -8,7 +8,7 @@ pub mod inference;
 mod kernel;
 pub mod modality;
 pub mod pipeline_parity;
-mod ports;
+pub mod ports;
 pub mod schedule;
 pub mod scheduling;
 pub mod speculative_decoding;

@@ -203,6 +203,7 @@ members = [
     "crates/prism-docs-ssg",
     "crates/prism-transitions",
     "crates/prism-docs-audit",
+    "crates/architecture",
 ]
 
 [workspace.package]

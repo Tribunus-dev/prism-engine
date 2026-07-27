@@ -4,7 +4,7 @@
 //! here.  The worker ingress system drains them in batches and creates
 //! entities with the appropriate components.
 
-use crate::ecs::scheduling::ingress_bridge::IngressBridge;
+use prism_ecs_runtime::ports::ingress::IngressBridge;
 use std::collections::VecDeque;
 
 /// A single queued ingress entry carrying a request into the ECS world.
