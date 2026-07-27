@@ -1,37 +1,21 @@
-//! Search-facing evaluation strategies and the canonical speculation
-//! shapes used by the engine's draft/target orchestrator.
+//! Mapped-tensor search-system evaluation strategy family.
 //!
-//! This module owns two distinct authorities under a single banner because
-//! they are co-shaped for the search system's `[`crate::search::EvaluationStrategy`]`
-//! trait surface:
-//!
-//! 1. **Search-system wrappers** — [`MeasuredEvaluatorAdapter`] and
-//!    [`MappedTensorEvaluationStrategy`] are the constitutional adapters
-//!    that translate between the internal evolutionary-evidence API and
-//!    the search-system's string-keyed, vector-returning trait. They are
-//!    the only path by which a `ProgressiveStageExecutor` becomes a
-//!    search-system evaluator.
-//! 2. **Tree-spec speculation shapes** — [`DraftModelConfig`],
-//!    [`SpeculativeBranch`], and [`TreeSpecDecoder`] are the canonical
-//!    pure-data types used by the engine's draft/target orchestrator
-//!    to describe a tree of speculative continuations. They were
-//!    absorbed from `compute-core/src/ecs/core/speculative.rs` (the
-//!    portions that don't depend on ANE dispatch or MLX arrays).
-//!
-//! The MLX-coupled `SpecHub` verification functions remain in the engine
-//! because they take `&mlx_rs::Array` (criterion 4: FFI surface).
-//! The ANE-coupled `MultiSpecDraftModel` also stays in the engine
-//! (criterion 1: hardware dispatch path).
-//!
-//! Representation helpers ([`reconstruct_representation`],
-//! [`quantize_uniform`], [`quantize_ternary`]) are pure data transforms
-//! and live here because they are the building blocks of the wrappers
-//! above.
-//!
-//! The [`BehavioralProbe`] trait is the abstract probe surface used by
-//! the objective layer in [`super::objective`]; it is declared here so
-//! the wrapper that consumes it ([`MeasuredEvaluatorAdapter`]) can name
-//! the trait.
+//! **Single authority:** The constitutional adapters
+//! ([`MeasuredEvaluatorAdapter`], [`MappedTensorEvaluationStrategy`])
+//! that translate between the internal evolutionary-evidence API
+//! and the search-system
+//! [`crate::search::EvaluationStrategy`] trait, plus the workload and
+//! backend evaluation plumbing that drives the bounded reference
+//! probe. The wrapper is the only path by which an internal
+//! evaluator (synthetic, measured, or behavioral) is exposed to the
+//! search layer, and the plumbing is the only path by which the
+//! mapped-tensor strategy actually drives the bounded reference
+//! probe through mixed-precision graph candidates, SpatialIR
+//! lowering, ANE/Metal/Accelerate backend dispatch, and a
+//! `CanaryWindow` evidence window. Fail-closed semantics for the
+//! `ProgressiveStageExecutor` impl live in
+//! [`super::super::fail_closed`] so the fail-closed authority is
+//! isolated to one place.
 
 #![forbid(unsafe_code)]
 
@@ -47,210 +31,11 @@ use prism_spatial_ir::{FusionStrategy, LoweringTarget, SpatialGraph, SpatialNode
 use crate::search::{EvaluationStrategy as SearchEvaluationStrategy, SearchError};
 use crate::workload_search::WorkloadProfile;
 
-use super::canary_window::CanaryWindow;
-use super::kv_evaluator::evaluate_kv_reference_cache;
+use super::behavioral::BehavioralProbe;
+use super::progressive::parse_genome_from_string;
 
-// ---------------------------------------------------------------------------
-// Tree-spec speculation shapes (absorbed from
-// `compute-core/src/ecs/core/speculative.rs`)
-// ---------------------------------------------------------------------------
-
-/// Description of a draft model's architecture.
-///
-/// Weights are stored as group-quantized so the draft model can be
-/// loaded into any backend that supports group-wise quantisation
-/// (MLX, Accelerate, ANE). The struct is the canonical authority for
-/// the shape of a draft model; the ANE-specific loading paths live in
-/// the engine.
-#[derive(Debug, Clone)]
-pub struct DraftModelConfig {
-    pub n_heads: u32,
-    pub head_dim: u32,
-    pub n_layers: u32,
-}
-
-/// One speculative branch in a tree-structured speculation.
-///
-/// Each branch is a sequence of draft tokens along a single path
-/// through the speculation tree, together with metadata about its
-/// acceptance probability and the KV-cache generation that produced
-/// it.
-#[derive(Debug, Clone)]
-pub struct SpeculativeBranch {
-    /// Draft token IDs along this branch.
-    pub tokens: Vec<u32>,
-    /// Estimated probability that the entire branch will be accepted by
-    /// the target model.
-    pub acceptance_prob: f32,
-    /// Indices of the draft-model layers that generated this branch.
-    pub draft_layer_indices: Vec<u32>,
-    /// Provisional page IDs that the memory planner reserved for this
-    /// branch's KV-cache entries.
-    pub provisional_pages: Vec<u32>,
-    /// Total KV-cache generation cost (bytes) for this branch.
-    pub kv_generation: u64,
-}
-
-/// Tree-structured speculative decoder.
-///
-/// Manages a draft model and generates multiple candidate branches
-/// forming a speculation tree. The target model verifies all branches
-/// in a single batched forward pass; the first token (by tree order)
-/// that passes the acceptance criterion is committed.
-///
-/// This is a pure-data canonical type — the actual proposal and
-/// verification algorithms are still stubs in the engine; once a
-/// concrete engine-side implementation lands, this type is the
-/// authority for the shape of the result.
-#[derive(Debug, Clone)]
-pub struct TreeSpecDecoder {
-    pub draft: DraftModelConfig,
-    pub max_branches: u32,
-    pub max_depth: u32,
-    pub acceptance_threshold: f32,
-}
-
-impl TreeSpecDecoder {
-    /// Propose a set of speculative branches from the current context.
-    /// Stub — returns an empty branch list until the engine-side
-    /// proposal algorithm is implemented.
-    pub fn propose(&self, _context: &[u32]) -> Vec<SpeculativeBranch> {
-        Vec::new()
-    }
-
-    /// Verify speculative branches against the target model's logits.
-    /// Stub — returns an empty token sequence until the engine-side
-    /// verification algorithm is implemented.
-    pub fn verify(&mut self, _branches: &[SpeculativeBranch], _target_logits: &[f32]) -> Vec<u32> {
-        Vec::new()
-    }
-}
-
-// ---------------------------------------------------------------------------
-// BehavioralProbe trait — abstract probe surface consumed by
-// MeasuredEvaluatorAdapter and implemented by the objective layer
-// ---------------------------------------------------------------------------
-
-/// A reference-aware behavioral probe that maps a candidate genome
-/// to a [`TernaryObjectiveEvidence`]. The constitutional evaluator
-/// composes a [`MeasuredEvaluatorAdapter`] with a `BehavioralProbe` to
-/// produce activation, logit, and router signals that a synthetic
-/// evaluator cannot supply.
-pub trait BehavioralProbe: Send + Sync {
-    fn evaluate(
-        &self,
-        genome: &CandidateGenome,
-        context: &[u8],
-    ) -> Result<TernaryObjectiveEvidence, SearchError>;
-}
-
-// ---------------------------------------------------------------------------
-// Representation helpers — pure data transforms used by the wrapper
-// strategies and the objective layer
-// ---------------------------------------------------------------------------
-
-/// Reconstruct one bounded candidate representation for behavioral
-/// scoring. Fallback formats are deliberately real reconstructions,
-/// not ternary labels with a different name, so admission can compare
-/// their actual divergence.
-pub(crate) fn reconstruct_representation(
-    reference: &[f32],
-    rows: usize,
-    cols: usize,
-    genome: &CandidateGenome,
-) -> (Vec<f32>, u64) {
-    use prism_ecs_ir::evolution::RepresentationAxis::*;
-    let (bits, candidate) = match genome.representation {
-        Fp16 => (16u64, reference.to_vec()),
-        Bf16 => (
-            16,
-            reference
-                .iter()
-                .map(|v| f32::from_bits(v.to_bits() & 0xffff0000))
-                .collect(),
-        ),
-        Int8 => (8, quantize_uniform(reference, 8)),
-        Int4 | Nf4 => (4, quantize_uniform(reference, 4)),
-        Nf8 => (8, quantize_uniform(reference, 8)),
-        Ternary158 | TernaryTile640 => (2, quantize_ternary(reference, rows, cols, genome)),
-        Binary1 => (
-            1,
-            reference
-                .iter()
-                .map(|v| if *v >= 0.0 { v.abs() } else { -v.abs() })
-                .collect(),
-        ),
-    };
-    let bytes = ((reference.len() as u64 * bits) + 7) / 8;
-    (candidate, bytes)
-}
-
-/// Symmetric uniform quantization over the reference range.
-pub(crate) fn quantize_uniform(reference: &[f32], bits: u32) -> Vec<f32> {
-    let levels = ((1u32 << bits) - 1) as f32;
-    let min = reference.iter().copied().fold(f32::INFINITY, f32::min);
-    let max = reference.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-    let span = (max - min).max(f32::EPSILON);
-    reference
-        .iter()
-        .map(|v| {
-            let q = ((*v - min) / span * levels).round();
-            min + q / levels * span
-        })
-        .collect()
-}
-
-/// Row-grouped ternary quantization with packing-aware grouping.
-pub(crate) fn quantize_ternary(
-    reference: &[f32],
-    rows: usize,
-    cols: usize,
-    genome: &CandidateGenome,
-) -> Vec<f32> {
-    let group = match genome.packing {
-        prism_ecs_ir::evolution::PackingAxis::Tile640 => 640,
-        prism_ecs_ir::evolution::PackingAxis::Block2D => 128,
-        _ => 32,
-    };
-    let threshold = if matches!(
-        genome.representation,
-        prism_ecs_ir::evolution::RepresentationAxis::TernaryTile640
-    ) {
-        0.05
-    } else {
-        0.0
-    };
-    let mut out = vec![0.0; reference.len()];
-    for row in 0..rows {
-        for start in (0..cols).step_by(group) {
-            let end = (start + group).min(cols);
-            let scale = reference[row * cols + start..row * cols + end]
-                .iter()
-                .map(|v| v.abs())
-                .sum::<f32>()
-                / (end - start).max(1) as f32;
-            for col in start..end {
-                let v = reference[row * cols + col];
-                out[row * cols + col] = if v.abs() <= threshold {
-                    0.0
-                } else {
-                    v.signum() * scale
-                };
-            }
-        }
-    }
-    out
-}
-
-/// Parse a genome from its canonical JSON form. Used by the
-/// [`MeasuredEvaluatorAdapter`] wrapper, which has to bridge the
-/// search-system's string-based API to the internal
-/// [`CandidateGenome`] shape.
-pub(crate) fn parse_genome_from_string(
-    genome_str: &str,
-) -> Result<CandidateGenome, Box<dyn std::error::Error>> {
-    serde_json::from_str(genome_str).map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-}
+use super::super::canary_window::CanaryWindow;
+use super::super::fail_closed;
 
 // ---------------------------------------------------------------------------
 // MeasuredEvaluatorAdapter — the constitutional adapter that turns an
@@ -296,7 +81,7 @@ impl MeasuredEvaluatorAdapter {
     /// when available.
     pub fn with_mapped_tensor_probe(self, model_dir: impl Into<std::path::PathBuf>) -> Self {
         self.with_behavioral_probe(Arc::new(
-            super::objective::MappedTensorBehavioralProbe::new(model_dir),
+            super::super::objective::MappedTensorBehavioralProbe::new(model_dir),
         ))
     }
 
@@ -319,7 +104,7 @@ impl ProgressiveStageExecutor for MeasuredEvaluatorAdapter {
         // Fail-closed evidence composition lives in `super::fail_closed`;
         // any error there collapses to a missing-evidence marker so the
         // executor's contract (always return a value) is preserved.
-        super::fail_closed::evaluate_ternary_evidence(self, genome, context)
+        fail_closed::evaluate_ternary_evidence(self, genome, context)
             .unwrap_or_else(|_| TernaryObjectiveEvidence::missing())
     }
 }
@@ -349,14 +134,14 @@ impl SearchEvaluationStrategy for MeasuredEvaluatorAdapter {
 /// reference probe available to the compiler's normal evolutionary
 /// search trait, not only to the progressive ECS executor.
 pub struct MappedTensorEvaluationStrategy {
-    pub probe: super::objective::MappedTensorBehavioralProbe,
+    pub probe: super::super::objective::MappedTensorBehavioralProbe,
     pub limits: TernaryAdmissionLimits,
 }
 
 impl MappedTensorEvaluationStrategy {
     pub fn new(model_dir: impl Into<std::path::PathBuf>) -> Self {
         Self {
-            probe: super::objective::MappedTensorBehavioralProbe::new(model_dir),
+            probe: super::super::objective::MappedTensorBehavioralProbe::new(model_dir),
             limits: TernaryAdmissionLimits::default(),
         }
     }
@@ -416,8 +201,8 @@ impl SearchEvaluationStrategy for MappedTensorEvaluationStrategy {
 }
 
 // ---------------------------------------------------------------------------
-// Workload / backend evaluation plumbing — kept in `strategy.rs` because
-// the wrapping strategy owns the dispatch shape; the underlying scoring
+// Workload / backend evaluation plumbing — kept here because the
+// wrapping strategy owns the dispatch shape; the underlying scoring
 // primitive lives in `super::objective`.
 // ---------------------------------------------------------------------------
 
@@ -777,6 +562,8 @@ fn evaluate_backend_impl(
     genome: &str,
     context: &[u8],
 ) -> Result<crate::search::BackendEvaluation, String> {
+    use super::progressive::reconstruct_representation;
+
     let (selection_budget, dispatch_budget) = if backend == crate::search::SearchBackend::Ane {
         (self_adapter.probe.max_elements.min(8_000_000), 1_000_000usize)
     } else {
@@ -957,44 +744,4 @@ fn evaluate_backend_impl(
 }
 
 // Re-exported for `super::fail_closed` use.
-pub(crate) use super::objective::mapped_probe_evaluate_for_fail_closed;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn strategy_parses_genome_string() {
-        let genome = CandidateGenome::new();
-        let json = serde_json::to_string(&genome).expect("encode");
-        let parsed = parse_genome_from_string(&json).expect("decode");
-        assert_eq!(
-            std::mem::discriminant(&parsed.representation),
-            std::mem::discriminant(&genome.representation)
-        );
-    }
-
-    #[test]
-    fn tree_spec_decoder_stub_returns_empty() {
-        let decoder = TreeSpecDecoder {
-            draft: DraftModelConfig {
-                n_heads: 4,
-                head_dim: 32,
-                n_layers: 2,
-            },
-            max_branches: 4,
-            max_depth: 4,
-            acceptance_threshold: 0.5,
-        };
-        assert!(decoder.propose(&[]).is_empty());
-        let mut decoder = decoder;
-        let branches = vec![SpeculativeBranch {
-            tokens: vec![1, 2, 3],
-            acceptance_prob: 0.9,
-            draft_layer_indices: vec![0],
-            provisional_pages: vec![],
-            kv_generation: 0,
-        }];
-        assert!(decoder.verify(&branches, &[0.0]).is_empty());
-    }
-}
+pub(crate) use super::super::objective::mapped_probe_evaluate_for_fail_closed;
