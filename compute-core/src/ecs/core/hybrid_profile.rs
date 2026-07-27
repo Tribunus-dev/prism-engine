@@ -457,7 +457,7 @@ impl HybridExecutor {
     /// backend_id mapping: deprecated — see canonical constants in routing::
     pub fn execute_batch(
         &mut self,
-        batch: &crate::ecs::scheduling::Batch,
+        batch: &prism_ecs_runtime::scheduling::state::batch::Batch,
     ) -> Result<Vec<BoundaryExecutionReceipt>, String> {
         let mut receipts = Vec::with_capacity(batch.slots.len());
 
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn test_execute_batch_with_mlx_and_accelerate() {
         use crate::ecs::backend::accelerate::AccelerateBackend;
-        use crate::ecs::scheduling::{Batch, Slot};
+        use prism_ecs_runtime::scheduling::state::batch::{Batch, Slot};
 
         // Create a minimal HybridProfile for the executor
         let profile = HybridProfile {
