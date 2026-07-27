@@ -1,24 +1,26 @@
-//! Modality dispatch — image, audio, video, embeddings, and multimodal routes.
+//! Multimodal routing, mixed-modality plan resolution, and capture
+//! envelope — `POST /v1/multimodal/generate`.
 //!
-//! **Single authority:** This module owns the canonical modality-routing
-//! surface: the `POST /v1/images/generate`, `POST /v1/audio/speech`,
-//! `POST /v1/video/generate`, `POST /v1/embeddings`, and
-//! `POST /v1/multimodal/generate` HTTP handlers, the multimodal-request
-//! plan resolver (`resolve_multimodal_request`), the file-kind / manifest
-//! validators, the vision matmul provider (canonical; the actual Metal
-//! kernel dispatch is a typed port in `crate::engine::metal`), and the
-//! `capture_live_media` envelope.
+//! **Single authority:** This sub-module owns the canonical HTTP handler
+//! for mixed-modality generation, the multimodal-request plan resolver
+//! (`resolve_multimodal_request`), the file-kind / inline-payload
+//! validators, the manifest-vs-media-kind validators, the
+//! `validate_plan_models` cross-check, the `capture_live_media`
+//! envelope, and the (currently noop) backend execution hook
+//! (`execute_multimodal_backend`). Single-modality image, audio, video,
+//! and embeddings dispatch live in their sibling sub-modules
+//! ([`super::image`], [`super::audio`], [`super::embeddings`]).
 //!
-//! **Canonical-vs-execution-boundary:** All types and functions in this
-//! file are canonical. The Metal matmul kernel that
-//! `make_vision_matmul_provider` dispatches to when the `metal-dispatch`
-//! feature is enabled is execution-boundary; the provider itself is the
-//! typed port interface that bridges the canonical plan resolver to the
-//! engine's `crate::engine::metal::dispatch_fp16_matmul`.
+//! **Canonical-vs-execution-boundary:** All types and functions here are
+//! canonical. The actual capture path inside `capture_live_media` calls
+//! `prism_multimodal::capture::CaptureCoordinator`, which is an
+//! execution-boundary coordinator. The backend execution function
+//! `execute_multimodal_backend` is currently a noop canonical pass for
+//! multi-model fusion; it does not invoke a backend.
 
 #[cfg(feature = "server")]
 use axum::{
-    extract::{Path, State},
+    extract::State,
     Json,
 };
 #[cfg(feature = "server")]
@@ -30,10 +32,7 @@ use prism_multimodal::capture::admit_live_source;
 use prism_multimodal::media::{resolve_egress, resolve_ingress, MediaDescriptor, MediaSource};
 
 #[cfg(feature = "server")]
-use crate::runtime::PrismInferenceServer;
-
-#[cfg(feature = "server")]
-type AppState = std::sync::Arc<PrismInferenceServer>;
+use super::AppState;
 
 // =====================================================================
 //  Multimodal request validation helpers
@@ -280,37 +279,6 @@ fn validate_plan_models(server: &AppState, plan: &Value) -> Result<(), String> {
 }
 
 #[cfg(feature = "server")]
-fn vision_config_for_model(
-    server: &AppState,
-    model_id: &str,
-) -> Result<prism_multimodal::multimodal::vision_encoder::VisionEncoderConfig, String> {
-    let hidden_dim = server
-        .manifest_for_namespace(model_id)?
-        .and_then(|model| {
-            model
-                .outputs
-                .iter()
-                .find(|output| output.kind == prism_ecs_compile::ModelIoKind::Embedding)
-                .and_then(|output| {
-                    (output.shape.len() == 1 && output.shape[0] > 0).then_some(output.shape[0])
-                })
-        })
-        .unwrap_or(1024);
-    let hidden_dim = u32::try_from(hidden_dim)
-        .map_err(|_| format!("vision embedding width is too large for model {model_id:?}"))?;
-    Ok(
-        prism_multimodal::multimodal::vision_encoder::VisionEncoderConfig {
-            arch: prism_multimodal::multimodal::vision_encoder::VisionArch::ClipVitL,
-            input_size: (224, 224),
-            patch_size: 14,
-            num_layers: 24,
-            hidden_dim,
-            num_heads: 16,
-        },
-    )
-}
-
-#[cfg(feature = "server")]
 fn capture_live_media(
     source: prism_multimodal::media::MediaSource,
     descriptor: prism_multimodal::media::MediaDescriptor,
@@ -356,44 +324,6 @@ fn capture_live_media(
         Ok(packets)
     } else {
         Err("unsupported live media kind".into())
-    }
-}
-
-/// Canonical vision-encoder matmul provider.
-///
-/// **Typed port interface** to the Metal matmul kernel. The closure falls
-/// back to a CPU implementation; when the `metal-dispatch` feature is
-/// enabled it forwards to `crate::engine::metal::dispatch_fp16_matmul`,
-/// which is the execution-boundary Metal kernel.
-#[cfg(feature = "server")]
-fn make_vision_matmul_provider() -> prism_multimodal::multimodal::vision_encoder::MatmulProvider {
-    prism_multimodal::multimodal::vision_encoder::MatmulProvider {
-        matmul: Box::new(|input, weight, dim_m, dim_n| {
-            let m = dim_m as usize;
-            let n = dim_n as usize;
-            if input.len() != n || weight.len() < n * m {
-                return Err("vision matmul dimension mismatch".into());
-            }
-            #[cfg(all(feature = "metal-dispatch", target_os = "macos"))]
-            {
-                let fp16_weights = weight
-                    .iter()
-                    .flat_map(|value| half::f16::from_f32(*value).to_le_bytes())
-                    .collect::<Vec<_>>();
-                if let Ok(output) = crate::engine::metal::dispatch_fp16_matmul(
-                    "vision_encoder",
-                    input,
-                    &fp16_weights,
-                    dim_m,
-                    dim_n,
-                ) {
-                    return Ok(output);
-                }
-            }
-            Ok((0..m)
-                .map(|j| (0..n).map(|i| input[i] * weight[j * n + i]).sum())
-                .collect())
-        }),
     }
 }
 
@@ -483,321 +413,8 @@ fn validate_inline_payload(descriptor: &MediaDescriptor, payload: &[u8]) -> Resu
 }
 
 // =====================================================================
-//  HTTP handlers — image, audio, video, embeddings, multimodal
+//  HTTP handler — multimodal (vision+text) generation
 // =====================================================================
-
-/// POST /v1/images/generate - generate an image from a text prompt.
-#[cfg(all(feature = "server", not(feature = "prism-backend")))]
-pub async fn generate_image(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    #[cfg(feature = "generation-image")]
-    {
-        use crate::runtime::modality::ModalityProvider;
-        let model = body
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("default");
-        let prompt = body.get("prompt").and_then(Value::as_str).unwrap_or("");
-        let width = body.get("width").and_then(Value::as_u64).unwrap_or(1024) as u32;
-        let height = body.get("height").and_then(Value::as_u64).unwrap_or(1024) as u32;
-        let request = crate::runtime::modality::ImageGenerationRequest::new(
-            prompt.to_string(),
-            width,
-            height,
-        );
-        return match _server.generate_image(model, request) {
-            Ok(result) => Json(json!({
-                "status": "ok",
-                "width": result.image.width,
-                "height": result.image.height,
-                "format": format!("{:?}", result.image.format),
-                "digest": result.image.digest.0,
-                "receipt": result.receipt,
-            })),
-            Err(error) => Json(json!({"status": "error", "message": error.to_string()})),
-        };
-    }
-    #[cfg(not(feature = "generation-image"))]
-    {
-        let _ = body;
-        Json(json!({"status": "error", "message": "feature not enabled: generation-image"}))
-    }
-}
-
-/// POST /v1/images/generate - generate an image (compute-core).
-#[cfg(all(
-    feature = "server",
-    feature = "prism-backend",
-    any(feature = "generation-image", feature = "generation-diffusion")
-))]
-pub async fn generate_image(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let model_path = body
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("default");
-    let prompt = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-    let width = body.get("width").and_then(|v| v.as_u64()).unwrap_or(1024) as u32;
-    let height = body.get("height").and_then(|v| v.as_u64()).unwrap_or(1024) as u32;
-    let request =
-        crate::runtime::modality::ImageGenerationRequest::new(prompt.to_string(), width, height);
-    match server.generate_image(model_path, request) {
-        Ok(result) => Json(json!({
-            "status": "ok",
-            "image": {
-                "width": result.image.width,
-                "height": result.image.height,
-                "format": format!("{:?}", result.image.format),
-                "digest": result.image.digest.0,
-            },
-            "receipt": result.receipt,
-        })),
-        Err(e) => Json(json!({
-            "status": "error",
-            "message": format!("{e}"),
-        })),
-    }
-}
-
-/// POST /v1/images/generate - feature not enabled stub.
-#[cfg(all(
-    feature = "server",
-    feature = "prism-backend",
-    not(any(feature = "generation-image", feature = "generation-diffusion"))
-))]
-pub async fn generate_image(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let _ = body;
-    Json(json!({
-        "status": "error",
-        "message": "feature not enabled: generation-image or generation-diffusion"
-    }))
-}
-
-/// POST /v1/audio/speech - generate speech from text.
-#[cfg(all(feature = "server", not(feature = "prism-backend")))]
-pub async fn generate_audio(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    #[cfg(feature = "generation-audio")]
-    {
-        use crate::runtime::modality::ModalityProvider;
-        let model = body
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("default");
-        let text = body.get("text").and_then(Value::as_str).unwrap_or("");
-        let mut params = crate::runtime::modality::AudioParams::default();
-        params.voice = body
-            .get("voice")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        return match _server.generate_audio(model, text, params) {
-            Ok(receipt) => Json(json!({
-                "status": "ok",
-                "sample_rate": receipt.sample_rate,
-                "num_samples": receipt.num_samples,
-                "compute_ms": receipt.compute_ms,
-                "output_digest": receipt.output_digest,
-            })),
-            Err(error) => Json(json!({"status": "error", "message": error.to_string()})),
-        };
-    }
-    #[cfg(not(feature = "generation-audio"))]
-    {
-        let _ = body;
-        Json(json!({"status": "error", "message": "feature not enabled: generation-audio"}))
-    }
-}
-
-/// POST /v1/audio/speech - generate speech (compute-core).
-#[cfg(all(
-    feature = "server",
-    feature = "prism-backend",
-    feature = "generation-audio"
-))]
-pub async fn generate_audio(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let model_path = body
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("default");
-    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
-    let mut params = crate::runtime::modality::AudioParams::default();
-    params.voice = body.get("voice").and_then(|v| v.as_str()).map(String::from);
-    match server.generate_audio(model_path, text, params) {
-        Ok(receipt) => Json(json!({
-            "status": "ok",
-            "sample_rate": receipt.sample_rate,
-            "num_samples": receipt.num_samples,
-            "compute_ms": receipt.compute_ms,
-            "output_digest": receipt.output_digest,
-        })),
-        Err(e) => Json(json!({
-            "status": "error",
-            "message": format!("{e}"),
-        })),
-    }
-}
-
-/// POST /v1/audio/speech - feature not enabled stub.
-#[cfg(all(
-    feature = "server",
-    feature = "prism-backend",
-    not(feature = "generation-audio")
-))]
-pub async fn generate_audio(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let _ = body;
-    Json(json!({
-        "status": "error",
-        "message": "feature not enabled: generation-audio"
-    }))
-}
-
-/// POST /v1/video/generate - generate a video from a text prompt.
-#[cfg(all(feature = "server", not(feature = "prism-backend")))]
-pub async fn generate_video(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    #[cfg(feature = "generation-video")]
-    {
-        use crate::runtime::modality::ModalityProvider;
-        let model = body
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("default");
-        let prompt = body.get("prompt").and_then(Value::as_str).unwrap_or("");
-        let mut params = crate::runtime::modality::VideoParams::default();
-        if let Some(frames) = body.get("num_frames").and_then(Value::as_u64) {
-            params.num_frames = frames as u32;
-        }
-        if let Some(fps) = body.get("fps").and_then(Value::as_f64) {
-            params.fps = fps as f32;
-        }
-        return match _server.generate_video(model, prompt, params) {
-            Ok(receipt) => Json(json!({
-                "status": "ok",
-                "num_frames": receipt.num_frames,
-                "compute_ms": receipt.compute_ms,
-            })),
-            Err(error) => Json(json!({"status": "error", "message": error.to_string()})),
-        };
-    }
-    #[cfg(not(feature = "generation-video"))]
-    {
-        let _ = body;
-        Json(json!({"status": "error", "message": "feature not enabled: generation-video"}))
-    }
-}
-
-/// POST /v1/video/generate - generate a video (compute-core).
-#[cfg(all(
-    feature = "server",
-    feature = "prism-backend",
-    feature = "generation-video"
-))]
-pub async fn generate_video(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let model_path = body
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("default");
-    let prompt = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
-    let mut params = crate::runtime::modality::VideoParams::default();
-    if let Some(v) = body.get("num_frames").and_then(|v| v.as_u64()) {
-        params.num_frames = v as u32;
-    }
-    if let Some(v) = body.get("fps").and_then(|v| v.as_f64()) {
-        params.fps = v as f32;
-    }
-    if let Some(v) = body.get("seed").and_then(|v| v.as_u64()) {
-        params.seed = v;
-    }
-    match server.generate_video(model_path, prompt, params) {
-        Ok(receipt) => Json(json!({
-            "status": "ok",
-            "num_frames": receipt.num_frames,
-            "compute_ms": receipt.compute_ms,
-        })),
-        Err(e) => Json(json!({
-            "status": "error",
-            "message": format!("{e}"),
-        })),
-    }
-}
-
-/// POST /v1/video/generate - feature not enabled stub.
-#[cfg(all(
-    feature = "server",
-    feature = "prism-backend",
-    not(feature = "generation-video")
-))]
-pub async fn generate_video(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let _ = body;
-    Json(json!({
-        "status": "error",
-        "message": "feature not enabled: generation-video"
-    }))
-}
-
-/// POST /v1/embeddings - generate text embeddings.
-#[cfg(all(feature = "server", not(feature = "prism-backend")))]
-pub async fn generate_embeddings(
-    State(_server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let model = body
-        .get("model")
-        .and_then(Value::as_str)
-        .unwrap_or("default");
-    Json(json!({
-        "status": "error",
-        "code": "runtime_unavailable",
-        "model": model,
-        "message": "text embeddings require an admitted live model runtime; enable prism-backend and register a CImage"
-    }))
-}
-
-/// POST /v1/embeddings - generate text embeddings (compute-core).
-#[cfg(all(feature = "server", feature = "prism-backend"))]
-pub async fn generate_embeddings(
-    State(server): State<AppState>,
-    Json(body): Json<Value>,
-) -> Json<Value> {
-    let model_path = body
-        .get("model")
-        .and_then(|v| v.as_str())
-        .unwrap_or("default");
-    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
-    match server.generate_embeddings(model_path, text) {
-        Ok(embeddings) => Json(json!({
-            "status": "ok",
-            "embeddings": embeddings,
-        })),
-        Err(e) => Json(json!({
-            "status": "error",
-            "message": e,
-        })),
-    }
-}
 
 /// POST /v1/multimodal/generate - multimodal (vision+text) generation.
 #[cfg(all(feature = "server", not(feature = "prism-backend")))]
@@ -847,13 +464,6 @@ pub async fn generate_multimodal(
 mod multimodal_plan_tests {
     use super::*;
     use prism_multimodal::media::{MediaKind, PixelFormat};
-
-    #[test]
-    fn vision_provider_preserves_gemv_contract() {
-        let provider = make_vision_matmul_provider();
-        let output = (provider.matmul)(&[2.0, 3.0], &[4.0, 5.0, 6.0, 7.0], 2, 2).unwrap();
-        assert_eq!(output, vec![23.0, 33.0]);
-    }
 
     #[test]
     fn plans_file_input_and_video_toolbox_output_together() {
