@@ -19,5 +19,6 @@ pub mod phase_engine_state;
 pub mod phase_invocation;
 pub mod ready_queue;
 pub mod request;
+pub mod session;
 pub mod token_budget;
 pub mod work_registry;
