@@ -6593,6 +6593,7 @@ dependencies = [
  "png 0.17.16",
  "prism-ane",
  "prism-ecs-backend",
+ "prism-ecs-compile",
  "prism-ecs-constitutional",
  "prism-ecs-core",
  "prism-ecs-ir",

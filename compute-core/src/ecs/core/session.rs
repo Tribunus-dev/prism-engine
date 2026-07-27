@@ -1,6 +1,21 @@
 #![cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 //! Session types for generation control (host) and inference (worker).
 //!
+//! **ENGINE-ABSORPTION NOTE:** The canonical types in this file have been
+//! re-homed in `crates/prism-ecs-server/src/runtime/server/session_lifecycle.rs`:
+//!
+//! - `ControlSessionState` → `prism_ecs_server::runtime::server::session_lifecycle::ControlSessionState`
+//! - `SessionOutcome` → `...::SessionOutcome`
+//! - `GenerationControlSession` → `...::GenerationControlSession`
+//! - `InferenceSessionState` → `...::WorkerInferencePhase` (renamed to avoid
+//!   collision with the server-side state machine)
+//! - `SamplerConfig` → `...::SamplerConfig` (in `request_handling.rs`)
+//!
+//! The duplicates here remain temporarily because the engine crate does
+//! not depend on `prism-ecs-server`. The engine's own `InferenceSession`
+//! struct (worker-side, MLX-backed) is execution-boundary and stays here
+//! alongside its `KvCache` and `AtomicBool`.
+//!
 //! The control-side state machine:
 //!   Created → Admitted → Submitted → PrefillRunning → Decoding → Completed
 //!                                                             ├── Cancelled

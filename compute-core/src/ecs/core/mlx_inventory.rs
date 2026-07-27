@@ -5,6 +5,15 @@
 //! that the compute pipeline, compiler, and runtime consult to understand
 //! which MLX primitives are available, how they dispatch, and what
 //! fork-specific patches they carry.
+//!
+//! **EXECUTION-BOUNDARY (do not absorb).** This file documents a
+//! hardware-specific kernel inventory. Per AGENTS.md's four
+//! canonical-vs-execution-boundary criteria, MLX-backed execution data is
+//! execution-boundary and stays in the engine. The constitutional crate
+//! `prism-ecs-server` consumes the dispatch metadata through a typed port
+//! (see `PrefillDecodeRuntime` in
+//! `crates/prism-ecs-server/src/runtime/server/request_handling.rs`), but
+//! never imports the primitives catalogue itself.
 
 use serde::Serialize;
 

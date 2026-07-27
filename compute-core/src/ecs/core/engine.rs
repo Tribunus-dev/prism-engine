@@ -5,6 +5,19 @@
 //! delegates execution to the ECS schedule.  The schedule owns the model
 //! runtime, prefill, and decode loop.
 //!
+//! **ENGINE-ABSORPTION NOTE:** The canonical request types in this file
+//! have been re-homed in
+//! `crates/prism-ecs-server/src/runtime/server/request_handling.rs`:
+//!
+//! - `GenerationRequest` → `prism_ecs_server::runtime::server::request_handling::GenerationRequest`
+//! - `EngineCapabilities` → `...::EngineCapabilities`
+//!
+//! The duplicates here remain temporarily because the engine crate does
+//! not depend on `prism-ecs-server`. The execution-boundary parts
+//! (`LoadedModel`, `ComputeEngine`, the cimage load and execute path,
+//! `init_host_inference`, `run_inference_cycle`, `run_with_token_budget`,
+//! `check_memory_pressure`, MLX memory queries) stay in the engine.
+//!
 //! # Changes from v0
 //!
 //! - `generate()` now accepts `input_ids: &[u32]` and returns
