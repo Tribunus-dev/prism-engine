@@ -8,3 +8,4 @@
 //! this state only through the runtime completion-reconciliation system.
 
 pub mod lane_capacity;
+pub mod lane_work;
