@@ -2433,7 +2433,9 @@ pub fn prefill_with_audio(
     text_tokens: &[u32],
     audio_inputs: &[AudioInput],
 ) -> Result<u32, EngineError> {
-    use crate::ecs::audio::{inject_audio_features, preprocess_audio, AudioEncoder};
+    use prism_audio::asr_pipeline::encoder::AudioEncoder;
+    use prism_audio::asr_pipeline::injection::inject_audio_features;
+    use prism_audio::asr_pipeline::preprocess::preprocess_audio;
     use crate::executor::run_prologue;
     use crate::session::SamplerConfig;
 

@@ -52,8 +52,6 @@ pub use crate::ecs::tts;
 pub mod aot_kernels;
 pub use crate::ecs::assistant_graph;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub use crate::ecs::audio;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub use crate::ecs::autopsy;
 pub use crate::ecs::backend;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
