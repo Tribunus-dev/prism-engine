@@ -9,7 +9,7 @@
 use crate::ecs::runtime::scheduling::command::CommandWriter;
 use crate::ecs::runtime::scheduling::metadata::*;
 use crate::ecs::runtime::world::World;
-use crate::ecs::scheduling::agent_bridge::AgentBridge;
+use prism_ecs_runtime::scheduling::systems::agent_bridge::AgentBridge;
 
 // ---------------------------------------------------------------------------
 // LegacyBridgeSystem
