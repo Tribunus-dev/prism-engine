@@ -11,3 +11,5 @@
 //! (`receipt.rs` and `receipts.rs`) move here from the engine. The
 //! `engine_receipts.rs` shape (already in `prism-ecs-runtime`) is
 //! the parent type; scheduling receipts are specializations.
+
+pub mod scheduling_receipts;

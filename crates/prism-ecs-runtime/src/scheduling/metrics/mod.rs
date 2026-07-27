@@ -10,3 +10,7 @@
 //! Per the inventory v2.1 (steps 53-55), the metrics files
 //! (outlier_detector, scheduler_metrics, phase_telemetry) move here
 //! from the engine.
+
+pub mod outlier_detector;
+pub mod phase_telemetry;
+pub mod scheduler_metrics;
