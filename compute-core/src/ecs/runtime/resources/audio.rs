@@ -3,10 +3,10 @@
 //! [`AudioEncoderResource`] holds the loaded [`AudioEncoder`] for ASR
 //! prefill processing at runtime.
 //!
-//! [`AudioEncoder`]: crate::ecs::audio::AudioEncoder
+//! [`AudioEncoder`]: prism_audio::asr_pipeline::encoder::AudioEncoder
 
-use crate::ecs::audio::AudioEncoder;
 use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
+use prism_audio::asr_pipeline::AudioEncoder;
 
 /// Stable resource ID for the audio encoder singleton.
 pub const AUDIO_ENCODER_RESOURCE: ResourceId = 21;

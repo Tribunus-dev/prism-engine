@@ -27,7 +27,6 @@ pub mod arena_lifecycle;
 pub mod arena_pool;
 pub mod assessment;
 pub mod attention;
-pub mod audio;
 pub mod audio_preprocess_accelerate;
 pub mod audio_provider;
 pub mod autopsy;

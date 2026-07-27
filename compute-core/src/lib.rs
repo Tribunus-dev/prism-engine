@@ -51,8 +51,6 @@ pub use crate::ecs::tts;
 #[cfg(any(target_os = "macos", feature = "amd-rocm"))]
 pub mod aot_kernels;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub use crate::ecs::audio;
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub use crate::ecs::autopsy;
 pub use crate::ecs::backend;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
