@@ -16,6 +16,19 @@ use crate::ecs::ane::draft_model::AneMultiCoreDraft;
 use std::collections::HashMap;
 use std::fmt;
 
+// Canonical data types formerly defined in this file were absorbed
+// into `prism_ecs_compile::evaluator` (Phase 1 godfile decomposition,
+// 2026-07-27). The canonical home is the constitutional crate; this
+// module re-exports the types so existing engine callers
+// (`crate::speculative::DraftModelConfig`, `…::TreeSpecDecoder`,
+// `…::SpeculativeBranch`, `…::SpecHubVerification`) continue to
+// resolve without a code change. The ANE-coupled `MultiSpecDraftModel`
+// and the MLX-coupled `spechub_verify` family stay engine-side per
+// AGENTS.md criteria 1 and 4.
+pub use prism_ecs_compile::evaluator::{
+    DraftModelConfig, SpeculativeBranch, SpecHubVerification, TreeSpecDecoder,
+};
+
 // ---------------------------------------------------------------------------
 // Pseudo-RNG
 // ---------------------------------------------------------------------------
@@ -742,83 +755,9 @@ impl MultiSpecDraftModel {
 
 // ---------------------------------------------------------------------------
 // ADR 0034 Speculative Decoding — Draft model configuration & tree-spec
+// (canonical data types now live in `prism_ecs_compile::evaluator`;
+// see re-exports at the top of this file)
 // ---------------------------------------------------------------------------
-
-/// Description of a draft model's architecture.
-///
-/// Weights are stored as [`WeightCodec::GroupQuantized`] so that the
-/// draft model can be loaded into any backend that supports group-wise
-/// quantisation (MLX, Accelerate, ANE).
-#[derive(Debug, Clone)]
-pub struct DraftModelConfig {
-    pub n_heads: u32,
-    pub head_dim: u32,
-    pub n_layers: u32,
-}
-
-/// One speculative branch in a tree-structured speculation.
-///
-/// Each branch is a sequence of draft tokens along a single path through
-/// the speculation tree, together with metadata about its acceptance
-/// probability and the KV-cache generation that produced it.
-#[derive(Debug, Clone)]
-pub struct SpeculativeBranch {
-    /// Draft token IDs along this branch.
-    pub tokens: Vec<u32>,
-    /// Estimated probability that the entire branch will be accepted by
-    /// the target model.
-    pub acceptance_prob: f32,
-    /// Indices of the draft-model layers that generated this branch.
-    pub draft_layer_indices: Vec<u32>,
-    /// Provisional page IDs that the memory planner reserved for this
-    /// branch's KV-cache entries.
-    pub provisional_pages: Vec<u32>,
-    /// Total KV-cache generation cost (bytes) for this branch.
-    pub kv_generation: u64,
-}
-
-/// Tree-structured speculative decoder.
-///
-/// Manages a draft model and generates multiple candidate branches
-/// forming a speculation tree.  The target model verifies all branches
-/// in a single batched forward pass; the first token (by tree order)
-/// that passes the acceptance criterion is committed.
-#[derive(Debug, Clone)]
-pub struct TreeSpecDecoder {
-    pub draft: DraftModelConfig,
-    pub max_branches: u32,
-    pub max_depth: u32,
-    pub acceptance_threshold: f32,
-}
-
-impl TreeSpecDecoder {
-    /// Propose a set of speculative branches from the current context.
-    ///
-    /// Uses the draft model's architecture (`n_heads`, `head_dim`,
-    /// `n_layers`) together with the current context to generate up to
-    /// `max_branches` distinct speculative continuations, each at most
-    /// `max_depth` tokens long.
-    pub fn propose(&self, _context: &[u32]) -> Vec<SpeculativeBranch> {
-        let _ = self;
-        // Speculative decoding is not yet implemented.
-        // The TreeSpecDecoder and related infrastructure are stubs.
-        Vec::new()
-    }
-
-    /// Verify speculative branches against the target model's logits.
-    ///
-    /// Compares each branch against `target_logits`; commits tokens up
-    /// to the first position where the acceptance criterion fails
-    /// (i.e. where the target's probability for the draft token falls
-    /// below `acceptance_threshold`).  Returns the accepted token
-    /// sequence.
-    pub fn verify(&mut self, _branches: &[SpeculativeBranch], _target_logits: &[f32]) -> Vec<u32> {
-        let _ = self;
-        // Speculative decoding is not yet implemented.
-        // The TreeSpecDecoder and related infrastructure are stubs.
-        Vec::new()
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -1035,24 +974,11 @@ mod tests {
 
 // ---------------------------------------------------------------------------
 // SpecHub — optimal multi-draft verification
+// (canonical data type `SpecHubVerification` is re-exported from
+//  `prism_ecs_compile::evaluator` at the top of this file;
+//  the MLX-coupled verification functions stay engine-side per
+//  AGENTS.md criterion 4)
 // ---------------------------------------------------------------------------
-
-/// SpecHub verification result — accepts more tokens than greedy.
-///
-/// SpecHub builds a sparse joint distribution over all draft outputs and
-/// identifies the subset of drafts consistent with the target model,
-/// recovering tokens that greedy rejection would discard.
-pub struct SpecHubVerification {
-    /// Token IDs accepted at each verified position.
-    pub accepted_tokens: Vec<u32>,
-    /// Fraction of draft tokens accepted (verified / attempted).
-    pub acceptance_rate: f64,
-    /// Estimated latency saved by acceptance vs. target-only decode (ms).
-    /// Set externally from wall-clock measurements.
-    pub saved_latency_ms: f64,
-    /// Time spent in the SpecHub verification algorithm (microseconds).
-    pub verification_time_us: u64,
-}
 
 /// Build a sparse joint distribution over all drafts at a single position.
 ///

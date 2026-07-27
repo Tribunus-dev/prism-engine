@@ -26,6 +26,19 @@ prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
 # `crate::ecs::mil_builder::MilBuilder` (see
 # `compute-core/src/ecs/core/mil_builder.rs`).
 prism-ane = { path = "../crates/prism-ane", optional = true }
+# Canonical home of the constitutional compiler. The engine's
+# `core/speculative.rs` data types (`DraftModelConfig`,
+# `SpeculativeBranch`, `TreeSpecDecoder`, `SpecHubVerification`)
+# were absorbed into `prism_ecs_compile::evaluator::strategy` and
+# `prism_ecs_compile::evaluator::objective` (canonical data only;
+# the ANE-coupled `MultiSpecDraftModel` and the MLX-coupled
+# `spechub_verify` family remain engine-side per AGENTS.md
+# criteria 1 and 4). Default (non-optional) because the canonical
+# data types are referenced from compile-cfg-gated code paths
+# (ANE / MLX) and a narrow hardware-only consumer would simply
+# not enable those features; the dep itself never pulls in
+# hardware code.
+prism-ecs-compile = { path = "../crates/prism-ecs-compile" }
 block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
