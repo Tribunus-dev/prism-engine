@@ -20,7 +20,6 @@ prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
 prism-kv-cache = { path = "../crates/prism-kv-cache" }
 prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
 prism-ecs-runtime = { path = "../crates/prism-ecs-runtime" }
-prism-ecs-kernel = { path = "../crates/prism-ecs-kernel" }
 # Prism ANE crate — canonical home for the MIL builder and the two
 # high-level ANE program constructors. The engine used to have its
 # own parallel MIL builder (now absorbed); this dependency routes
