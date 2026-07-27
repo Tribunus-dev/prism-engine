@@ -27,8 +27,7 @@ use crate::ecs::compiler::event_emitter::{now_micros, CompilerEvent, CompilerEve
 use crate::ecs::evolution::foundation::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 use crate::ecs::plan::CodecFamily;
-use crate::ecs::scheduling::unified_scheduler::SchedulerRunner;
-use crate::ecs::scheduling::SchedulerConfig as SchedConfig;
+use prism_ecs_runtime::scheduling::systems::unified_scheduler::{SchedulerConfig as SchedConfig, SchedulerRunner};
 use crate::ecs::training_target::engram::trainer::{CalibrationEvidence, EngramTrainer};
 use std::collections::BTreeMap;
 

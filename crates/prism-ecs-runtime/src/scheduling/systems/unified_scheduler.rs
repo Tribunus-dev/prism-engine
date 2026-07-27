@@ -164,6 +164,17 @@ impl SchedulerState {
     }
 }
 
+/// Placeholder type alias for the engine's `SchedulerRunner`.
+///
+/// The engine's `SchedulerRunner::new(&SchedConfig)` and `.run()`
+/// pattern is the running algorithm; the constitutional side
+/// has `SchedulerState` as the data model and `schedule_once`
+/// as the algorithm. This alias lets the engine callers import
+/// the runner name without breaking. The full runner logic
+/// (with the engine's algorithm) migrates when the engine
+/// callers are updated.
+pub type SchedulerRunner = SchedulerState;
+
 // ---------------------------------------------------------------------------
 // Invariant tests
 // ---------------------------------------------------------------------------
