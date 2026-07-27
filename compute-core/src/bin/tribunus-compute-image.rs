@@ -2310,7 +2310,7 @@ fn cmd_cimage_validate_assistant_graph(args: &[String]) -> Result<(), String> {
     let path = get_opt(args, "--path").ok_or_else(|| "--path is required".to_string())?;
     let json_output = has_flag(args, "--json");
 
-    use tribunus_compute_core::assistant_graph::{
+    use prism_ecs_agent::assistant_graph::{
         AssistantGraphManifest, AssistantGraphValidationStatus, AssistantGraphValidator,
     };
     use tribunus_compute_core::cimage::*;
