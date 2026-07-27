@@ -1,10 +1,13 @@
+//! This module owns the canonical AssistantGraphManifest — the top-level
+//! artifact that binds contract, regions, bridges, shared state, route
+//! graph, and authority policy into a single graph identity.
+
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::assistant_graph::authority::RegionAuthorityPolicy;
-use crate::ecs::assistant_graph::bridge::BridgeDecl;
-use crate::ecs::assistant_graph::bridge::BridgeValueType;
-use crate::ecs::assistant_graph::graph::AssistantRouteGraph;
-use crate::ecs::assistant_graph::state::{RegionStateAccess, SharedStateSchema};
+use super::authority::RegionAuthorityPolicy;
+use super::bridge::{BridgeDecl, BridgeValueType};
+use super::graph::AssistantRouteGraph;
+use super::state::{RegionStateAccess, SharedStateSchema};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantGraphManifest {

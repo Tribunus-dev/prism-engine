@@ -1,6 +1,10 @@
+//! This module owns the canonical data structure for the route graph that
+//! connects regions through bridges, with sequential, parallel, and
+//! conditional kinds.
+
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::assistant_graph::bridge::BridgeValueType;
+use super::bridge::BridgeValueType;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssistantRouteGraph {

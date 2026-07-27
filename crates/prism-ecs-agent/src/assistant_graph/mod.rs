@@ -1,3 +1,8 @@
+//! This module is the canonical authority for the assistant graph manifest
+//! surface — regions, bridges, route graphs, authority policies, shared
+//! state schema, and the structural validator that admits a manifest as
+//! a valid graph identity.
+
 pub mod authority;
 pub mod bridge;
 pub mod graph;
@@ -7,7 +12,7 @@ pub mod state;
 pub mod validate;
 
 #[cfg(test)]
-pub mod tests;
+mod tests;
 
 pub use authority::{AuthorityRule, AuthorityRuleKind, RegionAuthorityPolicy};
 pub use bridge::{

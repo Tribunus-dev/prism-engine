@@ -1,3 +1,14 @@
+//! Constitutional agent surface — assistant graph manifest types and
+//! a small in-memory `AgentStore` for tracking agent runs.
+//!
+//! The `assistant_graph` module is the canonical home for the manifest
+//! types (regions, bridges, route graphs, authority policies, shared
+//! state schema) and the structural validator that admits a manifest
+//! as a valid graph identity. The engine's `compute-core/src/ecs/
+//! assistant_graph/` parallel surface has been absorbed here.
+
+pub mod assistant_graph;
+
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AgentState {

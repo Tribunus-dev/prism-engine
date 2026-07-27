@@ -1,3 +1,7 @@
+//! This module owns the canonical type vocabulary for the values that flow
+//! between regions across bridges, including semantic response state and
+//! speech plans.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]

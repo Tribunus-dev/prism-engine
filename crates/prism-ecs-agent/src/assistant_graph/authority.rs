@@ -1,6 +1,10 @@
+//! This module owns the canonical authority-rule vocabulary that constrains
+//! which regions may emit, mutate, or be required to consume specific
+//! output types.
+
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::assistant_graph::manifest::RegionOutputAuthority;
+use super::manifest::RegionOutputAuthority;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RegionAuthorityPolicy {

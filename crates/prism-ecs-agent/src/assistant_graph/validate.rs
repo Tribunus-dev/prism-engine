@@ -1,13 +1,15 @@
+//! This module owns the canonical structural validator that runs all ten
+//! admission gates against an assistant graph manifest and produces a
+//! validation receipt.
+
 use std::collections::{HashMap, HashSet};
 
-use crate::ecs::assistant_graph::bridge::BridgeValueType;
-use crate::ecs::assistant_graph::manifest::{
+use super::bridge::BridgeValueType;
+use super::manifest::{
     AssistantGraphManifest, AssistantRegionDecl, AssistantRegionKind, RegionOutputAuthority,
 };
-use crate::ecs::assistant_graph::receipts::{
-    AssistantGraphValidationReceipt, AssistantGraphValidationStatus,
-};
-use crate::ecs::assistant_graph::state::StateStoreKind;
+use super::receipts::{AssistantGraphValidationReceipt, AssistantGraphValidationStatus};
+use super::state::StateStoreKind;
 
 pub struct AssistantGraphValidator;
 
@@ -153,7 +155,10 @@ impl AssistantGraphValidator {
     }
 
     /// Gate 4: Reject if an embedding region can write assistant identity/style state.
-    fn gate_embedding_no_identity_write(graph: &AssistantGraphManifest, errors: &mut Vec<String>) {
+    fn gate_embedding_no_identity_write(
+        graph: &AssistantGraphManifest,
+        errors: &mut Vec<String>,
+    ) {
         let store_map: HashMap<&str, &StateStoreKind> = graph
             .shared_state_schema
             .stores
@@ -208,7 +213,10 @@ impl AssistantGraphValidator {
     /// Gate 6: Reject if a route consumes DraftText where CommittedAssistantResponse
     /// is required (target region has CommittedAssistantResponse authority but the
     /// edge allows DraftText).
-    fn gate_route_draft_text_mismatch(graph: &AssistantGraphManifest, errors: &mut Vec<String>) {
+    fn gate_route_draft_text_mismatch(
+        graph: &AssistantGraphManifest,
+        errors: &mut Vec<String>,
+    ) {
         // Build region_id -> region map
         let region_map: HashMap<&str, &AssistantRegionDecl> = graph
             .regions
@@ -291,7 +299,8 @@ impl AssistantGraphValidator {
         }
         if contract.requires_authority && graph.authority_policy.rules.is_empty() {
             warnings.push(
-                "Contract requires_authority enabled but authority_policy has no rules".to_string(),
+                "Contract requires_authority enabled but authority_policy has no rules"
+                    .to_string(),
             );
         }
     }

@@ -1,23 +1,31 @@
-use crate::ecs::assistant_graph::authority::{
+//! Integration tests for the assistant graph structural validator and the
+//! manifest / authority / bridge / route-graph / state-schema data types.
+//!
+//! Every `Gate N:` test exercises a single validator gate against a
+//! fixture that has been perturbed in exactly one way. The serde tests
+//! confirm that every variant of every enum survives a JSON roundtrip
+//! and that the manifest itself can be re-parsed without loss.
+
+use super::authority::{
     AuthorityRule, AuthorityRuleKind, RegionAuthorityPolicy,
 };
-use crate::ecs::assistant_graph::bridge::{
+use super::bridge::{
     BridgeDecl, BridgeValueType, EmotionalRegister, EmphasisSpan, PacingPlan, PronunciationHint,
     SpeakingStyle, SpeechPlan, SpeechUtterance, TurnIntent,
 };
-use crate::ecs::assistant_graph::graph::{AssistantRouteGraph, RouteEdge, RouteKind};
-use crate::ecs::assistant_graph::manifest::{
+use super::graph::{AssistantRouteGraph, RouteEdge, RouteKind};
+use super::manifest::{
     AssistantContract, AssistantGraphManifest, AssistantRegionDecl, AssistantRegionKind,
     RegionOutputAuthority,
 };
-use crate::ecs::assistant_graph::receipts::{
+use super::receipts::{
     AssistantGraphValidationReceipt, AssistantGraphValidationStatus,
 };
-use crate::ecs::assistant_graph::state::{
+use super::state::{
     RegionStateAccess, SharedStateSchema, StatePersistence, StateStoreDecl, StateStoreKind,
 };
-use crate::ecs::assistant_graph::validate::AssistantGraphValidator;
-use crate::ecs::assistant_graph::AssistantResponseState;
+use super::validate::AssistantGraphValidator;
+use super::AssistantResponseState;
 
 // ---------------------------------------------------------------------------
 // Helper — builds a minimal valid manifest
@@ -201,6 +209,8 @@ fn valid_manifest() -> AssistantGraphManifest {
         },
     }
 }
+
+// ---------------------------------------------------------------------------
 // Serde roundtrip tests
 // ---------------------------------------------------------------------------
 

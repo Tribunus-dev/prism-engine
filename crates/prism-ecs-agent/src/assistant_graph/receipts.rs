@@ -1,3 +1,6 @@
+//! This module owns the canonical validation receipt types that record
+//! the outcome of validating an assistant graph manifest.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

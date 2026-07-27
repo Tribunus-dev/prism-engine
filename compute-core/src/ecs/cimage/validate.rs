@@ -9,10 +9,10 @@ use std::collections::HashSet;
 
 use sha2::{Digest, Sha256};
 
-use crate::ecs::assistant_graph::{AssistantGraphManifest, AssistantGraphValidator};
 use crate::ecs::cimage::*;
 use crate::execution_plan::CodecFamily;
 use crate::ternary::pack::validate_no_reserved_codes;
+use prism_ecs_agent::assistant_graph::{AssistantGraphManifest, AssistantGraphValidator};
 
 /// Hex SHA-256 digest helper.
 fn sha256_hex(bytes: &[u8]) -> String {
