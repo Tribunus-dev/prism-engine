@@ -1,21 +1,21 @@
-//! Layer 1: Raw manifest types and config.json parsing.
+//! Layer 1: Raw manifest types and `config.json` parsing.
 //!
-//! Raw model manifest types plus the `parse_config` function that reads
-//! config.json and produces a normalized TextArchitecture + QuantizationMeta.
+//! Authority: the canonical [`parse_config`] routine that reads
+//! `config.json` and produces a normalized
+//! [`super::architecture::TextArchitecture`] + [`QuantizationMeta`]
+//! plus the [`ModelManifest`] / [`CimageManifest`] carrier types used
+//! by the compile pipeline. Uses thiserror-driven
+//! [`super::error::ConfigError`]; no `anyhow`, no `unwrap`, no `panic`.
 
-#[cfg(feature = "prism-backend")]
-use prism_ecs_compile::compute_image_core::manifest::TensorEntry;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-/// Import TensorEntry from compute_image when prism-backend is active.
-#[cfg(feature = "prism-backend")]
-use std::path::Path;
+use std::collections::BTreeMap;
 
-use super::hardware::{
+use super::architecture::{
     AttentionKind, AudioArchitecture, MoEConfig, QuantizationMeta, QuantizationMode, RopeSpec,
     TextArchitecture, VisionArchitecture,
 };
+use super::error::{ConfigError, ConfigResult};
 
 // ── Modality Discriminator ─────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ pub enum ArchitectureConfig {
 // ── Layer 1: Raw Manifest ──────────────────────────────────────────────
 
 /// Raw model manifest read from config.json.
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ModelManifest {
     /// Modality discriminator — determines runtime dispatch path.
     pub modality: ManifestModality,
@@ -60,7 +60,7 @@ pub struct ModelManifest {
     pub safetensors_shards: Vec<ShardManifest>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ShardManifest {
     pub path: String,
     pub sha256: String,
@@ -135,6 +135,7 @@ struct RawConfig {
     #[serde(default)]
     dtype: Option<String>,
 }
+
 impl RawConfig {
     fn to_text_config_fallback(&self) -> RawTextConfig {
         RawTextConfig {
@@ -206,20 +207,23 @@ struct RawQuantization {
     mode: Option<String>,
 }
 
-/// Parse config.json and produce a normalized TextArchitecture + QuantizationMeta.
+/// Parse `config.json` and produce a normalized [`TextArchitecture`] +
+/// [`QuantizationMeta`] + [`ModelManifest`].
 pub fn parse_config(
     config_path: &str,
-) -> crate::Result<(TextArchitecture, Option<QuantizationMeta>, ModelManifest)> {
-    let config_json = std::fs::read_to_string(config_path)
-        .map_err(|e| crate::Error::from_reason(format!("Cannot read config: {}", e)))?;
+) -> ConfigResult<(TextArchitecture, Option<QuantizationMeta>, ModelManifest)> {
+    if config_path.is_empty() {
+        return Err(ConfigError::EmptyConfigPath);
+    }
+
+    let config_json = std::fs::read_to_string(config_path)?;
 
     // Hash the raw config for provenance
     let mut hasher = Sha256::new();
     hasher.update(config_json.as_bytes());
     let config_hash = format!("{:x}", hasher.finalize());
 
-    let raw: RawConfig = serde_json::from_str(&config_json)
-        .map_err(|e| crate::Error::from_reason(format!("Invalid config JSON: {}", e)))?;
+    let raw: RawConfig = serde_json::from_str(&config_json)?;
 
     let text = raw
         .text_config
@@ -246,30 +250,26 @@ pub fn parse_config(
             layer_types.push(AttentionKind::SlidingAttention);
         }
     } else if layer_types.len() != text.num_hidden_layers as usize {
-        return Err(crate::Error::from_reason(format!(
-            "layer_types count ({}) != num_hidden_layers ({})",
-            layer_types.len(),
-            text.num_hidden_layers
-        )));
+        return Err(ConfigError::LayerTypeCountMismatch {
+            layer_types: layer_types.len(),
+            num_hidden_layers: text.num_hidden_layers,
+        });
     }
 
-    let rope_local = {
-        let raw_rope = text
-            .rope_parameters
-            .as_ref()
-            .and_then(|r| r.sliding_attention.as_ref())
-            .map(|s| RopeSpec {
-                theta: s.rope_theta,
-                rope_type: s.rope_type.clone().unwrap_or_else(|| "default".into()),
-                partial_rotary_factor: s.partial_rotary_factor,
-            })
-            .unwrap_or_else(|| RopeSpec {
-                theta: 10000.0,
-                rope_type: "default".into(),
-                partial_rotary_factor: None,
-            });
-        raw_rope
-    };
+    let rope_local = text
+        .rope_parameters
+        .as_ref()
+        .and_then(|r| r.sliding_attention.as_ref())
+        .map(|s| RopeSpec {
+            theta: s.rope_theta,
+            rope_type: s.rope_type.clone().unwrap_or_else(|| "default".into()),
+            partial_rotary_factor: s.partial_rotary_factor,
+        })
+        .unwrap_or_else(|| RopeSpec {
+            theta: 10000.0,
+            rope_type: "default".into(),
+            partial_rotary_factor: None,
+        });
 
     let rope_global = text
         .rope_parameters
@@ -341,7 +341,7 @@ pub fn parse_config(
             Some("affine") => QuantizationMode::Affine,
             _ => QuantizationMode::None,
         },
-        overrides: HashMap::new(),
+        overrides: BTreeMap::new(),
     });
 
     // For models with a nested text_config (e.g. Gemma4 Unified), the
@@ -357,7 +357,7 @@ pub fn parse_config(
                     bits: 8,
                     group_size: 64,
                     mode: QuantizationMode::Affine,
-                    overrides: HashMap::new(),
+                    overrides: BTreeMap::new(),
                 })
             } else {
                 None
@@ -388,29 +388,122 @@ pub fn parse_config(
     Ok((arch, quant, manifest))
 }
 
-#[cfg(feature = "prism-backend")]
 // ── CimageManifest — compile-target manifest ────────────────────────────
 
-/// Compile-target manifest for standalone audio cimage builds.
-///
-/// A lightweight, modality-typed manifest that pairs with the audio
-/// compilation pipeline ([`crate::ecs::compile::audio::compile_audio_model`])
-/// to produce a serialized cimage artifact on disk.
+/// Compile-target manifest for standalone modality-typed cimage
+/// builds.  Pairs with the audio / vision / text compilation
+/// pipelines to produce a serialized cimage artifact on disk.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CimageManifest {
     pub modality: ManifestModality,
     pub architecture: ArchitectureConfig,
-    pub tensor_table: Vec<TensorEntry>,
+    /// Tensor entries, recorded at compile time.  Stored as
+    /// `serde_json::Value` so this module does not depend on the
+    /// engine-internal `TensorEntry` type; the compile pipeline
+    /// re-attaches the typed entries when the cimage is emitted.
+    pub tensor_table: Vec<serde_json::Value>,
 }
 
-#[cfg(feature = "prism-backend")]
 impl CimageManifest {
     /// Serialize this manifest to a JSON file at `path`.
-    pub fn write_to(&self, path: &Path) -> anyhow::Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| anyhow::anyhow!("failed to serialize cimage manifest: {e}"))?;
-        std::fs::write(path, &json)
-            .map_err(|e| anyhow::anyhow!("failed to write cimage manifest: {e}"))?;
+    pub fn write_to(&self, path: &std::path::Path) -> ConfigResult<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, &json)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_tmp_config(name: &str, content: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "prism_ecs_constitutional_config_test_{}_{}_{}.json",
+            name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    #[test]
+    fn parse_rejects_empty_path() {
+        let err = parse_config("").unwrap_err();
+        assert!(matches!(err, ConfigError::EmptyConfigPath));
+    }
+
+    #[test]
+    fn parse_handles_minimal_flat_config() {
+        let body = r#"{
+            "model_type": "gemma4_unified_text",
+            "hidden_size": 32,
+            "intermediate_size": 64,
+            "num_attention_heads": 2,
+            "num_key_value_heads": 1,
+            "head_dim": 16,
+            "num_hidden_layers": 2,
+            "vocab_size": 128,
+            "rms_norm_eps": 1e-6
+        }"#;
+        let path = write_tmp_config("flat", body);
+        let (arch, _q, manifest) = parse_config(path.to_str().unwrap()).unwrap();
+        assert_eq!(arch.hidden_size, 32);
+        assert_eq!(arch.num_hidden_layers, 2);
+        // Empty layer_types => defaults to all sliding.
+        assert_eq!(arch.layer_types.len(), 2);
+        assert!(matches!(
+            arch.layer_types[0],
+            AttentionKind::SlidingAttention
+        ));
+        // The parser has determined this is a text model, so the
+        // manifest flags `has_text_config = true` (matches the
+        // engine-side invariant).
+        assert!(manifest.has_text_config);
+        // Cleanup best-effort.
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn parse_rejects_layer_count_mismatch() {
+        let body = r#"{
+            "text_config": {
+                "hidden_size": 32,
+                "intermediate_size": 64,
+                "num_attention_heads": 2,
+                "num_key_value_heads": 1,
+                "head_dim": 16,
+                "num_hidden_layers": 2,
+                "vocab_size": 128,
+                "rms_norm_eps": 1e-6,
+                "layer_types": ["full_attention"]
+            }
+        }"#;
+        let path = write_tmp_config("mismatch", body);
+        let err = parse_config(path.to_str().unwrap()).unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::LayerTypeCountMismatch { .. }
+        ));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn cimage_manifest_round_trip() {
+        let m = CimageManifest {
+            modality: ManifestModality::Text,
+            architecture: ArchitectureConfig::Text(TextArchitecture::default()),
+            tensor_table: vec![],
+        };
+        let j = serde_json::to_string(&m).unwrap();
+        let back: CimageManifest = serde_json::from_str(&j).unwrap();
+        assert_eq!(back.modality, ManifestModality::Text);
     }
 }

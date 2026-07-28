@@ -8,7 +8,7 @@
 //! backpressure propagates all the way to the source reader, limiting the
 //! number of buffered payloads.
 
-use crate::ecs::config::{CompilationPlan, PlannedSegment, PlannedTensor, TensorDisposition};
+use prism_ecs_constitutional::config::{CompilationPlan, PlannedSegment, PlannedTensor, TensorDisposition};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;

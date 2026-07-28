@@ -346,7 +346,7 @@ pub fn build_and_compile_with_opset(
 ///
 /// This is the naming convention used internally by [`compile_mlpackage`] when
 /// writing compiled output to `output_dir / {island_id}.modelc / …`.  Callers
-/// that populate [`AneFusedIsland::modelc_relpath`][crate::ecs::config::AneFusedIsland]
+/// that populate [`AneFusedIsland::modelc_relpath`][prism_ecs_constitutional::config::AneFusedIsland]
 /// SHOULD use this function so the path matches the compile output location.
 pub fn modelc_relpath_for_island_id(island_id: &str) -> String {
     format!("{}.modelc", island_id)

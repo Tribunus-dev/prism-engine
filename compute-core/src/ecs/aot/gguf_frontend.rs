@@ -113,7 +113,7 @@ impl ModelFrontend for GgufFrontend {
 #[cfg(feature = "prism-backend")]
 fn build_model_configuration(
     metadata: &[(String, String)],
-    arch: &crate::ecs::config::TextArchitecture,
+    arch: &prism_ecs_constitutional::config::TextArchitecture,
 ) -> ModelConfiguration {
     let arch_prefix = &arch.model_type;
 

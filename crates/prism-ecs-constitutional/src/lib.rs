@@ -10,6 +10,7 @@ pub mod artifact;
 pub mod canonical;
 pub mod command;
 pub mod compilation;
+pub mod config;
 pub mod device;
 pub mod distributed;
 pub mod driver;

@@ -12,7 +12,7 @@ pub type NodeId = String;
 pub type BackendTarget = String;
 pub type OpId = String;
 use prism_ecs_compile::compilation::phase_ir::CompilePhaseDescriptor;
-use crate::ecs::config::ModelExecutionPlan;
+use prism_ecs_constitutional::config::ModelExecutionPlan;
 
 impl Component for CompilePhaseDescriptor {}
 impl Component for ModelExecutionPlan {}

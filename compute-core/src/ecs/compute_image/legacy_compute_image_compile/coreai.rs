@@ -630,15 +630,15 @@ pub fn validate_ane_program(program: &mil_spec::Program) -> Result<(), String> {
 
 /// Compile all ANE fused islands with zero-filled weight placeholders.
 ///
-/// Iterates over [`crate::ecs::config::AneFusedIsland`] entries in the execution
+/// Iterates over [`prism_ecs_constitutional::config::AneFusedIsland`] entries in the execution
 /// plan and compiles each as a Core ML subgraph. The ANE model is stateless
 /// and reads weights from the shared ternary-quantized .cimage at runtime;
 /// the MIL programs use zero-filled placeholders for type-checking only.
 /// Each island's `.mlmodelc` is written to
 /// `output_dir / island.modelc_relpath`.
 pub fn compile_ane_islands(
-    execution_plan: &crate::ecs::config::ModelExecutionPlan,
-    arch: &crate::ecs::config::TextArchitecture,
+    execution_plan: &prism_ecs_constitutional::config::ModelExecutionPlan,
+    arch: &prism_ecs_constitutional::config::TextArchitecture,
     output_dir: &std::path::Path,
     stateless: bool,
 ) -> Result<(), String> {

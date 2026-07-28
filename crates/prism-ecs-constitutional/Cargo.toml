@@ -31,4 +31,10 @@ strum = { workspace = true }
 parking_lot = { workspace = true }
 sha2 = { version = "0.10", features = ["asm"] }
 bincode = { version = "1.3" }
+# Configuration surface (`config::parser` and `config::network`):
+# - `sha2` is the SHA-256 hash used to derive the config provenance
+#   digest on the `ModelManifest`.
+# - `toml` parses the optional `config.toml` server config file.
+# Both are pure-Rust crates; they add no engine-internal coupling.
+toml = "0.8"
 prism-ecs-quantization = { path = "../prism-ecs-quantization", optional = true }

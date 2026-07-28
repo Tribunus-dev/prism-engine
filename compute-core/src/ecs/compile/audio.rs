@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use crate::ecs::compute_image::manifest::TensorEntry;
-use crate::ecs::config::parser::{CimageManifest, ManifestModality};
+use prism_ecs_constitutional::config::parser::{CimageManifest, ManifestModality};
 
 /// Compile an audio model checkpoint into a standalone cimage artifact.
 ///
@@ -34,10 +34,21 @@ pub fn compile_audio_model(
     }; // Reserved: propagate into CimageManifest metadata
 
     // 3. Construct manifest
+    // The constitutional `CimageManifest` carries its `tensor_table`
+    // as `Vec<serde_json::Value>` (platform-neutral, no engine-coupling).
+    // Convert the engine-internal `TensorEntry` list via the standard
+    // serde pipeline; `serde_json::to_value` on a `Serialize` type
+    // produces a faithful JSON view of every field.
+    let tensor_table: Vec<serde_json::Value> = tensor_table
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("failed to convert tensor table to JSON: {e}"))?;
+
     let manifest = CimageManifest {
         modality: ManifestModality::Audio,
-        architecture: crate::ecs::config::ArchitectureConfig::Audio(
-            crate::ecs::config::hardware::AudioArchitecture {
+        architecture: prism_ecs_constitutional::config::ArchitectureConfig::Audio(
+            prism_ecs_constitutional::config::hardware::AudioArchitecture {
                 hidden_size: 384,
                 num_attention_heads: 6,
                 num_hidden_layers: 4,

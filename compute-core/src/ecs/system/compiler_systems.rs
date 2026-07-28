@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use prism_ecs_kernel::backend::routing::{BackendId, EvidenceDigest, OperationFamily, OperationId};
 use crate::ecs::component::compilation::{GraphNode, GraphNodeKind, NodeId};
-use crate::ecs::config::ModelExecutionPlan;
+use prism_ecs_constitutional::config::ModelExecutionPlan;
 use prism_ecs_compile::pipeline::backend_assessment::{
     BackendAssessmentPass, GraphOperation, ModelOperationGraph,
 };
@@ -45,7 +45,7 @@ impl CompilerSystem for CompileScheduleSystem {
             };
 
             let first = plan.layers.first();
-            let arch = crate::ecs::config::TextArchitecture {
+            let arch = prism_ecs_constitutional::config::TextArchitecture {
                 hidden_size: plan.hidden_size as u32,
                 intermediate_size: (plan.hidden_size * 4) as u32,
                 vocab_size: plan.vocab_size as u32,

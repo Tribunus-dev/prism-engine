@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use crate::ecs::compute_image::TensorEntry;
-use crate::ecs::config::hardware::VisionArchitecture;
-use crate::ecs::config::parser::{ArchitectureConfig, CimageManifest, ManifestModality};
+use prism_ecs_constitutional::config::hardware::VisionArchitecture;
+use prism_ecs_constitutional::config::parser::{ArchitectureConfig, CimageManifest, ManifestModality};
 
 /// Compile a vision model checkpoint into a standalone cimage artifact.
 ///
@@ -35,6 +35,16 @@ pub fn compile_vision_model(
     };
 
     // 3. Construct and write the manifest
+    // The constitutional `CimageManifest` carries its `tensor_table`
+    // as `Vec<serde_json::Value>` (platform-neutral, no engine-coupling).
+    // Convert the engine-internal `TensorEntry` list via the standard
+    // serde pipeline.
+    let tensor_table: Vec<serde_json::Value> = tensor_table
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("failed to convert tensor table to JSON: {e}"))?;
+
     let manifest = CimageManifest {
         modality: ManifestModality::Vision,
         architecture: ArchitectureConfig::Vision(VisionArchitecture {

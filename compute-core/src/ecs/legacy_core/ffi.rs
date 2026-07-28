@@ -44,7 +44,7 @@ use crate::ecs::compute_image::legacy_compute_image_compile::source::load_source
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-use crate::ecs::config::CompileQuantMode;
+use prism_ecs_constitutional::config::CompileQuantMode;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
@@ -406,7 +406,7 @@ pub struct PrismServerConfig {
 /// Fill a PrismServerConfig struct with the current configuration.
 /// Loads from default config file path + env vars.
 pub fn prism_load_config(config: *mut PrismServerConfig) {
-    use crate::ecs::config::ServerConfig;
+    use prism_ecs_constitutional::config::ServerConfig;
     let cfg = ServerConfig::load();
 
     unsafe {

@@ -18,7 +18,7 @@
 //! | layers | 48 | 48 |
 //! | vocab_size | 256000 | 256000 |
 
-use crate::ecs::config::ModelExecutionPlan;
+use prism_ecs_constitutional::config::ModelExecutionPlan;
 use serde::{Deserialize, Serialize};
 
 // ── Operation kind ─────────────────────────────────────────────────────────
@@ -460,7 +460,7 @@ impl OperationCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::config::{EpiloguePlan, LayerPlan, ModelExecutionPlan, ProloguePlan};
+    use prism_ecs_constitutional::config::{EpiloguePlan, LayerPlan, ModelExecutionPlan, ProloguePlan};
 
     /// Build a minimal Gemma-4-like plan with 2 layers (one sliding, one
     /// full) so we can verify record shapes without loading 48 layers of

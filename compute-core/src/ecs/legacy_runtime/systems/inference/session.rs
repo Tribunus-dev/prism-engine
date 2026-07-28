@@ -21,7 +21,7 @@ use crate::ecs::cache::prefix_cache::{check_shared_prefix, insert_shared_prefix}
 use prism_ecs_compile::compute_image_core::phase_dag::EmittedPhaseGraph;
 use prism_ecs_compile::compute_image_core::phase_dag::PhaseCompletionStatus;
 use prism_ecs_compile::compute_image_core::manifest::CompiledImageReader;
-use crate::ecs::config::ModelExecutionPlan;
+use prism_ecs_constitutional::config::ModelExecutionPlan;
 use crate::ecs::kv_cache::{KvCache, PageMigrationService};
 use crate::ecs::legacy_runtime::executable_session::RuntimeBackends;
 use prism_ecs_runtime::scheduling::evidence::scheduling_receipts::PhaseReceipt;
@@ -2671,8 +2671,8 @@ mod tests {
     use super::*;
     use crate::profiled_model::build_rope_tables;
 
-    fn test_architecture() -> crate::ecs::config::TextArchitecture {
-        crate::ecs::config::TextArchitecture {
+    fn test_architecture() -> prism_ecs_constitutional::config::TextArchitecture {
+        prism_ecs_constitutional::config::TextArchitecture {
             hidden_size: 3840,
             intermediate_size: 15360,
             num_attention_heads: 32,
@@ -2690,15 +2690,15 @@ mod tests {
             final_logit_softcapping: None,
             hidden_size_per_layer_input: 3840,
             layer_types: vec![
-                crate::ecs::config::AttentionKind::SlidingAttention,
-                crate::ecs::config::AttentionKind::FullAttention,
+                prism_ecs_constitutional::config::AttentionKind::SlidingAttention,
+                prism_ecs_constitutional::config::AttentionKind::FullAttention,
             ],
-            rope_local: crate::ecs::config::RopeSpec {
+            rope_local: prism_ecs_constitutional::config::RopeSpec {
                 theta: 10_000.0,
                 rope_type: "default".to_string(),
                 partial_rotary_factor: None,
             },
-            rope_global: Some(crate::ecs::config::RopeSpec {
+            rope_global: Some(prism_ecs_constitutional::config::RopeSpec {
                 theta: 1_000_000.0,
                 rope_type: "default".to_string(),
                 partial_rotary_factor: None,

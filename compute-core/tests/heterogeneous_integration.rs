@@ -19,8 +19,8 @@ use tribunus_compute_core::backend::MlxBackend;
 use tribunus_compute_core::backend::TensorBackend;
 use tribunus_compute_core::compiler::ane::fusion::build_fused_ane_regions;
 use tribunus_compute_core::compiler::scheduled::{RegionDependency, RegionId, ScheduledRegion};
-use tribunus_compute_core::config::operation_route::OperationRoute;
-use tribunus_compute_core::config::ModelExecutionPlan;
+use prism_ecs_constitutional::config::operation_route::OperationRoute;
+use prism_ecs_constitutional::config::ModelExecutionPlan;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -434,8 +434,8 @@ fn heterogeneous_compile_pipeline() {
 
 #[test]
 fn fusion_plan_reduces_mlmodel_calls() {
-    fn minimal_layer(i: u32, route: OperationRoute) -> tribunus_compute_core::config::LayerPlan {
-        use tribunus_compute_core::config::LayerPlan;
+    fn minimal_layer(i: u32, route: OperationRoute) -> prism_ecs_constitutional::config::LayerPlan {
+        use prism_ecs_constitutional::config::LayerPlan;
         LayerPlan {
             layer_index: i,
             route,

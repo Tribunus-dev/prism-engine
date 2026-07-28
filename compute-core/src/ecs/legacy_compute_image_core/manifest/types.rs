@@ -107,7 +107,7 @@ pub struct Manifest {
     pub runtime_abi: String,
     /// Target hardware this image was compiled for (None = auto-detect at compile time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hardware_target: Option<crate::ecs::config::HardwareTarget>,
+    pub hardware_target: Option<prism_ecs_constitutional::config::HardwareTarget>,
     /// Compilation readiness verdict after artifact audit.
     #[serde(default)]
     pub readiness: Option<CompileReadiness>,
@@ -118,13 +118,13 @@ pub struct Manifest {
     #[serde(default)]
     pub compile_host: String,
     pub source: SourceIdentity,
-    pub architecture: crate::ecs::config::TextArchitecture,
+    pub architecture: prism_ecs_constitutional::config::TextArchitecture,
     /// Vision encoder configuration (vision_config from model config.json).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vision_config: Option<crate::ecs::config::VisionArchitecture>,
+    pub vision_config: Option<prism_ecs_constitutional::config::VisionArchitecture>,
     /// Audio encoder configuration (Gemma 4 Unified audio_config).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audio_config: Option<crate::ecs::config::AudioArchitecture>,
+    pub audio_config: Option<prism_ecs_constitutional::config::AudioArchitecture>,
     pub segments: Vec<Segment>,
     pub tensor_table: Vec<TensorEntry>,
     pub alias_table: Vec<AliasEntry>,
@@ -155,7 +155,7 @@ pub struct Manifest {
     pub metal_kernel_artifacts: Vec<MetalKernelArtifact>,
     /// Execution plan emitted by the compiler (prologue, layers, epilogue).
     #[serde(default)]
-    pub execution_plan: crate::ecs::config::ModelExecutionPlan,
+    pub execution_plan: prism_ecs_constitutional::config::ModelExecutionPlan,
     /// Compiler-emitted phase DAG for PhaseEngine dispatch (optional).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase_dag: Option<crate::ecs::legacy_compute_image_core::phase_dag::EmittedPhaseGraph>,
@@ -1013,7 +1013,7 @@ pub(crate) fn compute_manifest_hash(manifest: &Manifest) -> String {
         compiler_version: &'a str,
         runtime_abi: &'a str,
         source: &'a SourceIdentity,
-        architecture: &'a crate::ecs::config::TextArchitecture,
+        architecture: &'a prism_ecs_constitutional::config::TextArchitecture,
         segments: &'a [Segment],
         tensor_table: &'a [TensorEntry],
         alias_table: &'a [AliasEntry],

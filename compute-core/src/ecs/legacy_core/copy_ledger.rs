@@ -175,7 +175,7 @@ impl CopyLedger {
 /// - U32 packed weights are at 16-byte alignment, row-major contiguous.
 /// - F32 scales / biases are row-major contiguous.
 /// - Every weight segment should be zero-copy (MappedImage ↔ MLX).
-pub fn audit_mapped_weight_layout(segments: &[crate::ecs::config::PlannedSegment]) -> CopyLedger {
+pub fn audit_mapped_weight_layout(segments: &[prism_ecs_constitutional::config::PlannedSegment]) -> CopyLedger {
     let mut ledger = CopyLedger::default();
 
     for seg in segments {
@@ -412,7 +412,7 @@ pub fn mlx_contiguous_copy_warning(ledger: &CopyLedger) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::config::PlannedSegment;
+    use prism_ecs_constitutional::config::PlannedSegment;
 
     #[test]
     fn test_copy_entry_builder() {

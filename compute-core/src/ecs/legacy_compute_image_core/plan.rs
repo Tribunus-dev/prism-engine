@@ -7,7 +7,7 @@ use super::compile::{
 use super::manifest::{
     mlx_active_memory_bytes, CompiledImage, ImageBuilder, SegmentKind, StageProfile,
 };
-use crate::ecs::config::CompileQuantMode;
+use prism_ecs_constitutional::config::CompileQuantMode;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -15,8 +15,8 @@ use std::time::Instant;
 pub fn plan(
     source_dir: &Path,
     skip_validation: bool,
-) -> crate::Result<(crate::ecs::config::CompilationPlan, LoadedSource)> {
-    use crate::ecs::config::{CompilationPlan, PlannedSegment, PlannedTensor};
+) -> crate::Result<(prism_ecs_constitutional::config::CompilationPlan, LoadedSource)> {
+    use prism_ecs_constitutional::config::{CompilationPlan, PlannedSegment, PlannedTensor};
     let loaded = load_source(source_dir, skip_validation)?;
     let shard_hashes: Vec<String> = loaded
         .shard_hashes
@@ -122,10 +122,10 @@ pub fn plan(
 }
 
 fn classify_disposition(
-    binding: &crate::ecs::config::TensorBinding,
-    _namespace: &crate::ecs::config::NamespaceBinding,
-) -> crate::ecs::config::TensorDisposition {
-    use crate::ecs::config::TensorDisposition;
+    binding: &prism_ecs_constitutional::config::TensorBinding,
+    _namespace: &prism_ecs_constitutional::config::NamespaceBinding,
+) -> prism_ecs_constitutional::config::TensorDisposition {
+    use prism_ecs_constitutional::config::TensorDisposition;
 
     // Quantized weight payloads get relocated unchanged.
     if binding.name.ends_with(".weight")
@@ -158,9 +158,9 @@ fn source_info(
 /// then draft layer segments, then target layer segments + target persistent.
 #[allow(dead_code)]
 fn reorder_for_speculative(
-    target_segments: &mut Vec<crate::ecs::config::PlannedSegment>,
-    draft_segments: &mut Vec<crate::ecs::config::PlannedSegment>,
-    config: &crate::ecs::config::SpeculativeModelConfig,
+    target_segments: &mut Vec<prism_ecs_constitutional::config::PlannedSegment>,
+    draft_segments: &mut Vec<prism_ecs_constitutional::config::PlannedSegment>,
+    config: &prism_ecs_constitutional::config::SpeculativeModelConfig,
 ) {
     let mut reordered = Vec::new();
 
@@ -359,11 +359,11 @@ pub(crate) fn compile_unchecked_speculative(
 
     // === STEP 4: Build execution plan with captured metadata ===
     let mut execution_plan =
-        crate::ecs::config::build_execution_plan(&target_arch, &target_namespace, &emitted_ids);
+        prism_ecs_constitutional::config::build_execution_plan(&target_arch, &target_namespace, &emitted_ids);
     execution_plan.build_ane_fusion_plan();
 
     // Attach speculative config metadata
-    execution_plan.speculative_config = Some(crate::ecs::config::SpeculativeModelConfig {
+    execution_plan.speculative_config = Some(prism_ecs_constitutional::config::SpeculativeModelConfig {
         draft_architecture: draft_arch,
         target_architecture: target_arch,
         shared_embedding,

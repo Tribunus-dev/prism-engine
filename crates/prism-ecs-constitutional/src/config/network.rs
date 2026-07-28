@@ -1,12 +1,15 @@
 //! Server configuration: networking, model loading, caching, speculation, cluster.
 //!
-//! ServerConfig and its section types loaded from config.toml, environment
-//! variables, and CLI arguments (in ascending priority order).
+//! Authority: the canonical [`ServerConfig`] and its section types
+//! loaded from `config.toml`, environment variables, and CLI arguments
+//! (in ascending priority order). Also the per-backend fusion plan
+//! generator. Pure data + pure functions; no engine-internal types
+//! referenced.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use super::hardware::{FusedOperation, ModelExecutionPlan};
+use super::model_execution_plan::{FusedOperation, ModelExecutionPlan};
 
 /// Unified server configuration loaded from config.toml, environment
 /// variables, and CLI arguments (in ascending priority order).
@@ -141,8 +144,8 @@ impl Default for ServerConfig {
 
 impl ServerConfig {
     /// Load from config file, then environment variables.
-    /// Config file path: $HOME/.tribunus/config.toml
-    /// (override with TRIBUNUS_CONFIG_PATH env var).
+    /// Config file path: `$HOME/.tribunus/config.toml`
+    /// (override with `TRIBUNUS_CONFIG_PATH` env var).
     pub fn load() -> Self {
         let mut config = Self::default();
         let config_path = std::env::var("TRIBUNUS_CONFIG_PATH").unwrap_or_else(|_| {
@@ -212,7 +215,7 @@ impl ServerConfig {
         }
         if let Ok(v) = std::env::var("TRIBUNUS_KV_CACHE_TIERS") {
             if let Ok(n) = v.parse::<u32>() {
-                if n >= 2 && n <= 4 {
+                if (2..=4).contains(&n) {
                     self.cache.kv_cache_tiers = n;
                 }
             }
@@ -259,7 +262,7 @@ impl ServerConfig {
     }
 
     /// Override fields from CLI arguments.
-    /// Must be called after load() so CLI args take highest priority.
+    /// Must be called after `load()` so CLI args take highest priority.
     pub fn apply_cli_args(&mut self, args: &[String]) {
         let mut i = 1;
         while i < args.len() {
@@ -337,24 +340,76 @@ impl ServerConfig {
     }
 }
 
-/// Generate per-backend fusion plans.
+/// Generate per-backend fusion plans: for each backend, the map of
+/// `layer_index` → fused operations for that layer.
+///
+/// The result is keyed by `BTreeMap` so it is deterministic across
+/// runs and across hash implementations.
 pub fn generate_backend_plans(
     plan: &ModelExecutionPlan,
     backends: &[&str],
-) -> HashMap<String, std::collections::HashMap<String, Vec<FusedOperation>>> {
-    let mut result = std::collections::HashMap::new();
+) -> BTreeMap<String, BTreeMap<String, Vec<FusedOperation>>> {
+    let mut result: BTreeMap<String, BTreeMap<String, Vec<FusedOperation>>> = BTreeMap::new();
     for backend in backends {
-        let layer_ops: std::collections::HashMap<String, Vec<FusedOperation>> = plan
-            .layers
-            .iter()
-            .map(|layer| {
-                (
-                    layer.layer_index.to_string(),
-                    layer.fused_operations.clone(),
-                )
-            })
-            .collect();
-        result.insert(backend.to_string(), layer_ops);
+        let mut layer_ops: BTreeMap<String, Vec<FusedOperation>> = BTreeMap::new();
+        for layer in &plan.layers {
+            layer_ops.insert(layer.layer_index.to_string(), layer.fused_operations.clone());
+        }
+        result.insert((*backend).to_string(), layer_ops);
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_server_config_has_safe_drift_values() {
+        let c = ServerConfig::default();
+        assert_eq!(c.server.port, 11434);
+        assert_eq!(c.server.max_concurrent, 64);
+        assert!(!c.cluster.exo_enabled);
+    }
+
+    #[test]
+    fn apply_cli_args_overrides_known_flags() {
+        let mut c = ServerConfig::default();
+        let args = vec![
+            "program".to_string(),
+            "--port".to_string(),
+            "9999".to_string(),
+            "--runtime-mode".to_string(),
+            "fast".to_string(),
+            "--exo".to_string(),
+        ];
+        c.apply_cli_args(&args);
+        assert_eq!(c.server.port, 9999);
+        assert_eq!(c.server.runtime_mode, "fast");
+        assert!(c.cluster.exo_enabled);
+    }
+
+    #[test]
+    fn merge_overrides_only_known_fields() {
+        let mut a = ServerConfig::default();
+        let b = ServerConfig {
+            server: ServerConfigSection {
+                port: 9000,
+                ..ServerConfigSection::default()
+            },
+            ..ServerConfig::default()
+        };
+        a.merge(b);
+        assert_eq!(a.server.port, 9000);
+    }
+
+    #[test]
+    fn generate_backend_plans_is_deterministic() {
+        let plan = ModelExecutionPlan::default();
+        let out1 = generate_backend_plans(&plan, &["a", "b"]);
+        let out2 = generate_backend_plans(&plan, &["a", "b"]);
+        let j1 = serde_json::to_string(&out1).unwrap();
+        let j2 = serde_json::to_string(&out2).unwrap();
+        assert_eq!(j1, j2);
+    }
 }

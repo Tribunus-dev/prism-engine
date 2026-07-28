@@ -8,7 +8,7 @@
 //! within the worker's address space; only metadata, token IDs, and control
 //! messages flow over this channel.
 
-use crate::ecs::config::GenerationRegime;
+use prism_ecs_constitutional::config::GenerationRegime;
 use serde::{Deserialize, Serialize};
 
 // ────────────────────────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@ use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
 };
 use crate::ecs::legacy_compute_image_core::phase_dag::EmittedPhaseGraph;
 use crate::ecs::legacy_compute_image_core::{CompiledImageReader, CopyClassification, TensorEntry};
-use crate::ecs::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
+use prism_ecs_constitutional::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
 use crate::ecs::coreai_bridge::CoreAiModel;
 use crate::ecs::external_array::BorrowedStorage;
 use crate::ecs::external_array::{new_external_array, ExternalStorage};
