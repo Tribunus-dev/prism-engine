@@ -4,7 +4,7 @@
 use std::time::Instant;
 
 use super::dataset::F32MatmulDataset;
-use crate::ecs::backend::routing::{BackendArtifactId, EvidenceDigest, BACKEND_MLX};
+use prism_ecs_kernel::backend::routing::{BackendArtifactId, EvidenceDigest, BACKEND_MLX};
 use crate::ecs::backend::{MatmulOp, MlxBackend, TensorBackend};
 use crate::ecs::compiler::LoweringReceipt;
 

@@ -82,7 +82,7 @@ fn try_qmatmul_candle(
     b: &Array,
     desc: &QuantizedProjectionDescriptor,
 ) -> MlxResult<Array> {
-    use crate::ecs::backend::TensorBackend;
+    use prism_ecs_kernel::backend::TensorBackend;
     use crate::ecs::candle_cpu_backend::CandleCpuBackend;
     use candle_core::{Device, Tensor};
 
@@ -135,11 +135,11 @@ fn try_qmatmul_candle(
         m: desc.logical_in_features,
         n: desc.logical_out_features,
         k: desc.logical_in_features,
-        input_dtype: crate::ecs::backend::DType::F32,
-        weight_dtype: crate::ecs::backend::DType::U32,
-        scale_dtype: crate::ecs::backend::DType::F32,
-        bias_dtype: crate::ecs::backend::DType::F32,
-        output_dtype: crate::ecs::backend::DType::F32,
+        input_dtype: prism_ecs_kernel::backend::DType::F32,
+        weight_dtype: prism_ecs_kernel::backend::DType::U32,
+        scale_dtype: prism_ecs_kernel::backend::DType::F32,
+        bias_dtype: prism_ecs_kernel::backend::DType::F32,
+        output_dtype: prism_ecs_kernel::backend::DType::F32,
         group_size: desc.group_size,
         bits: desc.bits,
         transpose: true,
@@ -465,7 +465,7 @@ fn try_epilogue_candle(
     output_biases: &Array,
     desc: &QuantizedProjectionDescriptor,
 ) -> MlxResult<Array> {
-    use crate::ecs::backend::TensorBackend;
+    use prism_ecs_kernel::backend::TensorBackend;
     use crate::ecs::candle_cpu_backend::CandleCpuBackend;
     use candle_core::{Device, Tensor};
 
@@ -518,11 +518,11 @@ fn try_epilogue_candle(
         m: desc.logical_in_features,
         n: desc.logical_out_features,
         k: desc.logical_in_features,
-        input_dtype: crate::ecs::backend::DType::F32,
-        weight_dtype: crate::ecs::backend::DType::U32,
-        scale_dtype: crate::ecs::backend::DType::F32,
-        bias_dtype: crate::ecs::backend::DType::F32,
-        output_dtype: crate::ecs::backend::DType::F32,
+        input_dtype: prism_ecs_kernel::backend::DType::F32,
+        weight_dtype: prism_ecs_kernel::backend::DType::U32,
+        scale_dtype: prism_ecs_kernel::backend::DType::F32,
+        bias_dtype: prism_ecs_kernel::backend::DType::F32,
+        output_dtype: prism_ecs_kernel::backend::DType::F32,
         group_size: desc.group_size,
         bits: desc.bits,
         transpose: true,

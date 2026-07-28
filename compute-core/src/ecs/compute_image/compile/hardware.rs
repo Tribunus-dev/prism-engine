@@ -17,7 +17,7 @@ use crate::ecs::compute_image::hw_bench_suite::{
 };
 
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-use crate::ecs::backend::unified_arena::{ArenaView, MemoryBacking, UnifiedExecutionArena};
+use prism_ecs_kernel::backend::unified_arena::{ArenaView, MemoryBacking, UnifiedExecutionArena};
 
 /// Benchmark Accelerate RMSNorm with real NEON/vDSP execution.
 ///

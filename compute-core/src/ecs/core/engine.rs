@@ -30,14 +30,14 @@ use std::path::PathBuf;
 use crate::ecs::backend::accelerate::AccelerateBackend;
 use crate::ecs::backend::heterogeneous_executor::BackendInstance;
 #[cfg(feature = "mlx-backend")]
-use crate::ecs::backend::routing::BACKEND_MLX;
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::BACKEND_MLX;
+use prism_ecs_kernel::backend::routing::{
     BackendExecutionReceipt, BackendId, ComputeRouteProfile, OperationDescriptor, OperationFamily,
     BACKEND_ACCELERATE,
 };
 #[cfg(feature = "mlx-backend")]
 use crate::ecs::backend::MlxBackend;
-use crate::ecs::backend::TensorHandle;
+use prism_ecs_kernel::backend::TensorHandle;
 use crate::ecs::compute_image::compile::execution_graph::{
     ExecutionGraphDescriptor, NodeKind, EXECUTION_GRAPH_MAGIC,
 };
@@ -549,17 +549,17 @@ impl ComputeEngine {
         //    deterministic backend routing.
         // TODO: implement full HybridProfile -> ComputeRouteProfile conversion
         let route_profile = ComputeRouteProfile {
-            profile_id: crate::ecs::backend::routing::RouteProfileId(0),
-            logical_image_hash: crate::ecs::backend::routing::EvidenceDigest(
+            profile_id: prism_ecs_kernel::backend::routing::RouteProfileId(0),
+            logical_image_hash: prism_ecs_kernel::backend::routing::EvidenceDigest(
                 profile.root_model_hash.clone(),
             ),
-            artifact_root_hash: crate::ecs::backend::routing::EvidenceDigest(
+            artifact_root_hash: prism_ecs_kernel::backend::routing::EvidenceDigest(
                 profile.compute_image_hash.clone(),
             ),
-            machine_profile: crate::ecs::backend::routing::MachineProfileId(0),
+            machine_profile: prism_ecs_kernel::backend::routing::MachineProfileId(0),
             operations: Vec::new(),
             transfers: Vec::new(),
-            backend_artifacts: crate::ecs::backend::routing::BackendArtifactManifest {
+            backend_artifacts: prism_ecs_kernel::backend::routing::BackendArtifactManifest {
                 mlx: Vec::new(),
                 accelerate: Vec::new(),
                 coreai: Vec::new(),

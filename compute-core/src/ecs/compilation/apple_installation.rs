@@ -11,7 +11,7 @@ use crate::ecs::backend::metal_consumer::MetalConsumer;
 use crate::ecs::backend::metal_iosurface::{
     MetalExecutable, MetalResourceFormat, MetalResourceKind, MetalResourceView,
 };
-use crate::ecs::backend::shared_event::{
+use prism_ecs_kernel::backend::shared_event::{
     SharedEventAccess, SharedEventBinding, SharedEventContract,
 };
 use crate::ecs::compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
@@ -725,7 +725,7 @@ pub fn warmup_with_arena(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::placement::ExecutionLane;
+    use prism_ecs_kernel::backend::placement::ExecutionLane;
     use crate::ecs::compute_image::apple_cimage_manifest::{
         AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
         AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, CoreAiArtifactManifest,

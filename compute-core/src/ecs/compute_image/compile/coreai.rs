@@ -97,7 +97,7 @@ const TINY_OPS: &[&str] = &["residual_add", "rms_norm", "silu_mul"];
 ///   [`TINY_OPS`] go to Accelerate; everything else goes to Core ML).
 ///
 /// Both lane assignments execute concurrently over the same
-/// [`UnifiedExecutionArena`](crate::ecs::backend::unified_arena::UnifiedExecutionArena).
+/// [`UnifiedExecutionArena`](prism_ecs_kernel::backend::unified_arena::UnifiedExecutionArena).
 pub fn decompose_subgraph(
     name: &str,
     ops: &[&str],

@@ -3,8 +3,8 @@
 
 use std::time::Instant;
 
-use crate::ecs::backend::routing::{EvidenceDigest, OperationId, TensorId};
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::routing::{EvidenceDigest, OperationId, TensorId};
+use prism_ecs_kernel::backend::DType;
 use crate::ecs::compiler::pass::PassIdentity;
 use crate::ecs::compiler::scheduled::ScheduledRegion;
 
@@ -250,7 +250,7 @@ fn compute_receipt_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::routing::BackendId;
+    use prism_ecs_kernel::backend::routing::BackendId;
     use crate::ecs::compiler::scheduled::{RegionId, ScheduledRegion};
 
     fn empty_region() -> ScheduledRegion {

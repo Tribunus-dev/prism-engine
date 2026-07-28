@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, EvidenceDigest, OperationFamily, OperationId, BACKEND_ANE,
 };
 use crate::ecs::compiler::pass::{PassIdentity, TransformPass, TransformReceipt};
@@ -362,8 +362,8 @@ pub fn build_fused_ane_regions(regions: &[ScheduledRegion]) -> Vec<AneFusedArtif
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::routing::BACKEND_ANE;
-    use crate::ecs::backend::routing::{BackendId, TensorId};
+    use prism_ecs_kernel::backend::routing::BACKEND_ANE;
+    use prism_ecs_kernel::backend::routing::{BackendId, TensorId};
     use crate::ecs::compiler::scheduled::{DependencyKind, RegionDependency, ScheduledRegion};
 
     fn make_region(

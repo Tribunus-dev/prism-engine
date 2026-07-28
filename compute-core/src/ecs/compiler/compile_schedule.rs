@@ -6,11 +6,11 @@
 //! shapes) and the runtime execution infrastructure that allocates IOSurface
 //! slices, assigns backends, and sequences evaluation.
 
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, EvidenceDigest, OperationId, PhysicalLayout, TensorId, TensorShape,
     BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX,
 };
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::DType;
 use crate::ecs::compiler::scheduled::{
     BufferReuse, DependencyKind, MemoryPlan, RegionDependency, RegionId, ScheduledModule,
     ScheduledRegion, SealedEvaluationBoundary, StorageClass, TransferPlan,

@@ -5,11 +5,11 @@
 //!    IOSurface contract, weight plan, compile plan.
 //! 2. Differential legality — mutate one property, expect one rule violation.
 
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, EvidenceDigest, LogicalShape, OperationFamily, OperationId, Phase, PhysicalLayout,
     TensorId, TensorShape,
 };
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::DType;
 use crate::ecs::compiler::ane::artifacts::{
     AneBlobEntry, AneCompilePlan, AneIoContract, AneIoSurfaceSpec, AneProgramArtifactIdentity,
     AneProgramGeneration, AneWeightBlobPlan,

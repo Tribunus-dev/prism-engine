@@ -9,13 +9,13 @@
 
 use std::collections::HashMap;
 
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, EvidenceDigest, OperationFamily, OperationId, PhysicalLayout, TensorId, TensorShape,
 };
 
 #[cfg(test)]
-use crate::ecs::backend::routing::BACKEND_ACCELERATE;
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::routing::BACKEND_ACCELERATE;
+use prism_ecs_kernel::backend::DType;
 use crate::ecs::config::FusedOperation;
 
 // ── Physical tensor ───────────────────────────────────────────────────────

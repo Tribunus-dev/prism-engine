@@ -24,7 +24,7 @@ pub mod semantic;
 #[cfg(test)]
 mod pipeline_tests;
 
-use crate::ecs::backend::routing::{BackendArtifactId, BackendId, EvidenceDigest, OperationId};
+use prism_ecs_kernel::backend::routing::{BackendArtifactId, BackendId, EvidenceDigest, OperationId};
 
 /// Receipt produced when lowering a scheduled region to a backend artifact.
 #[derive(Debug, Clone)]

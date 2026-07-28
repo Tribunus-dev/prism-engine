@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, ConversionKind, EvaluationGroupId, EvaluationPolicy, EvidenceDigest,
     ExecutionBoundaryPlan, OperationFamily, OperationId, PhysicalLayout,
     SealedExecutionBoundaryPlan, SynchronizationPolicy, TensorId, TensorTransferPlan, BACKEND_MLX,
@@ -332,7 +332,7 @@ fn build_groups(assignments: &[(OperationId, BackendId)]) -> Vec<BackendBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::routing::{SynchronizationPolicy, BACKEND_ACCELERATE, BACKEND_MLX};
+    use prism_ecs_kernel::backend::routing::{SynchronizationPolicy, BACKEND_ACCELERATE, BACKEND_MLX};
 
     // Helper to create a test operation
     fn make_op(

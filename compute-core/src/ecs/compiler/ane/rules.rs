@@ -1,8 +1,8 @@
 //! Concrete ANE legality rules derived from Orion's `pass_ane_validate.c`
 //! and the Apple MIL specification.
 
-use crate::ecs::backend::routing::{EvidenceDigest, OperationFamily};
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::routing::{EvidenceDigest, OperationFamily};
+use prism_ecs_kernel::backend::DType;
 use crate::ecs::compiler::pass::PassIdentity;
 use crate::ecs::compiler::scheduled::{ScheduledRegion, StorageClass};
 

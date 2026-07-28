@@ -196,7 +196,7 @@ pub struct AneInferenceStep {
 pub fn execute_ane_step(
     step: &AneInferenceStep,
     program_cache: &AneProgramCache,
-) -> Result<crate::ecs::backend::routing::BoundaryExecutionReceipt, String> {
+) -> Result<prism_ecs_kernel::backend::routing::BoundaryExecutionReceipt, String> {
     let AneInferenceStep {
         mil_text,
         inputs,
@@ -214,10 +214,10 @@ pub fn execute_ane_step(
 
     program.evaluate(&input_ptrs, &output_ptrs)?;
 
-    Ok(crate::ecs::backend::routing::BoundaryExecutionReceipt {
-        group_id: crate::ecs::backend::routing::EvaluationGroupId(0),
-        planned_policy: crate::ecs::backend::routing::EvaluationPolicy::BackendLazy,
-        backend: crate::ecs::backend::routing::BACKEND_ANE,
+    Ok(prism_ecs_kernel::backend::routing::BoundaryExecutionReceipt {
+        group_id: prism_ecs_kernel::backend::routing::EvaluationGroupId(0),
+        planned_policy: prism_ecs_kernel::backend::routing::EvaluationPolicy::BackendLazy,
+        backend: prism_ecs_kernel::backend::routing::BACKEND_ANE,
         operation_count: 1,
         planned_materialized_outputs: outputs.len(),
         actual_eval_calls: 1,
@@ -229,7 +229,7 @@ pub fn execute_ane_step(
         temporary_bytes: 0,
         released_tensor_count: 0,
         unaccounted_ns: 0,
-        policy_support: crate::ecs::backend::routing::EvaluationPolicySupport::Native,
+        policy_support: prism_ecs_kernel::backend::routing::EvaluationPolicySupport::Native,
     })
 }
 
@@ -248,7 +248,7 @@ pub fn execute_batched_ane_step(
     step: &AneInferenceStep,
     program_cache: &AneProgramCache,
     batch_index: u32,
-) -> Result<crate::ecs::backend::routing::BoundaryExecutionReceipt, String> {
+) -> Result<prism_ecs_kernel::backend::routing::BoundaryExecutionReceipt, String> {
     // The MIL program already encodes the batch dimension in its input
     // shapes — `[batch_size, in_features]`. The ANE processes all items
     // at once; batch_index is metadata for the caller to identify which

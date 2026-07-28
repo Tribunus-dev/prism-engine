@@ -4,7 +4,7 @@
 //! with a [`TransformReceipt`]. This makes every compiler decision
 //! reproducible and scientifically attributable.
 
-use crate::ecs::backend::routing::EvidenceDigest;
+use prism_ecs_kernel::backend::routing::EvidenceDigest;
 
 // ── Pass identity ──────────────────────────────────────────────────────────
 

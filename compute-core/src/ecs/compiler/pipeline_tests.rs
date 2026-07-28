@@ -6,14 +6,14 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::ecs::backend::graph::{
+    use prism_ecs_kernel::backend::graph::{
         BackendLegalityReceipt, GraphBackend, RegionExecutionReceipt,
     };
-    use crate::ecs::backend::routing::{
+    use prism_ecs_kernel::backend::routing::{
         BackendId, CompiledRegionHandle, EvidenceDigest, GraphRegion, LogicalShape,
         OperationFamily, OperationId, Phase, TensorId,
     };
-    use crate::ecs::backend::DType;
+    use prism_ecs_kernel::backend::DType;
     use crate::ecs::compiler::scheduled::{RegionId, ScheduledModule, ScheduledRegion};
     use crate::ecs::compiler::semantic::{SemanticModule, SemanticOp, ToleranceClass};
     // Import from compiler module via its public re-exports

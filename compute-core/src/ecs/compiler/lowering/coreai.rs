@@ -12,7 +12,7 @@ use prost::Message;
 use sha2::{Digest, Sha256};
 
 use crate::coreai_pipeline::{compile_mlpackage, CoreAiIslandReceipt};
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendArtifactId, EvidenceDigest, OperationId, TensorId, BACKEND_ANE,
 };
 use crate::ecs::compiler::{

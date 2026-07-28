@@ -4,8 +4,8 @@
 //! semantic field, verification validates raw data, and nested
 //! verification is recursive.
 
-use crate::ecs::backend::routing::*;
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::routing::*;
+use prism_ecs_kernel::backend::DType;
 
 // ── Error type ─────────────────────────────────────────────────────
 

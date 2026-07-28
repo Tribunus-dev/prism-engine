@@ -1,7 +1,7 @@
 //! Core ML lowering parameter types — opcode, shape policy, target,
 //! precision, parameter schema, storage encoding.
 
-use crate::ecs::backend::routing::{OperationId, TensorId};
+use prism_ecs_kernel::backend::routing::{OperationId, TensorId};
 
 // ── Opcode ─────────────────────────────────────────────────────────────────
 

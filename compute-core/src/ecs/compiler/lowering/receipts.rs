@@ -1,7 +1,7 @@
 //! Immutable stage receipts for the Core ML lowering pipeline
 //! and the aggregate gate qualification report.
 
-use crate::ecs::backend::routing::{BackendId, EvidenceDigest, OperationId, TensorId};
+use prism_ecs_kernel::backend::routing::{BackendId, EvidenceDigest, OperationId, TensorId};
 
 use super::params::{
     CoreAiTarget, LoweringDiagnostic, MilValueRef, Opcode, PrecisionPolicy, ShapePolicy,

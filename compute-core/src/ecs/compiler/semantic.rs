@@ -11,11 +11,11 @@
 
 use std::collections::HashMap;
 
-use crate::ecs::backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     EvidenceDigest, LogicalShape, OperationFamily, OperationId, Phase, QuantizationContract,
     TensorId,
 };
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::DType;
 
 // ── Semantic tensor ────────────────────────────────────────────────────────
 
@@ -313,7 +313,7 @@ impl SemanticModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::routing::{OperationFamily, Phase};
+    use prism_ecs_kernel::backend::routing::{OperationFamily, Phase};
 
     #[test]
     fn build_semantic_matmul() {

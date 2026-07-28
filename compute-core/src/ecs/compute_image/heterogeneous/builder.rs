@@ -385,7 +385,7 @@ mod tests {
         builder.add_phase_node(CompiledPhaseNode {
             phase_id: 0,
             variant_set_id: 0,
-            operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+            operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
             ready_condition: ReadyCondition::AlwaysReady,
             parallel_group: None,
             priority_class: PriorityClass::Critical,
@@ -393,7 +393,7 @@ mod tests {
         builder.add_phase_node(CompiledPhaseNode {
             phase_id: 1,
             variant_set_id: 0,
-            operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+            operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
             ready_condition: ReadyCondition::AllDependenciesSatisfied,
             parallel_group: None,
             priority_class: PriorityClass::Critical,
@@ -439,7 +439,7 @@ mod tests {
         builder.add_phase_node(CompiledPhaseNode {
             phase_id: 10,
             variant_set_id: 0,
-            operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+            operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
             ready_condition: ReadyCondition::AlwaysReady,
             parallel_group: None,
             priority_class: PriorityClass::Critical,
@@ -447,7 +447,7 @@ mod tests {
         builder.add_phase_node(CompiledPhaseNode {
             phase_id: 20,
             variant_set_id: 0,
-            operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+            operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
             ready_condition: ReadyCondition::AllDependenciesSatisfied,
             parallel_group: None,
             priority_class: PriorityClass::Batch,

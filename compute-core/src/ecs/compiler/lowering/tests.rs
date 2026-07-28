@@ -12,8 +12,8 @@
     )),
     allow(unused_imports, dead_code)
 )]
-use crate::ecs::backend::routing::{LogicalShape, OperationFamily, OperationId, Phase, TensorId};
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::routing::{LogicalShape, OperationFamily, OperationId, Phase, TensorId};
+use prism_ecs_kernel::backend::DType;
 use crate::ecs::compiler::semantic::{SemanticModule, SemanticOp, ToleranceClass};
 
 #[cfg(all(

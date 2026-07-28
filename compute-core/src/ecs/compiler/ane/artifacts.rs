@@ -6,8 +6,8 @@
 //! packing are derived backend artifacts whose receipts point back to
 //! the source tensor identities.
 
-use crate::ecs::backend::routing::{BackendArtifactId, EvidenceDigest, TensorId};
-use crate::ecs::backend::DType;
+use prism_ecs_kernel::backend::routing::{BackendArtifactId, EvidenceDigest, TensorId};
+use prism_ecs_kernel::backend::DType;
 
 // ── ANE MIL text artifact ────────────────────────────────────────────────
 

@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use super::dataset::F32MatmulDataset;
 use crate::ecs::backend::accelerate::AccelerateBackend;
-use crate::ecs::backend::routing::{BackendArtifactId, EvidenceDigest, BACKEND_ACCELERATE};
+use prism_ecs_kernel::backend::routing::{BackendArtifactId, EvidenceDigest, BACKEND_ACCELERATE};
 use crate::ecs::backend::{MatmulOp, TensorBackend};
 use crate::ecs::compiler::LoweringReceipt;
 

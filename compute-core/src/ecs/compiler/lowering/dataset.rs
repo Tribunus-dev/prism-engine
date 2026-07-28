@@ -9,7 +9,7 @@
 //!
 //! This completes Mission 0009's real-backend preservation gate.
 
-use crate::ecs::backend::routing::LogicalShape;
+use prism_ecs_kernel::backend::routing::LogicalShape;
 
 /// A known-answer dataset for a single F32 matmul operation.
 /// Input A is [1, 4], Weight W is [4, 1], expected output C is [1, 1].
