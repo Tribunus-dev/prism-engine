@@ -544,7 +544,7 @@ impl ImageRuntime {
             let base = format!("{}.layers.{}", root, layer);
             let is_full = matches!(
                 arch.layer_types[layer],
-                crate::ecs::config::AttentionKind::FullAttention
+                prism_ecs_constitutional::config::AttentionKind::FullAttention
             );
 
             let attn_norm = get_tensor(&format!("{}.input_layernorm.weight", base))?;
@@ -1024,7 +1024,7 @@ impl ImageRuntime {
             hidden = crate::executor::run_layer(
                 &hidden,
                 layer_plan,
-                &crate::ecs::config::operation_route::OperationRoute::default(),
+                &prism_ecs_constitutional::config::operation_route::OperationRoute::default(),
                 None,
                 &[],
                 &attn_norm,

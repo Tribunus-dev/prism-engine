@@ -16,8 +16,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::path::{Path, PathBuf};
 mod release;
 
-use tribunus_compute_core::config::CompileQuantMode;
-use tribunus_compute_core::config::HardwareTarget;
+use prism_ecs_constitutional::config::CompileQuantMode;
+use prism_ecs_constitutional::config::HardwareTarget;
 
 pub const PRISM_HOME: &str = ".prism";
 pub const MODELS_DIR: &str = "models";

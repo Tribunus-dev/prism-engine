@@ -13,7 +13,7 @@
 //!
 
 use crate::ecs::bridge::ARRAY_REGISTRY;
-use crate::ecs::config::AttentionKind::{
+use prism_ecs_constitutional::config::AttentionKind::{
     self, FullAttention, MiniMaxSparseAttention, SlidingAttention,
 };
 use mlx_rs::ops::indexing::IndexOp;

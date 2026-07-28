@@ -176,7 +176,7 @@ impl PrismCompiler {
             let quant_mode = request
                 .quant_mode
                 .as_deref()
-                .and_then(crate::ecs::config::CompileQuantMode::from_name);
+                .and_then(prism_ecs_constitutional::config::CompileQuantMode::from_name);
 
             let (_compiled_image, mut outcome) =
                 crate::ecs::compute_image::legacy_compute_image_compile::compile_gguf_to_canonical(
@@ -296,7 +296,7 @@ impl PrismCompiler {
         let quant_mode = request
             .quant_mode
             .as_deref()
-            .and_then(crate::ecs::config::CompileQuantMode::from_name);
+            .and_then(prism_ecs_constitutional::config::CompileQuantMode::from_name);
 
         let authority = parse_authority(request.authority.as_deref());
 
@@ -362,7 +362,7 @@ impl PrismCompiler {
         let quant_mode = request
             .quant_mode
             .as_deref()
-            .and_then(crate::ecs::config::CompileQuantMode::from_name);
+            .and_then(prism_ecs_constitutional::config::CompileQuantMode::from_name);
 
         let authority = parse_authority(request.authority.as_deref());
 
@@ -625,8 +625,8 @@ fn parse_authority(s: Option<&str>) -> crate::ecs::compute_image::manifest::Comp
 }
 /// Parse a hardware target string into a HardwareTarget.
 #[cfg(feature = "mlx-backend")]
-fn parse_hardware_target(s: Option<&str>) -> Option<crate::ecs::config::HardwareTarget> {
-    use crate::ecs::config::HardwareTarget;
+fn parse_hardware_target(s: Option<&str>) -> Option<prism_ecs_constitutional::config::HardwareTarget> {
+    use prism_ecs_constitutional::config::HardwareTarget;
     s.and_then(|t| match t.to_lowercase().as_str() {
         "m1" => Some(HardwareTarget::M1),
         "m1pro" => Some(HardwareTarget::M1Pro),

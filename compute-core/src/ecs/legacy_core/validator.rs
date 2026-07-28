@@ -6,7 +6,7 @@
 //!
 //! This operates over safetensors metadata only — no arrays are materialized.
 
-use crate::ecs::config::{AttentionKind, ExecutionSpec, QuantizationMeta, TensorBinding};
+use prism_ecs_constitutional::config::{AttentionKind, ExecutionSpec, QuantizationMeta, TensorBinding};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
@@ -211,7 +211,7 @@ pub fn validate_bindings(model_dir: &str, spec: &ExecutionSpec) -> crate::Result
     }
 
     let names: Vec<String> = all_meta.iter().map(|m| m.name.clone()).collect();
-    let namespace = crate::ecs::config::resolve_namespace(&names).ok_or_else(|| {
+    let namespace = prism_ecs_constitutional::config::resolve_namespace(&names).ok_or_else(|| {
         crate::Error::from_reason(
             "Could not resolve text model namespace — no candidate matched anchors",
         )
@@ -558,7 +558,7 @@ pub fn discover_shards(dir: &std::path::Path) -> crate::Result<Vec<std::path::Pa
 /// The map is built from pre-read safetensors headers by the caller.
 pub fn validate_bindings_from_map(
     name_map: &std::collections::HashMap<String, TensorMeta>,
-    spec: &crate::ecs::config::ExecutionSpec,
+    spec: &prism_ecs_constitutional::config::ExecutionSpec,
 ) -> crate::Result<ValidationReport> {
     // Build a &str→&TensorMeta lookup
     let lookup: std::collections::HashMap<&str, &TensorMeta> =
@@ -602,12 +602,12 @@ pub fn validate_bindings_from_map(
             sliding_layers: spec
                 .layers
                 .iter()
-                .filter(|l| l.attention_kind == crate::ecs::config::AttentionKind::SlidingAttention)
+                .filter(|l| l.attention_kind == prism_ecs_constitutional::config::AttentionKind::SlidingAttention)
                 .count(),
             full_layers: spec
                 .layers
                 .iter()
-                .filter(|l| l.attention_kind == crate::ecs::config::AttentionKind::FullAttention)
+                .filter(|l| l.attention_kind == prism_ecs_constitutional::config::AttentionKind::FullAttention)
                 .count(),
         },
         bindings: Vec::new(),

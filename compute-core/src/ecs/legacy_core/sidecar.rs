@@ -28,7 +28,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 use prism_ecs_compile::compute_image_core::manifest::CompiledImageReader;
-use crate::ecs::config::LayerPlan;
+use prism_ecs_constitutional::config::LayerPlan;
 use tribunus_evidence_schema::mission0007::{
     ArtifactRange, AttentionKind, DType, KernelSignature, KernelSignatureId, OperationFamily,
     ResidencyGroup, ResidencyGroupId, ResidencyPlanVersion, ResidencyPriority, ResourceId,
@@ -357,7 +357,7 @@ impl ExecutionConditioningSidecar {
     ///
     /// This is a convenience method that iterates `derive_kernel_signatures`
     /// over all layers in the given plan.
-    pub fn derive_all_kernels_from_plan(&mut self, plan: &crate::ecs::config::ModelExecutionPlan) {
+    pub fn derive_all_kernels_from_plan(&mut self, plan: &prism_ecs_constitutional::config::ModelExecutionPlan) {
         self.kernel_signatures.clear();
 
         for layer in &plan.layers {
@@ -388,7 +388,7 @@ impl ExecutionConditioningSidecar {
 
 /// Compute a SHA-256 digest of a [`ModelExecutionPlan`] by serialising it
 /// to JSON (canonical form) and hashing the bytes.
-fn compute_plan_digest(plan: &crate::ecs::config::ModelExecutionPlan) -> String {
+fn compute_plan_digest(plan: &prism_ecs_constitutional::config::ModelExecutionPlan) -> String {
     let serialized = serde_json::to_vec(plan).expect("plan serialization");
     let mut hasher = Sha256::new();
     hasher.update(&serialized);

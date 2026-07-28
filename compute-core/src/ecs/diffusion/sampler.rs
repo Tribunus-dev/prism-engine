@@ -4,7 +4,7 @@
 //! to commit and which to remask. All operations are on CPU-side `Vec<f32>`
 //! and `Vec<u32>` — no MLX Array dependency.
 
-use crate::ecs::config::MaskSelection;
+use prism_ecs_constitutional::config::MaskSelection;
 
 use super::canvas::TokenCanvas;
 
@@ -106,7 +106,7 @@ pub struct DiffusionSampler {
 
 impl DiffusionSampler {
     /// Create a new `DiffusionSampler` from configuration.
-    pub fn new(config: &crate::ecs::config::DiffusionConfig, seed: u64) -> Self {
+    pub fn new(config: &prism_ecs_constitutional::config::DiffusionConfig, seed: u64) -> Self {
         Self {
             seed,
             temperature: 1.0,
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn test_diffusion_sampler_new() {
-        let config = crate::ecs::config::DiffusionConfig::default();
+        let config = prism_ecs_constitutional::config::DiffusionConfig::default();
         let sampler = DiffusionSampler::new(&config, 42);
         assert_eq!(sampler.seed, 42);
         assert!((sampler.confidence_threshold - 0.7).abs() < 1e-6);

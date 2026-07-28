@@ -44,8 +44,8 @@ use crate::ecs::legacy_compute_image_core::manifest::{
     TensorProvenance,
 };
 use crate::ecs::legacy_compute_image_core::plan::{compile_unchecked_speculative, plan};
-use crate::ecs::config::CompileQuantMode;
-use crate::ecs::config::HardwareTarget;
+use prism_ecs_constitutional::config::CompileQuantMode;
+use prism_ecs_constitutional::config::HardwareTarget;
 use crate::ecs::metal_backend::catalogue_source_for;
 use serde::Serialize;
 use serde_json::json;
@@ -225,7 +225,7 @@ fn detect_validate_quant(
 /// Extract TextArchitecture from a raw config.json Value.
 fn extract_architecture_from_config(
     config: &serde_json::Value,
-) -> Result<crate::ecs::config::TextArchitecture, String> {
+) -> Result<prism_ecs_constitutional::config::TextArchitecture, String> {
     let text = config.get("text_config").unwrap_or(config);
 
     fn num(v: &serde_json::Value, key: &str) -> Result<u32, String> {
@@ -263,8 +263,8 @@ fn extract_architecture_from_config(
             items
                 .iter()
                 .map(|item| match item.as_str().unwrap_or("sliding_attention") {
-                    "full_attention" | "full" => crate::ecs::config::AttentionKind::FullAttention,
-                    _ => crate::ecs::config::AttentionKind::SlidingAttention,
+                    "full_attention" | "full" => prism_ecs_constitutional::config::AttentionKind::FullAttention,
+                    _ => prism_ecs_constitutional::config::AttentionKind::SlidingAttention,
                 })
                 .collect::<Vec<_>>()
         })
@@ -278,7 +278,7 @@ fn extract_architecture_from_config(
     let rope_global = text
         .get("rope_parameters")
         .and_then(|r| r.get("full_attention"))
-        .map(|r| crate::ecs::config::RopeSpec {
+        .map(|r| prism_ecs_constitutional::config::RopeSpec {
             theta: r
                 .get("rope_theta")
                 .and_then(|v| v.as_f64())
@@ -293,7 +293,7 @@ fn extract_architecture_from_config(
 
     let fallback_layer_types = if layer_types.is_empty() {
         vec![
-            crate::ecs::config::AttentionKind::SlidingAttention;
+            prism_ecs_constitutional::config::AttentionKind::SlidingAttention;
             num(text, "num_hidden_layers")? as usize
         ]
     } else {
@@ -318,7 +318,7 @@ fn extract_architecture_from_config(
 
     let rms_norm_eps = f64_val(text, "rms_norm_eps").unwrap_or(1e-6);
 
-    Ok(crate::ecs::config::TextArchitecture {
+    Ok(prism_ecs_constitutional::config::TextArchitecture {
         hidden_size: h,
         intermediate_size,
         num_attention_heads: n_heads,
@@ -336,7 +336,7 @@ fn extract_architecture_from_config(
         final_logit_softcapping,
         hidden_size_per_layer_input,
         layer_types: fallback_layer_types,
-        rope_local: crate::ecs::config::RopeSpec {
+        rope_local: prism_ecs_constitutional::config::RopeSpec {
             theta: rope_local_theta,
             rope_type: "default".to_string(),
             partial_rotary_factor: None,
@@ -554,10 +554,10 @@ pub fn compile_gguf_speculative(
 
     // === STEP 4: Build execution plan with speculative config ===
     let mut execution_plan =
-        crate::ecs::config::build_execution_plan(&target_arch, &target_namespace, &emitted_ids);
+        prism_ecs_constitutional::config::build_execution_plan(&target_arch, &target_namespace, &emitted_ids);
     execution_plan.build_ane_fusion_plan();
 
-    execution_plan.speculative_config = Some(crate::ecs::config::SpeculativeModelConfig {
+    execution_plan.speculative_config = Some(prism_ecs_constitutional::config::SpeculativeModelConfig {
         draft_architecture: draft_arch,
         target_architecture: target_arch,
         shared_embedding,
@@ -727,14 +727,14 @@ pub(crate) fn compile_unchecked(
     // pre-compiles ANE subgraphs to .mlmodelc before main compilation.
     {
         let config_path = source_dir.join("config.json");
-        let (arch, _, _manifest) = crate::ecs::config::parse_config(
+        let (arch, _, _manifest) = prism_ecs_constitutional::config::parse_config(
             config_path
                 .to_str()
                 .ok_or_else(|| crate::Error::from_reason("invalid config path"))?,
         )?;
         let empty_ids = std::collections::HashMap::new();
-        let namespace = crate::ecs::config::resolve_namespace(&[]).unwrap_or_default();
-        let mut ane_plan = crate::ecs::config::build_execution_plan(&arch, &namespace, &empty_ids);
+        let namespace = prism_ecs_constitutional::config::resolve_namespace(&[]).unwrap_or_default();
+        let mut ane_plan = prism_ecs_constitutional::config::build_execution_plan(&arch, &namespace, &empty_ids);
         ane_plan.build_ane_fusion_plan();
         super::coreai::compile_ane_islands(&ane_plan, &arch, output_dir, true)
             .map_err(|e| crate::Error::from_reason(format!("ANE pre-compilation failed: {e}")))?;
@@ -849,15 +849,15 @@ pub fn compile_gguf_unchecked(
     // 4. ANE pre-compilation phase (reads config.json from temp dir)
     match ane_models_dir {
         None => {
-            let (arch_ane, _, _manifest) = crate::ecs::config::parse_config(
+            let (arch_ane, _, _manifest) = prism_ecs_constitutional::config::parse_config(
                 config_path
                     .to_str()
                     .ok_or_else(|| crate::Error::from_reason("invalid config path"))?,
             )?;
             let empty_ids = std::collections::HashMap::new();
-            let namespace = crate::ecs::config::resolve_namespace(&[]).unwrap_or_default();
+            let namespace = prism_ecs_constitutional::config::resolve_namespace(&[]).unwrap_or_default();
             let mut ane_plan =
-                crate::ecs::config::build_execution_plan(&arch_ane, &namespace, &empty_ids);
+                prism_ecs_constitutional::config::build_execution_plan(&arch_ane, &namespace, &empty_ids);
             ane_plan.build_ane_fusion_plan();
             super::coreai::compile_ane_islands(&ane_plan, &arch_ane, output_dir, true).map_err(
                 |e| crate::Error::from_reason(format!("ANE pre-compilation failed: {e}")),
@@ -932,7 +932,7 @@ pub fn compile_gguf_unchecked(
     )?;
 
     // 7. Archive ANE .mlmodelc directories for portable deployment
-    let islands: Vec<crate::ecs::config::AneFusedIsland> =
+    let islands: Vec<prism_ecs_constitutional::config::AneFusedIsland> =
         compiled.manifest.execution_plan.fused_ane_islands.clone();
     for island in &islands {
         let modelc_dir = output_dir.join(&island.modelc_relpath);
@@ -1112,7 +1112,7 @@ fn embed_metallib(
     source_dir: &str,
     output_dir: &Path,
     quantize_mode: Option<CompileQuantMode>,
-    arch: &crate::ecs::config::TextArchitecture,
+    arch: &prism_ecs_constitutional::config::TextArchitecture,
 ) -> crate::Result<()> {
     let source_path = Path::new(source_dir);
 
@@ -1391,7 +1391,7 @@ pub(crate) fn compile_sequential(
 
     // Build the execution plan using the emitted tensor IDs
     let execution_plan =
-        crate::ecs::config::build_execution_plan(&loaded.arch, &loaded.namespace, &emitted_ids);
+        prism_ecs_constitutional::config::build_execution_plan(&loaded.arch, &loaded.namespace, &emitted_ids);
     let mut plan_with_fusion = execution_plan;
     plan_with_fusion.build_ane_fusion_plan();
     plan_with_fusion.apply_fusion_pass();
@@ -1781,7 +1781,7 @@ pub fn compile_differential(
 
     // Build the execution plan
     let execution_plan =
-        crate::ecs::config::build_execution_plan(&loaded.arch, &loaded.namespace, &emitted_ids);
+        prism_ecs_constitutional::config::build_execution_plan(&loaded.arch, &loaded.namespace, &emitted_ids);
     let mut plan_with_fusion = execution_plan;
     plan_with_fusion.build_ane_fusion_plan();
     plan_with_fusion.apply_fusion_pass();

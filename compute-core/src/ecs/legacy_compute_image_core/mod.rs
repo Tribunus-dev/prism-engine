@@ -717,7 +717,7 @@ mod tests {
                 .to_str()
                 .expect("source shard 3"),
         );
-        let (arch, _, _) = crate::ecs::config::parse_config(
+        let (arch, _, _) = prism_ecs_constitutional::config::parse_config(
             source_dir
                 .join("config.json")
                 .to_str()
@@ -1144,7 +1144,7 @@ mod tests {
             quantization_quality: Default::default(),
             quantization_quality_status: Default::default(),
             source: source,
-            architecture: crate::ecs::config::TextArchitecture {
+            architecture: prism_ecs_constitutional::config::TextArchitecture {
                 hidden_size: 64,
                 intermediate_size: 128,
                 num_attention_heads: 4,
@@ -1161,8 +1161,8 @@ mod tests {
                 attention_k_eq_v: true,
                 final_logit_softcapping: None,
                 hidden_size_per_layer_input: 0,
-                layer_types: vec![crate::ecs::config::AttentionKind::SlidingAttention],
-                rope_local: crate::ecs::config::RopeSpec {
+                layer_types: vec![prism_ecs_constitutional::config::AttentionKind::SlidingAttention],
+                rope_local: prism_ecs_constitutional::config::RopeSpec {
                     theta: 10000.0,
                     rope_type: "default".into(),
                     partial_rotary_factor: None,
@@ -1192,7 +1192,7 @@ mod tests {
             metallib_size: None,
             metal_kernel_artifacts: vec![],
             phase_dag: None,
-            execution_plan: crate::ecs::config::ModelExecutionPlan::default(),
+            execution_plan: prism_ecs_constitutional::config::ModelExecutionPlan::default(),
             compatibility_receipt: None,
         };
 
@@ -1258,7 +1258,7 @@ mod tests {
                 quantization_group_size: 64,
                 quantization_mode: "affine".into(),
             },
-            architecture: crate::ecs::config::TextArchitecture {
+            architecture: prism_ecs_constitutional::config::TextArchitecture {
                 hidden_size: 64,
                 intermediate_size: 128,
                 num_attention_heads: 4,
@@ -1275,8 +1275,8 @@ mod tests {
                 attention_k_eq_v: true,
                 final_logit_softcapping: None,
                 hidden_size_per_layer_input: 0,
-                layer_types: vec![crate::ecs::config::AttentionKind::SlidingAttention],
-                rope_local: crate::ecs::config::RopeSpec {
+                layer_types: vec![prism_ecs_constitutional::config::AttentionKind::SlidingAttention],
+                rope_local: prism_ecs_constitutional::config::RopeSpec {
                     theta: 10000.0,
                     rope_type: "default".into(),
                     partial_rotary_factor: None,
@@ -1306,7 +1306,7 @@ mod tests {
             metallib_size: None,
             metal_kernel_artifacts: vec![],
             phase_dag: None,
-            execution_plan: crate::ecs::config::ModelExecutionPlan::default(),
+            execution_plan: prism_ecs_constitutional::config::ModelExecutionPlan::default(),
             compatibility_receipt: None,
         };
 

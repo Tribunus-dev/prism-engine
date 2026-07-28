@@ -80,7 +80,11 @@ pub use crate::ecs::compile;
 ))]
 pub use crate::ecs::legacy_compute_image_core;
 pub use crate::ecs::compute_image_v0;
-pub use crate::ecs::config;
+/// Engine-internal shim for the constitutional `config` surface.
+/// Re-exports `prism_ecs_constitutional::config::*` for engine code
+/// that historically imported `tribunus_compute_core::config::*`.
+/// New code should depend on the constitutional crate directly.
+pub use crate::ecs::legacy_config;
 /// Constitutional ECS kernel — stable identity types, causal messaging, command/effect/event types, and schema registry.
 pub use prism_ecs_constitutional;
 #[cfg(feature = "mlx-backend")]

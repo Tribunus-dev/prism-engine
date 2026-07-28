@@ -11,7 +11,6 @@ pub mod adapter;
 pub mod aot;
 pub mod compile_session;
 pub mod component;
-pub mod config;
 pub mod entity;
 pub mod plan;
 pub mod receipt_bus;
@@ -57,6 +56,11 @@ pub mod compute_ir;
 pub mod compute_lane;
 pub mod compute_service;
 pub mod config_namespace;
+// `legacy_config` is the engine-internal shim for the constitutional
+// `prism_ecs_constitutional::config` surface. See
+// `compute-core/src/ecs/legacy_config/mod.rs` for the full re-export
+// list. New engine code should prefer the constitutional surface.
+pub mod legacy_config;
 // `constitutional/` was deleted in Phase 1 (already absorbed into
 // `prism-ecs-constitutional`); see
 // `changelogs/2026-07-25-compute-core-absorption-phase-0-1.md`.

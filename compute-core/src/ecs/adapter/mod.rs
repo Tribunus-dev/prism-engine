@@ -18,7 +18,7 @@
 //! 3. Add a synthetic fixture in `fixtures.rs`
 //! 4. Add a conformance case in `conformance.rs`
 
-use crate::ecs::config::TextArchitecture;
+use prism_ecs_constitutional::config::TextArchitecture;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -1942,7 +1942,7 @@ impl ModelFamilyAdapter for PatternAdapter {
             final_logit_softcapping: None,
             hidden_size_per_layer_input: 0,
             layer_types: vec![],
-            rope_local: crate::ecs::config::hardware::RopeSpec {
+            rope_local: prism_ecs_constitutional::config::hardware::RopeSpec {
                 theta: 10000.0,
                 rope_type: "default".to_string(),
                 partial_rotary_factor: None,

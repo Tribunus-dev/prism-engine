@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use clap::Parser;
 
-use tribunus_compute_core::config::parse_config;
+use prism_ecs_constitutional::config::parse_config;
 use tribunus_compute_core::coreai_pipeline::build_nf4_tile640_stateless_region;
 use tribunus_compute_core::ffi::prism_compile_and_pack;
 

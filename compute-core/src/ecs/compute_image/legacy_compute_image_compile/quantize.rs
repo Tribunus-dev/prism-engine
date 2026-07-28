@@ -1,7 +1,7 @@
 //! Compile-time quantization transforms — NF4, 8-bit affine, INT4, ternary.
 
 use super::source::{source_tensor_view, LoadedSource, SourceTensor};
-use crate::ecs::config::CompileQuantMode;
+use prism_ecs_constitutional::config::CompileQuantMode;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // NF4 codebook
@@ -499,7 +499,7 @@ fn install_quantized_triplet(
     biases_bytes: Vec<u8>,
     biases_len: usize,
     aux_shape: Vec<u32>,
-    packed_shape: crate::ecs::config::PackedLinearShapes,
+    packed_shape: prism_ecs_constitutional::config::PackedLinearShapes,
 ) {
     if let Some(st) = loaded.source_tensors.get_mut(weight_name) {
         st.data = packed_weight_bytes;
@@ -633,7 +633,7 @@ pub(crate) fn apply_af8_quantize(
         .flat_map(|&w| w.to_le_bytes().to_vec())
         .collect();
 
-    let packed_shape = crate::ecs::config::PackedLinearShapes {
+    let packed_shape = prism_ecs_constitutional::config::PackedLinearShapes {
         weight: vec![out_dim, packed_in],
         scales: vec![out_dim, groups_per_row],
         biases: vec![out_dim, groups_per_row],
@@ -718,7 +718,7 @@ fn quantize_nf4_matrix_from_raw(
     Vec<u8>,
     Vec<u8>,
     usize,
-    crate::ecs::config::PackedLinearShapes,
+    prism_ecs_constitutional::config::PackedLinearShapes,
 )> {
     let in_dim_u = in_dim as usize;
     let gs = group_size as usize;
@@ -791,7 +791,7 @@ fn quantize_nf4_matrix_from_raw(
         .collect();
     let biases_bytes: Vec<u8> = vec![0u8; total_g * 4]; // F32 zeros
 
-    let packed_shape = crate::ecs::config::PackedLinearShapes {
+    let packed_shape = prism_ecs_constitutional::config::PackedLinearShapes {
         weight: vec![out_dim, packed_in as u32],
         scales: vec![out_dim, groups_per_row],
         biases: vec![out_dim, groups_per_row],
@@ -832,7 +832,7 @@ pub(crate) fn quantize_nf4_tile640_matrix_from_raw(
     Vec<u8>,
     Vec<u8>,
     usize,
-    crate::ecs::config::PackedLinearShapes,
+    prism_ecs_constitutional::config::PackedLinearShapes,
 )> {
     let in_dim_u = in_dim as usize;
     let out_dim_u = out_dim as usize;
@@ -894,7 +894,7 @@ pub(crate) fn quantize_nf4_tile640_matrix_from_raw(
         .collect();
 
     let packed_in = tile_count * packed_bytes_per_tile;
-    let packed_shape = crate::ecs::config::PackedLinearShapes {
+    let packed_shape = prism_ecs_constitutional::config::PackedLinearShapes {
         weight: vec![out_dim, packed_in as u32],
         scales: vec![out_dim, (tile_count * groups_per_tile) as u32],
         biases: vec![out_dim, (tile_count * groups_per_tile) as u32],
@@ -987,7 +987,7 @@ pub(crate) fn apply_ternary_quantize(
     let scales_name = format!("{}.scales", stem);
     let biases_name = format!("{}.biases", stem);
 
-    let packed_shape = crate::ecs::config::PackedLinearShapes {
+    let packed_shape = prism_ecs_constitutional::config::PackedLinearShapes {
         weight: vec![out_dim, packed_in as u32],
         scales: vec![out_dim, groups_per_row],
         biases: vec![out_dim, groups_per_row],
@@ -1166,7 +1166,7 @@ pub(crate) fn apply_ternary_tile640_quantize(
         .flat_map(|&w| w.to_le_bytes().to_vec())
         .collect();
 
-    let packed_shape = crate::ecs::config::PackedLinearShapes {
+    let packed_shape = prism_ecs_constitutional::config::PackedLinearShapes {
         weight: vec![out_dim, packed_in],
         scales: vec![out_dim, tile_count as u32],
         biases: vec![out_dim, tile_count as u32],

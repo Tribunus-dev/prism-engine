@@ -365,7 +365,7 @@ pub fn build_phase_regions(plan: &RegionExecutionPlan) -> Vec<PhaseRegion> {
 #[cfg(feature = "legacy_mutations")]
 mod tests {
     use super::*;
-    use crate::ecs::config::{AttentionKind, RopeSpec, TextArchitecture};
+    use prism_ecs_constitutional::config::{AttentionKind, RopeSpec, TextArchitecture};
     use crate::model_adapter::CanonicalModel;
 
     fn make_test_canonical(n_layers: u32) -> CanonicalModel {

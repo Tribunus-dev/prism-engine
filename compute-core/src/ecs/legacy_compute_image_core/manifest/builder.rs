@@ -39,7 +39,7 @@ struct SegmentBuilder {
 }
 
 impl ImageBuilder {
-    pub fn new(arch: crate::ecs::config::TextArchitecture, source: SourceIdentity) -> Self {
+    pub fn new(arch: prism_ecs_constitutional::config::TextArchitecture, source: SourceIdentity) -> Self {
         Self {
             manifest: Manifest {
                 image_version: "0.1.0".into(),
@@ -71,7 +71,7 @@ impl ImageBuilder {
                 metallib_hash: None,
                 metallib_size: None,
                 metal_kernel_artifacts: Vec::new(),
-                execution_plan: crate::ecs::config::ModelExecutionPlan::default(),
+                execution_plan: prism_ecs_constitutional::config::ModelExecutionPlan::default(),
                 readiness: None,
                 phase_dag: None,
                 compatibility_receipt: None,
@@ -327,7 +327,7 @@ impl ImageBuilder {
     }
 
     /// Set the execution plan on the manifest. Must be called before finalize().
-    pub fn set_execution_plan(&mut self, plan: crate::ecs::config::ModelExecutionPlan) {
+    pub fn set_execution_plan(&mut self, plan: prism_ecs_constitutional::config::ModelExecutionPlan) {
         self.manifest.execution_plan = plan;
     }
 
@@ -340,7 +340,7 @@ impl ImageBuilder {
     }
 
     /// Set the audio encoder configuration on the manifest.
-    pub fn set_audio_config(&mut self, audio_config: crate::ecs::config::AudioArchitecture) {
+    pub fn set_audio_config(&mut self, audio_config: prism_ecs_constitutional::config::AudioArchitecture) {
         self.manifest.audio_config = Some(audio_config);
     }
 

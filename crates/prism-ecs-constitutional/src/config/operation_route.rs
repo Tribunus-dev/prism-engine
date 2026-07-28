@@ -1,10 +1,11 @@
 //! Per-operation backend routing for decoder layers.
 //!
-//! Each operation group in a decoder layer is assigned to the optimal
-//! execution backend during compilation.  This is the compiler's single
-//! source of truth for heterogeneous dispatch — the runtime reads these
-//! assignments to route each operation to the correct backend via the
-//! IOSurface unified memory island.
+//! Authority: the per-layer assignment of operation groups to execution
+//! backends (MLX, Accelerate, Core ML, Orion/ANE), as decided at
+//! compile time. This surface is the canonical source of truth for
+//! heterogeneous dispatch hints; the runtime reads these assignments to
+//! route each operation to the correct backend via the IOSurface
+//! unified memory island.
 //!
 //! Backend IDs:
 //!   0 = MLX (GPU matmul, attention, softmax, default)
@@ -92,6 +93,10 @@ impl OperationRoute {
 
     /// Return the dominant (most-frequently-assigned) backend across all
     /// operation groups.  Used as the fast-dispatch hint at runtime.
+    ///
+    /// Ties are broken in favor of the highest backend id; this
+    /// preserves the original implementation's behavior where
+    /// `iter().max_by_key()` returns the last equal element.
     pub fn dominant_backend(&self) -> u32 {
         let counts = [
             self.rms_norm,
@@ -111,11 +116,15 @@ impl OperationRoute {
                 freq[b as usize] += 1;
             }
         }
-        freq.iter()
-            .enumerate()
-            .max_by_key(|(_, &c)| c)
-            .map(|(i, _)| i as u32)
-            .unwrap_or(0)
+        let mut best_id: u32 = 0;
+        let mut best_count: u32 = 0;
+        for (i, &c) in freq.iter().enumerate() {
+            if c >= best_count {
+                best_count = c;
+                best_id = i as u32;
+            }
+        }
+        best_id
     }
 
     /// Override the route so the given backend is dominant.
@@ -197,7 +206,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_dominant_backend_defaults() {
+    fn dominant_backend_defaults() {
         let route = OperationRoute::default();
         // Counts: MLX=6 (silu,matmul,attention,softmax,rope,transpose) vs Accel=4 (rms_norm,add,mul,reshape)
         assert_eq!(
@@ -208,7 +217,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dominant_backend_orion_preferred() {
+    fn dominant_backend_orion_preferred() {
         let route = OperationRoute {
             attention: 3, // Orion
             matmul: 3,    // Orion
@@ -224,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn test_serde_round_trip() {
+    fn serde_round_trip() {
         let route = OperationRoute {
             attention: 3,
             matmul: 0,
@@ -235,5 +244,25 @@ mod tests {
         assert_eq!(back.attention, 3);
         assert_eq!(back.matmul, 0);
         assert_eq!(back.rms_norm, 1); // from default
+    }
+
+    #[test]
+    fn has_ane_backend_detects_any_ane_assignment() {
+        let route = OperationRoute {
+            matmul: 3,
+            ..Default::default()
+        };
+        assert!(route.has_ane_backend());
+        let route = OperationRoute::default();
+        assert!(!route.has_ane_backend());
+    }
+
+    #[test]
+    fn set_dominant_backend_three_overrides_all() {
+        let mut route = OperationRoute::default();
+        route.set_dominant_backend(3);
+        assert_eq!(route.rms_norm, 3);
+        assert_eq!(route.attention, 3);
+        assert_eq!(route.reshape, 3);
     }
 }

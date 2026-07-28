@@ -10,7 +10,7 @@
 //! config, and architecture properties from GGUF files, then feeds them into
 //! the compile_sequential/compile_tensix pipeline to produce a ComputeImage.
 
-use crate::ecs::config::ManifestModality;
+use prism_ecs_constitutional::config::ManifestModality;
 use half::{bf16, f16};
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -64,7 +64,7 @@ fn meta_f64_flex(metadata: &[(String, String)], arch: &str, generic_key: &str) -
 // GGUF metadata key constants for Tribunus ModelManifest extraction.
 pub struct GgufImportResult {
     /// Model architecture config (feeds into `config::compile()`).
-    pub model_config: crate::ecs::config::TextArchitecture,
+    pub model_config: prism_ecs_constitutional::config::TextArchitecture,
     /// GGUF file path (for direct tensor read during compilation).
     pub source_path: std::path::PathBuf,
     /// Tensor names, shapes, dtypes, and byte offsets.
@@ -529,7 +529,7 @@ pub fn import_gguf_model(path: &Path) -> Result<GgufImportResult, String> {
 /// Extract a `TextArchitecture` from GGUF metadata KV pairs.
 pub fn extract_architecture(
     metadata: &[(String, String)],
-) -> Result<crate::ecs::config::TextArchitecture, String> {
+) -> Result<prism_ecs_constitutional::config::TextArchitecture, String> {
     // First extract the architecture type (used for key resolution)
     let model_type = meta_str(metadata, keys::MODEL_TYPE)
         .unwrap_or("unknown")
@@ -557,10 +557,10 @@ pub fn extract_architecture(
     let num_layers = num_hidden_layers as usize;
     let mut layer_types = Vec::with_capacity(num_layers);
     for _ in 0..num_layers {
-        layer_types.push(crate::ecs::config::AttentionKind::SlidingAttention);
+        layer_types.push(prism_ecs_constitutional::config::AttentionKind::SlidingAttention);
     }
 
-    Ok(crate::ecs::config::TextArchitecture {
+    Ok(prism_ecs_constitutional::config::TextArchitecture {
         hidden_size,
         intermediate_size,
         num_attention_heads,
@@ -578,7 +578,7 @@ pub fn extract_architecture(
         final_logit_softcapping: None,
         hidden_size_per_layer_input: 0,
         layer_types,
-        rope_local: crate::ecs::config::RopeSpec {
+        rope_local: prism_ecs_constitutional::config::RopeSpec {
             theta: rope_theta,
             rope_type: "default".into(),
             partial_rotary_factor: None,
@@ -617,7 +617,7 @@ fn find_tokenizer(gguf_path: &Path) -> Option<std::path::PathBuf> {
 /// work with the model without needing the original config.json.
 pub fn gguf_to_manifest(
     metadata: &[(String, String)],
-) -> Result<crate::ecs::config::ModelManifest, String> {
+) -> Result<prism_ecs_constitutional::config::ModelManifest, String> {
     // Build a JSON-like string from metadata for hashing (analogous to
     // config.rs hashing the raw config.json).
     let meta_json = metadata_to_json_string(metadata);
@@ -631,7 +631,7 @@ pub fn gguf_to_manifest(
     let quantization_version = meta_u64(metadata, keys::QUANTIZATION_VERSION);
     let file_type = meta_u64(metadata, keys::FILE_TYPE);
 
-    Ok(crate::ecs::config::ModelManifest {
+    Ok(prism_ecs_constitutional::config::ModelManifest {
         modality: ManifestModality::Text,
         architecture: None,
         config_path: String::new(),

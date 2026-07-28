@@ -5,7 +5,7 @@
 //! data — no 12B model required.  Every tensor, plan, manifest, and sidecar
 //! is constructed in-process from scratch.
 
-use tribunus_compute_core::config::LayerPlan;
+use prism_ecs_constitutional::config::LayerPlan;
 use tribunus_compute_core::sidecar::{
     derive_kernel_signatures, derive_residency_groups, ExecutionConditioningSidecar,
 };

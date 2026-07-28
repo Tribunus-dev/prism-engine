@@ -25,8 +25,8 @@ use std::fs::File;
 use std::io::Write;
 
 use crate::config_namespace::resolve_namespace;
-use crate::ecs::config::build_execution_plan;
-use crate::ecs::config::parse_config;
+use prism_ecs_constitutional::config::build_execution_plan;
+use prism_ecs_constitutional::config::parse_config;
 use crate::quantization::cimage::CImageWriter;
 use crate::quantization::palette::palettize_matrix;
 
@@ -559,7 +559,7 @@ pub fn compile_gguf_to_cimage(gguf_path: &Path, output_path: &Path) -> Result<()
 #[cfg(feature = "prism-backend")]
 fn write_gguf_config_json(
     path: &Path,
-    arch: &crate::ecs::config::TextArchitecture,
+    arch: &prism_ecs_constitutional::config::TextArchitecture,
     _metadata: &[(String, String)],
 ) -> Result<(), String> {
     // Determine architectures field from model_type

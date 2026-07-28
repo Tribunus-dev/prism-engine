@@ -42,10 +42,10 @@ pub struct SourceTensorInfo {
 }
 
 pub(crate) struct LoadedSource {
-    pub arch: crate::ecs::config::TextArchitecture,
-    pub manifest: crate::ecs::config::ModelManifest,
-    pub namespace: crate::ecs::config::NamespaceBinding,
-    pub spec: crate::ecs::config::ExecutionSpec,
+    pub arch: prism_ecs_constitutional::config::TextArchitecture,
+    pub manifest: prism_ecs_constitutional::config::ModelManifest,
+    pub namespace: prism_ecs_constitutional::config::NamespaceBinding,
+    pub spec: prism_ecs_constitutional::config::ExecutionSpec,
     pub source_tensors: HashMap<String, SourceTensor>,
     pub mmap_bytes: Vec<Mmap>,
     #[allow(dead_code)]
@@ -691,11 +691,11 @@ pub(crate) fn load_gguf_source(
     let auxiliary_hashes = Vec::new();
 
     // 7. Namespace + spec
-    let namespace = crate::ecs::config::resolve_namespace(&all_hf_names)
+    let namespace = prism_ecs_constitutional::config::resolve_namespace(&all_hf_names)
         .ok_or_else(|| crate::Error::from_reason("GGUF: could not resolve namespace"))?;
-    let mut spec = crate::ecs::config::compile(&arch, &namespace, None);
+    let mut spec = prism_ecs_constitutional::config::compile(&arch, &namespace, None);
     let name_set: std::collections::HashSet<String> = all_hf_names.into_iter().collect();
-    crate::ecs::config::filter_spec_to_existing(&mut spec, &name_set);
+    prism_ecs_constitutional::config::filter_spec_to_existing(&mut spec, &name_set);
 
     // 8. Validation
     let tensor_meta: HashMap<_, _> = source_tensors

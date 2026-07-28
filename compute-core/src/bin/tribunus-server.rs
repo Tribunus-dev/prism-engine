@@ -116,7 +116,7 @@ async fn main() {
     }
 
     // Load config: defaults -> config.toml -> env vars -> CLI args (highest priority)
-    let mut cfg = tribunus_compute_core::config::ServerConfig::load();
+    let mut cfg = prism_ecs_constitutional::config::ServerConfig::load();
     cfg.apply_cli_args(&args);
 
     let port = cfg.server.port;

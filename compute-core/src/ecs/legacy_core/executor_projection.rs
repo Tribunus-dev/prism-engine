@@ -7,7 +7,7 @@
 use crate::ecs::ane::hot_row_predictor::HotRowPredictor;
 use crate::ecs::ane::weight_row_cache::WeightRowCache;
 use crate::ecs::backend::MlxBackend;
-use crate::ecs::config::EpiloguePlan;
+use prism_ecs_constitutional::config::EpiloguePlan;
 use crate::ecs::projection_executor::{
     MaterializationClass, ProjectionExecutor, QuantizedProjectionDescriptor, RuntimeMode,
     StorageDtype,

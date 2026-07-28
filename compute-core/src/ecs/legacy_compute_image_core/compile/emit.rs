@@ -8,7 +8,7 @@ use crate::ecs::legacy_compute_image_core::manifest::{
     Manifest, Nf4Tile640Layout, QuantizationDesc, QuantizationProfileEntry,
     QuantizationQualityStatus, SegmentKind, ShardHash, SharedWeightLayout, SourceIdentity,
 };
-use crate::ecs::config::PackedLinearShapes;
+use prism_ecs_constitutional::config::PackedLinearShapes;
 use memmap2::Mmap;
 #[cfg(feature = "mlx-backend")]
 use mlx_rs::Array;
@@ -127,7 +127,7 @@ fn infer_shared_weight_layout(
 // ═══════════════════════════════════════════════════════════════════════════
 
 pub(crate) fn build_source_identity(
-    manifest: &crate::ecs::config::ModelManifest,
+    manifest: &prism_ecs_constitutional::config::ModelManifest,
     shard_hashes: Vec<ShardHash>,
     tokenizer_hashes: Vec<ShardHash>,
     auxiliary_hashes: Vec<ShardHash>,
@@ -216,7 +216,7 @@ pub(crate) fn compile_audio_encoder_tensors(
     source_tensors: &HashMap<String, SourceTensor>,
     mmap_bytes: &[Mmap],
     emitted_ids: &mut HashMap<String, u32>,
-    audio_config: Option<crate::ecs::config::AudioArchitecture>,
+    audio_config: Option<prism_ecs_constitutional::config::AudioArchitecture>,
 ) -> crate::Result<()> {
     let mut audio_names: Vec<&String> = source_tensors
         .keys()
@@ -266,7 +266,7 @@ pub(crate) fn emit_binding_set(
     builder: &mut crate::ecs::legacy_compute_image_core::manifest::ImageBuilder,
     source_tensors: &HashMap<String, SourceTensor>,
     mmap_bytes: &[Mmap],
-    binding: &crate::ecs::config::TensorBinding,
+    binding: &prism_ecs_constitutional::config::TensorBinding,
     layer: Option<u32>,
 ) -> crate::Result<u32> {
     let role = format!("{:?}", binding.role);
@@ -310,7 +310,7 @@ pub(crate) fn compute_manifest_hash(manifest: &Manifest) -> String {
         compiler_version: &'a str,
         runtime_abi: &'a str,
         source: &'a SourceIdentity,
-        architecture: &'a crate::ecs::config::TextArchitecture,
+        architecture: &'a prism_ecs_constitutional::config::TextArchitecture,
         segments: &'a [crate::ecs::legacy_compute_image_core::manifest::Segment],
         tensor_table: &'a [crate::ecs::legacy_compute_image_core::manifest::TensorEntry],
         alias_table: &'a [crate::ecs::legacy_compute_image_core::manifest::AliasEntry],

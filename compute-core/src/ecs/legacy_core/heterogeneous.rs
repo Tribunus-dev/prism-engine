@@ -8,7 +8,7 @@ use mlx_rs::Array;
 
 use crate::ecs::arena::Arena;
 use crate::ecs::arena::DataType;
-use crate::ecs::config::operation_route::OperationRoute;
+use prism_ecs_constitutional::config::operation_route::OperationRoute;
 use crate::ecs::memory_impl::allocator::IosurfaceAllocator;
 use crate::log_debug;
 
@@ -626,7 +626,7 @@ pub struct ComputeRuntime {
 
 pub fn run_layer_heterogeneous(
     hidden: &Array,
-    plan: &crate::ecs::config::LayerPlan,
+    plan: &prism_ecs_constitutional::config::LayerPlan,
     route: &OperationRoute,
     island: Option<&SharedMemoryIsland>,
     attn_norm: &Array,

@@ -8,8 +8,8 @@
 
 use crate::ecs::ane::moe_scheduler::{AneMoEScheduler, ExpertWeights};
 use prism_ecs_kernel::backend::routing::{BackendId, BACKEND_ANE, BACKEND_MLX};
-use crate::ecs::config::operation_route::OperationRoute;
-use crate::ecs::config::{LayerPlan, ProloguePlan};
+use prism_ecs_constitutional::config::operation_route::OperationRoute;
+use prism_ecs_constitutional::config::{LayerPlan, ProloguePlan};
 use crate::ecs::kv_cache::KvCache;
 use crate::ecs::projection_identity::{ProjectionContext, ProjectionFamily};
 use crate::log_debug;
@@ -1293,7 +1293,7 @@ pub fn run_moe_layer(
     router_weight: &Array,
     router_bias: Option<&Array>,
     expert_weights: &[ExpertWeights],
-    moe_config: &crate::ecs::config::MoEConfig,
+    moe_config: &prism_ecs_constitutional::config::MoEConfig,
     scheduler: &AneMoEScheduler,
 ) -> MlxResult<Array> {
     let logits = hidden.matmul(router_weight)?;

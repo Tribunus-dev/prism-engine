@@ -132,4 +132,4 @@ impl TargetCapabilities {
 }
 
 /// Import common types used by the pipeline.
-pub use crate::ecs::config::HardwareTarget as TargetHardware; // compat alias
+pub use prism_ecs_constitutional::config::HardwareTarget as TargetHardware; // compat alias
