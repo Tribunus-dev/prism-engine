@@ -3226,7 +3226,7 @@ fn cmd_cimage_bitnet_emit_checkpoint(args: &[String]) -> Result<(), String> {
         .unwrap_or(32);
     let json_output = has_flag(args, "--json");
 
-    use tribunus_compute_core::bitnet::phases::emit_bitnet_from_checkpoint;
+    use prism_ecs_quantization::bitnet::phases::emit_bitnet_from_checkpoint;
     use tribunus_compute_core::cimage::*;
 
     // Streaming write: processes one tensor at a time, writes directly to disk
@@ -3370,12 +3370,12 @@ fn cmd_cimage_bitnet_text_smoke_test(args: &[String]) -> Result<(), String> {
         .unwrap_or(10);
     let json_output = has_flag(args, "--json");
 
-    use tribunus_compute_core::bitnet::checkpoint::{
+    use prism_ecs_quantization::bitnet::checkpoint::{
         make_ternary_from_checkpoint, BitNetCheckpoint,
     };
-    use tribunus_compute_core::bitnet::phases::BitNetDecoderLayerShardConfig;
-    use tribunus_compute_core::bitnet::text::{run_text, BitNetTokenizer};
-    use tribunus_compute_core::ternary::codec::TernaryPackedTensor;
+    use prism_ecs_quantization::bitnet::phases::BitNetDecoderLayerShardConfig;
+    use prism_ecs_quantization::bitnet::text::{run_text, BitNetTokenizer};
+    use prism_ecs_quantization::bitnet::ternary_codec::TernaryPackedTensor;
 
     // 1. Load checkpoint
     let ckpt = BitNetCheckpoint::load(std::path::Path::new(checkpoint_path))

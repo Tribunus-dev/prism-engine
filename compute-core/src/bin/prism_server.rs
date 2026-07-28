@@ -74,8 +74,8 @@ use tribunus_compute_core::tts::pipeline::{pcm_chunk_to_wav, pcm_to_wav, TtsPipe
 // ── BitNet runtime ─────────────────────────────────────────────────────────
 
 /// Placeholder stub — will be replaced by
-/// `tribunus_compute_core::bitnet::text::BitNetRuntime` when the module is
-/// merged upstream.
+/// `prism_ecs_quantization::bitnet::text::BitNetRuntime` when the module
+/// is fully wired up.
 struct BitNetRuntime;
 impl BitNetRuntime {
     fn from_cimage(_path: &std::path::Path) -> Result<Self, String> {
