@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::backend::placement::ExecutionLane;
+use prism_ecs_kernel::backend::placement::ExecutionLane;
 use crate::ecs::compilation::phase_ir::TensorDtype;
 use crate::ecs::compilation::phase_types::MaterializationMode;
 use crate::ecs::compute_image::slot_types::SlotState;

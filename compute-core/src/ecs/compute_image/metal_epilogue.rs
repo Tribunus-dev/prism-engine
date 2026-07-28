@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::backend::placement::ExecutionLane;
+use prism_ecs_kernel::backend::placement::ExecutionLane;
 use crate::ecs::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 
 // ── Epilogue variant ─────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ pub fn choose_epilogue(
 
 #[cfg(test)]
 mod tests {
-    use crate::ecs::backend::placement::ExecutionLane;
+    use prism_ecs_kernel::backend::placement::ExecutionLane;
     use crate::ecs::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
     use crate::ecs::compute_image::metal_epilogue::{
         choose_epilogue, select_epilogue, EpilogueSelectionRule, MetalCodegenContext,

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // Re-export shared type identities.
-pub use crate::ecs::backend::placement::ExecutionLane;
+pub use prism_ecs_kernel::backend::placement::ExecutionLane;
 pub use crate::ecs::compilation::activation_abi::ActivationAbi;
 pub use crate::integration::ContentHash;
 
@@ -719,7 +719,7 @@ pub struct CompiledPhaseGraph {
 pub struct CompiledPhaseNode {
     pub phase_id: PhaseId,
     pub variant_set_id: VariantSetId,
-    pub operation_family: crate::ecs::backend::routing::OperationFamily,
+    pub operation_family: prism_ecs_kernel::backend::routing::OperationFamily,
     pub ready_condition: ReadyCondition,
     pub parallel_group: Option<ParallelGroupId>,
     pub priority_class: PriorityClass,
@@ -1318,7 +1318,7 @@ mod tests {
                 CompiledPhaseNode {
                     phase_id: 0,
                     variant_set_id: 0,
-                    operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+                    operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
                     ready_condition: ReadyCondition::AlwaysReady,
                     parallel_group: Some(0),
                     priority_class: PriorityClass::Critical,
@@ -1326,7 +1326,7 @@ mod tests {
                 CompiledPhaseNode {
                     phase_id: 1,
                     variant_set_id: 1,
-                    operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+                    operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
                     ready_condition: ReadyCondition::AllDependenciesSatisfied,
                     parallel_group: Some(0),
                     priority_class: PriorityClass::Critical,
@@ -1334,7 +1334,7 @@ mod tests {
                 CompiledPhaseNode {
                     phase_id: 2,
                     variant_set_id: 2,
-                    operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+                    operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
                     ready_condition: ReadyCondition::AllDependenciesSatisfied,
                     parallel_group: None,
                     priority_class: PriorityClass::Interactive,
