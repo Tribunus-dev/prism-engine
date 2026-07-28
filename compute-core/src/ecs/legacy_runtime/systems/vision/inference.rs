@@ -22,17 +22,17 @@ use lazy_static::lazy_static;
 
 use crate::ecs::constitutional::multimodal::{PipelineModality, PipelineStage};
 use crate::ecs::constitutional::pipeline_bridge::PipelineBridge;
-use crate::ecs::runtime::components::worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
-use crate::ecs::runtime::components::worker_request::WorkerRequest;
-use crate::ecs::runtime::components::worker_stream::WorkerStream;
-use crate::ecs::runtime::resources::vision::VisionEncoderResource;
-use crate::ecs::runtime::scheduling::access::{ComponentSet, ResourceSet};
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::components::worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
+use crate::ecs::legacy_runtime::components::worker_request::WorkerRequest;
+use crate::ecs::legacy_runtime::components::worker_stream::WorkerStream;
+use crate::ecs::legacy_runtime::resources::vision::VisionEncoderResource;
+use crate::ecs::legacy_runtime::scheduling::access::{ComponentSet, ResourceSet};
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
-use crate::ecs::runtime::world::{Entity, World};
+use crate::ecs::legacy_runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
 // System

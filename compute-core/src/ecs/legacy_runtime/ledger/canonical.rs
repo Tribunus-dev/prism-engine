@@ -1,5 +1,5 @@
-use crate::ecs::runtime::ledger::entry::DeterministicReceiptPayload;
-use crate::ecs::runtime::ledger::error::CanonicalEncodingError;
+use crate::ecs::legacy_runtime::ledger::entry::DeterministicReceiptPayload;
+use crate::ecs::legacy_runtime::ledger::error::CanonicalEncodingError;
 
 pub trait CanonicalReceiptEncoder {
     fn encode(

@@ -6,4 +6,4 @@
 //! `crate::profiled_executor::ProfiledInferenceSession`, etc.
 
 pub use crate::ecs::profiled_model::*;
-pub use crate::ecs::runtime::systems::inference::session::*;
+pub use crate::ecs::legacy_runtime::systems::inference::session::*;

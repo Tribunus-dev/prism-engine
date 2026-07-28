@@ -2,7 +2,7 @@
 //! firing `RuntimeSignal` events caught by the P-core multiplexer's
 //! injection window during the next ANE dispatch cycle.
 
-use crate::ecs::runtime::signal_bus::{RuntimeSignal, SignalBus};
+use crate::ecs::legacy_runtime::signal_bus::{RuntimeSignal, SignalBus};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;

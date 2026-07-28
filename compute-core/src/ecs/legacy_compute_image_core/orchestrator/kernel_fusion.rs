@@ -14,13 +14,7 @@
 //!   pressure limits on Apple Silicon).
 //! - SWA (Sliding Window Attention) and Full attention never fuse together.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile_orchestrator/kernel_fusion.rs
 use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/orchestrator/kernel_fusion.rs
-use crate::ecs::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
-========
-use crate::ecs::legacy_compute_image_core::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/orchestrator/kernel_fusion.rs
 
 /// A fused kernel group: N consecutive layers that can be merged into
 /// a single Metal kernel dispatch.
@@ -118,13 +112,7 @@ pub fn analyze_graph(graph: &ExecutionGraphDescriptor) -> Vec<FusedLayerGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile_orchestrator/kernel_fusion.rs
     use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{AttentionKind, LayerExecutionNode};
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/orchestrator/kernel_fusion.rs
-    use crate::ecs::compute_image::compile::execution_graph::{AttentionKind, LayerExecutionNode};
-========
-    use crate::ecs::legacy_compute_image_core::compile::execution_graph::{AttentionKind, LayerExecutionNode};
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/orchestrator/kernel_fusion.rs
 
     fn make_decoder(attention_kind: u8, head_dim: u16, compaction_epoch: u8) -> LayerExecutionNode {
         LayerExecutionNode {

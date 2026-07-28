@@ -14,13 +14,7 @@ pub struct SealedComputeImageExecutable {
     pub model_identity: ModelIdentity,
     pub model_graph_hash: ContentHash,
     pub tokenizer_hash: ContentHash,
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/executable/schema.rs
     pub content_store: crate::ecs::compute_image::legacy_compute_image_runtime::content_store::ContentAddressedContentStore,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/executable/schema.rs
-    pub content_store: crate::ecs::compute_image::content_store::ContentAddressedContentStore,
-========
-    pub content_store: crate::ecs::legacy_compute_image_core::content_store::ContentAddressedContentStore,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/executable/schema.rs
     pub target_profiles: Vec<super::profile::ExecutableTargetProfile>,
     pub executable_seal: super::seal::ExecutableSeal,
     pub compile_time_receipts: CompileTimeReceiptBundle,

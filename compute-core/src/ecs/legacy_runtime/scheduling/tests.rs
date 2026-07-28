@@ -4,20 +4,20 @@
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::component_id::{
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::component_id::{
     ComponentId, ComponentMask, ComponentRegistry, ResourceId, ResourceMask, SchedulableComponent,
     SchedulableResource,
 };
-use crate::ecs::runtime::scheduling::error::MaskError;
-use crate::ecs::runtime::scheduling::error::{RegistryError, ScheduleError};
-use crate::ecs::runtime::scheduling::manifest::MANIFEST_SCHEMA_VERSION;
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::scheduling::error::MaskError;
+use crate::ecs::legacy_runtime::scheduling::error::{RegistryError, ScheduleError};
+use crate::ecs::legacy_runtime::scheduling::manifest::MANIFEST_SCHEMA_VERSION;
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult,
 };
-use crate::ecs::runtime::scheduling::schedule::Schedule;
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::scheduling::schedule::Schedule;
+use crate::ecs::legacy_runtime::world::World;
 
 
 

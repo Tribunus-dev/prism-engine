@@ -18,8 +18,8 @@ use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
     QUANT_SCHEMA_NF4_TILE640, QUANT_SCHEMA_TERNARY_TILE640,
 };
 use crate::ecs::compute_image::legacy_compute_image_compile::tts_compile::pack_tts_weights;
-use crate::ecs::compute_image::manifest::Manifest;
-use crate::ecs::compute_image::manifest::SharedWeightLayout;
+use crate::ecs::legacy_compute_image_core::manifest::Manifest;
+use crate::ecs::legacy_compute_image_core::manifest::SharedWeightLayout;
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::descriptor::{
     MultimodalInputDescriptorV1, ProjectionRole, ProjectionTensorRecord,
     MULTIMODAL_DESCRIPTOR_MAGIC,
@@ -2975,7 +2975,7 @@ fn header_fields_from_manifest(manifest: Option<&Manifest>) -> (u32, u32, u32, u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::manifest::{
+    use crate::ecs::legacy_compute_image_core::manifest::{
         CompileReadiness, Nf4Tile640Layout, QuantizationDesc, QuantizationQualityStatus,
         ResidencyPlan, Segment, SegmentKind as ManifestSegmentKind, ShardHash, SharedWeightLayout,
         SourceIdentity, TensorEntry,

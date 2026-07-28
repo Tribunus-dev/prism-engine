@@ -17,13 +17,7 @@ pub struct ExecutableTargetProfile {
     pub hardware_contract: HardwareTargetContract,
     pub runtime_contract: RuntimeTargetContract,
     pub shape_variants: Vec<super::variant::ShapeSpecializedProgram>,
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/executable/profile.rs
     pub residency_plans: Vec<crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::CompiledResidencyPlan>,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/executable/profile.rs
-    pub residency_plans: Vec<crate::ecs::compute_image::residency::plan::CompiledResidencyPlan>,
-========
-    pub residency_plans: Vec<crate::ecs::legacy_compute_image_core::residency::plan::CompiledResidencyPlan>,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/executable/profile.rs
     pub default_variant_selection: DefaultVariantSelection,
 }
 

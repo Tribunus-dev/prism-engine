@@ -10,11 +10,11 @@ use std::collections::HashMap;
 
 use serde::de::DeserializeOwned;
 
-use crate::ecs::runtime::components::worker_assignment::WorkerAssignment;
-use crate::ecs::runtime::components::worker_health::WorkerHeartbeat;
-use crate::ecs::runtime::components::worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
-use crate::ecs::runtime::ledger::entry::SemanticCommandPayload;
-use crate::ecs::runtime::ledger::error::LedgerProjectionError;
+use crate::ecs::legacy_runtime::components::worker_assignment::WorkerAssignment;
+use crate::ecs::legacy_runtime::components::worker_health::WorkerHeartbeat;
+use crate::ecs::legacy_runtime::components::worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase};
+use crate::ecs::legacy_runtime::ledger::entry::SemanticCommandPayload;
+use crate::ecs::legacy_runtime::ledger::error::LedgerProjectionError;
 
 /// Boxed decoder: given raw component bytes, produce a semantic payload or
 /// return a projection error.

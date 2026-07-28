@@ -4,7 +4,7 @@
 //! and pushes an ingress entry so the normal ECS pipeline processes the
 //! request.  The concrete component setup will be wired in a later slice.
 
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::world::World;
 
 /// Bridge helper that translates legacy-style request submissions into
 /// ECS entity creation with ingress queue population.

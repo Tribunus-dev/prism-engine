@@ -20,21 +20,21 @@
 /// | Failure       | Transition `Failed`; write `WorkerOutcome::failure`        |
 use std::sync::OnceLock;
 
-use crate::ecs::runtime::components::{
+use crate::ecs::legacy_runtime::components::{
     worker_health::{TerminalStatus, WorkerErrorCategory},
     WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
     WorkerRequestPhase, WorkerStream, WORKER_EVENT_DRAIN_SYSTEM,
 };
-use crate::ecs::runtime::resources::{
+use crate::ecs::legacy_runtime::resources::{
     EventKind, MonotonicClockResource, WorkerDiagnosticsResource, WorkerEventSource,
     WorkerResponseRegistry,
 };
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
-use crate::ecs::runtime::world::{Entity, World};
+use crate::ecs::legacy_runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
 // System
@@ -253,7 +253,7 @@ impl ErasedSystem for WorkerEventDrainSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::runtime::world::World;
+    use crate::ecs::legacy_runtime::world::World;
 
     fn setup_world() -> World {
         let mut world = World::with_capacity(64);

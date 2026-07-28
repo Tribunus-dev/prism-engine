@@ -73,7 +73,7 @@ pub const VISION_ENCODER_RESOURCE: crate::ecs::runtime::scheduling::component_id
 
 // ── SchedulableResource impls ─────────────────────────────────────────
 
-use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
+use crate::ecs::legacy_runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 
 impl SchedulableResource for WorkerPoolResource {
     const RESOURCE_ID: ResourceId = WORKER_POOL_RESOURCE;

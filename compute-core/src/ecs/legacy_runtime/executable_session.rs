@@ -14,7 +14,7 @@
 //!    [`LaneArtifactRegistry`].
 //! 5. **Return the prepared session** for scheduler handoff (E5).
 
-use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
+use crate::ecs::legacy_compute_image_core::execution_shape::ExecutionShapeClass;
 use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SerializedPhaseProgram;
 use crate::ecs::compute_image::legacy_compute_image_runtime::residency::admission::{
     ResidencyAdmission, ResidencyAdmissionResult,
@@ -23,9 +23,9 @@ use crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::Co
 use crate::ecs::compute_image::legacy_compute_image_runtime::variants::selection::{
     select_program_variant, VariantSelectionRefusal,
 };
-use crate::ecs::runtime::executable_bindings::ExecutableBindings;
-use crate::ecs::runtime::executable_lane::LaneArtifactRegistry;
-use crate::ecs::runtime::executable_seal::SealVerificationReceipt;
+use crate::ecs::legacy_runtime::executable_bindings::ExecutableBindings;
+use crate::ecs::legacy_runtime::executable_lane::LaneArtifactRegistry;
+use crate::ecs::legacy_runtime::executable_seal::SealVerificationReceipt;
 use std::sync::Arc;
 
 /// Opaque backend handles bundled for phase-runner dispatch.

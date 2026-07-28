@@ -5,7 +5,7 @@
 //!
 //! [`AudioEncoder`]: prism_audio::asr_pipeline::encoder::AudioEncoder
 
-use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
+use crate::ecs::legacy_runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 use prism_audio::asr_pipeline::AudioEncoder;
 
 /// Stable resource ID for the audio encoder singleton.

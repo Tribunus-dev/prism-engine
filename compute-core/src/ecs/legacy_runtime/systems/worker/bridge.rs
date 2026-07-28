@@ -6,9 +6,9 @@
 //! implementation is a no-op placeholder; real functionality will be
 //! wired when the legacy endpoints are connected.
 
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::*;
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::*;
+use crate::ecs::legacy_runtime::world::World;
 use prism_ecs_runtime::scheduling::systems::agent_bridge::AgentBridge;
 
 // ---------------------------------------------------------------------------

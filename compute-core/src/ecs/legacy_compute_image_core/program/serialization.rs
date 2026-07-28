@@ -5,13 +5,7 @@
 //! selects the encoding format — JSON is always available; MessagePack
 //! requires the `msgpack` Cargo feature.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/program/serialization.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SerializedPhaseProgram;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/program/serialization.rs
-use crate::ecs::compute_image::program::phase_program::SerializedPhaseProgram;
-========
-use crate::ecs::legacy_compute_image_core::program::phase_program::SerializedPhaseProgram;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/program/serialization.rs
 
 /// Serialization format for phase programs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

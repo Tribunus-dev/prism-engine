@@ -6,22 +6,10 @@
     feature = "prism-backend-ios"
 ))]
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
-use crate::ecs::compute_image::cimage_loader::CimageDeployment;
+use crate::ecs::legacy_compute_image_core::cimage_loader::CimageDeployment;
 use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
 use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{verify_cimage, SegmentEntry, SegmentKind};
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-use crate::ecs::compute_image::cimage_loader::CimageDeployment;
-use crate::ecs::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
-use crate::ecs::compute_image::compile::ternary::{verify_cimage, SegmentEntry, SegmentKind};
-use crate::ecs::compute_image::multimodal::{
-========
-use crate::ecs::legacy_compute_image_core::cimage_loader::CimageDeployment;
-use crate::ecs::legacy_compute_image_core::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
-use crate::ecs::legacy_compute_image_core::compile::ternary::{verify_cimage, SegmentEntry, SegmentKind};
-use crate::ecs::legacy_compute_image_core::multimodal::{
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
     MultimodalArtifactSummary, MultimodalCapabilities, MultimodalInputDescriptorV1,
     ProjectionPrecision, ProjectionRole, ProjectionTensorRecord,
 };
@@ -149,13 +137,7 @@ impl SealedMultimodalBindings {
 
     pub fn validate_node_binding(
         &self,
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
         node: &crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::LayerExecutionNode,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-        node: &crate::ecs::compute_image::compile::execution_graph::LayerExecutionNode,
-========
-        node: &crate::ecs::legacy_compute_image_core::compile::execution_graph::LayerExecutionNode,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
     ) -> Result<&ProjectionTensorBinding, String> {
         let node_kind = match node.node_kind {
             x if x == NodeKind::VisionPatchEmbed as u8 => NodeKind::VisionPatchEmbed,
@@ -441,25 +423,11 @@ fn is_audio_role(role: ProjectionRole) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
     use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-    use crate::ecs::compute_image::compile::execution_graph::{
-========
-    use crate::ecs::legacy_compute_image_core::compile::execution_graph::{
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
         DeviceCapability, ExecutionGraphDescriptor, LayerExecutionNode, NodeKind,
     };
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
     use crate::ecs::compute_image::legacy_compute_image_compile::ternary::CIMAGE_SEGMENT_CAPACITY;
     use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::MULTIMODAL_DESCRIPTOR_MAGIC;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-    use crate::ecs::compute_image::compile::ternary::CIMAGE_SEGMENT_CAPACITY;
-    use crate::ecs::compute_image::multimodal::MULTIMODAL_DESCRIPTOR_MAGIC;
-========
-    use crate::ecs::legacy_compute_image_core::compile::ternary::CIMAGE_SEGMENT_CAPACITY;
-    use crate::ecs::legacy_compute_image_core::multimodal::MULTIMODAL_DESCRIPTOR_MAGIC;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
 
     fn make_descriptor() -> MultimodalInputDescriptorV1 {
         let mut desc = MultimodalInputDescriptorV1::default();
@@ -554,21 +522,9 @@ mod tests {
             image: true,
             audio: false,
             image_projection_backend:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
                 crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionBackend::None,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-                crate::ecs::compute_image::multimodal::ProjectionBackend::None,
-========
-                crate::ecs::legacy_compute_image_core::multimodal::ProjectionBackend::None,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
             audio_projection_backend:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
                 crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionBackend::None,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-                crate::ecs::compute_image::multimodal::ProjectionBackend::None,
-========
-                crate::ecs::legacy_compute_image_core::multimodal::ProjectionBackend::None,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
             max_images_per_prompt: 0,
             max_soft_tokens_per_image: 0,
             supports_mixed_embedding_prefill: false,
@@ -711,21 +667,9 @@ mod tests {
                 image: true,
                 audio: true,
                 image_projection_backend:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
                     crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionBackend::Metal,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-                    crate::ecs::compute_image::multimodal::ProjectionBackend::Metal,
-========
-                    crate::ecs::legacy_compute_image_core::multimodal::ProjectionBackend::Metal,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
                 audio_projection_backend:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
                     crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionBackend::Metal,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-                    crate::ecs::compute_image::multimodal::ProjectionBackend::Metal,
-========
-                    crate::ecs::legacy_compute_image_core::multimodal::ProjectionBackend::Metal,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
                 max_images_per_prompt: 1,
                 max_soft_tokens_per_image: 1024,
                 supports_mixed_embedding_prefill: true,
@@ -788,21 +732,9 @@ mod tests {
                 image: true,
                 audio: true,
                 image_projection_backend:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
                     crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionBackend::Metal,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-                    crate::ecs::compute_image::multimodal::ProjectionBackend::Metal,
-========
-                    crate::ecs::legacy_compute_image_core::multimodal::ProjectionBackend::Metal,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
                 audio_projection_backend:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
                     crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionBackend::Metal,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-                    crate::ecs::compute_image::multimodal::ProjectionBackend::Metal,
-========
-                    crate::ecs::legacy_compute_image_core::multimodal::ProjectionBackend::Metal,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
                 max_images_per_prompt: 1,
                 max_soft_tokens_per_image: 1024,
                 supports_mixed_embedding_prefill: true,
@@ -836,13 +768,7 @@ mod tests {
         .expect("bindings");
 
         let graph = ExecutionGraphDescriptor {
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/binding.rs
             magic: crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::EXECUTION_GRAPH_MAGIC,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/binding.rs
-            magic: crate::ecs::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
-========
-            magic: crate::ecs::legacy_compute_image_core::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/binding.rs
             version: 1,
             num_layers: 1,
             num_draft_layers: 0,

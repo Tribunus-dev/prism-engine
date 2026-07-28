@@ -15,13 +15,13 @@ use crate::ecs::compute_image::legacy_compute_image_compile::capability_registry
 use crate::ecs::compute_image::legacy_compute_image_compile::ternary::MatrixWeightBindingV1;
 pub use crate::ecs::compute_image::legacy_compute_image_compile::ternary::ModelConfig;
 use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
-use crate::ecs::runtime::ecs_components::{
+use crate::ecs::legacy_runtime::ecs_components::{
     CodesData, CompilationPhase, CompilationStatus, ReconstructedWeights, RefinementOutcome,
     SourceWeights, TensorBinding, TensorShape,
 };
-use crate::ecs::runtime::stage_graph::{StageConfig, StageGraph, StageQuantizationConfig};
-use crate::ecs::runtime::world::{Entity, World};
-use crate::ecs::runtime::world_txn::WorldTxn;
+use crate::ecs::legacy_runtime::stage_graph::{StageConfig, StageGraph, StageQuantizationConfig};
+use crate::ecs::legacy_runtime::world::{Entity, World};
+use crate::ecs::legacy_runtime::world_txn::WorldTxn;
 use crate::ecs::training_target::engram::dataset::EngramTrainingDataset;
 use crate::ecs::training_target::engram::trainer::EngramTrainer;
 use crate::quantization::admission::{

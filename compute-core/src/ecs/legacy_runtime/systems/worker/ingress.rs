@@ -4,17 +4,17 @@
 //! This system runs during `Stage::Intake` and is responsible for the
 //! Queued → Dispatching → AwaitingFirstEvent (or → Failed) transition.
 
-use crate::ecs::runtime::components::worker_health::{TerminalStatus, WorkerErrorCategory};
-use crate::ecs::runtime::components::worker_request::RequestClass;
-use crate::ecs::runtime::components::{
+use crate::ecs::legacy_runtime::components::worker_health::{TerminalStatus, WorkerErrorCategory};
+use crate::ecs::legacy_runtime::components::worker_request::RequestClass;
+use crate::ecs::legacy_runtime::components::{
     WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
     WorkerRequestPhase, WORKER_INGRESS_SYSTEM,
 };
-use crate::ecs::runtime::resources::*;
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::*;
-use crate::ecs::runtime::world::{Entity, World};
-use crate::ecs::runtime::world_txn::WorldTxn;
+use crate::ecs::legacy_runtime::resources::*;
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::*;
+use crate::ecs::legacy_runtime::world::{Entity, World};
+use crate::ecs::legacy_runtime::world_txn::WorldTxn;
 
 // ---------------------------------------------------------------------------
 // Constants

@@ -3,8 +3,8 @@
 //! `ComponentSet` and `ResourceSet` are implemented for tuples of component
 //! types and compiled into bitwise masks for O(1) overlap checks.
 
-use crate::ecs::runtime::scheduling::component_id::{ComponentMask, ResourceMask};
-use crate::ecs::runtime::scheduling::error::MaskError;
+use crate::ecs::legacy_runtime::scheduling::component_id::{ComponentMask, ResourceMask};
+use crate::ecs::legacy_runtime::scheduling::error::MaskError;
 
 /// A set of component types that a system intends to read or write.
 ///
@@ -98,7 +98,7 @@ impl_resource_set_tuple!(A, B, C, D, E, F);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::runtime::scheduling::component_id::*;
+    use crate::ecs::legacy_runtime::scheduling::component_id::*;
 
     struct A;
     impl SchedulableComponent for A {

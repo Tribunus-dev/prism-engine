@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::runtime::ledger::canonical::{CanonicalReceiptEncoder, JcsReceiptEncoder};
-use crate::ecs::runtime::ledger::entry::DeterministicReceiptPayload;
-use crate::ecs::runtime::ledger::error::ReceiptDigestError;
+use crate::ecs::legacy_runtime::ledger::canonical::{CanonicalReceiptEncoder, JcsReceiptEncoder};
+use crate::ecs::legacy_runtime::ledger::entry::DeterministicReceiptPayload;
+use crate::ecs::legacy_runtime::ledger::error::ReceiptDigestError;
 
 pub const TRANSITION_RECEIPT_DIGEST_ALGORITHM: &str = "blake3-256-jcs-rfc8785";
 

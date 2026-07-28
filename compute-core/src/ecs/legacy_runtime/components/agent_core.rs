@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use crate::ecs::runtime::agent_slot::STATE_IDLE;
+use crate::ecs::legacy_runtime::agent_slot::STATE_IDLE;
 
 // ---------------------------------------------------------------------------
 // Hot-path — agent slot state machine (cache-line-aligned, atomic)

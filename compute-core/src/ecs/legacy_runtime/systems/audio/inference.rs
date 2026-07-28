@@ -18,19 +18,19 @@ use lazy_static::lazy_static;
 
 use crate::ecs::constitutional::multimodal::{PipelineModality, PipelineStage};
 use crate::ecs::constitutional::pipeline_bridge::PipelineBridge;
-use crate::ecs::runtime::components::{
+use crate::ecs::legacy_runtime::components::{
     worker_lifecycle::{WorkerLifecycle, WorkerRequestPhase},
     worker_request::RequestClass,
     WorkerRequest, WorkerStream,
 };
-use crate::ecs::runtime::resources::audio::AudioEncoderResource;
-use crate::ecs::runtime::resources::text_to_speech::TextToSpeechResource;
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::resources::audio::AudioEncoderResource;
+use crate::ecs::legacy_runtime::resources::text_to_speech::TextToSpeechResource;
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
-use crate::ecs::runtime::world::{Entity, World};
+use crate::ecs::legacy_runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
 // AudioFeatures — marker component for entities with encoded audio features

@@ -8,8 +8,8 @@
 
 use std::fmt;
 
-use crate::ecs::runtime::scheduling::component_id::ComponentId;
-use crate::ecs::runtime::scheduling::metadata::SystemId;
+use crate::ecs::legacy_runtime::scheduling::component_id::ComponentId;
+use crate::ecs::legacy_runtime::scheduling::metadata::SystemId;
 
 // ---------------------------------------------------------------------------
 // MaskError

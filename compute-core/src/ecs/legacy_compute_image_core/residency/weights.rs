@@ -13,13 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/weights.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::content_store::index::{ContentObjectEntry, ResidencyClass};
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/weights.rs
-use crate::ecs::compute_image::content_store::index::{ContentObjectEntry, ResidencyClass};
-========
-use crate::ecs::legacy_compute_image_core::content_store::index::{ContentObjectEntry, ResidencyClass};
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/weights.rs
 use crate::integration::ContentHash;
 
 /// Descriptor for a weight tensor whose residency has been classified.
@@ -190,13 +184,7 @@ fn estimate_lifetime(consumer_phases: &[String], all_phase_ids: &[String]) -> Ve
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/weights.rs
     use crate::ecs::compute_image::legacy_compute_image_runtime::content_store::index::ArtifactConsumerRef;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/weights.rs
-    use crate::ecs::compute_image::content_store::index::ArtifactConsumerRef;
-========
-    use crate::ecs::legacy_compute_image_core::content_store::index::ArtifactConsumerRef;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/weights.rs
 
     fn make_consumer(phase: &str) -> ArtifactConsumerRef {
         ArtifactConsumerRef {
@@ -211,13 +199,7 @@ mod tests {
             object_id: object_id.into(),
             content_hash: ContentHash(0),
             object_kind:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/weights.rs
                 crate::ecs::compute_image::legacy_compute_image_runtime::content_store::index::ContentObjectKind::CanonicalWeight,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/weights.rs
-                crate::ecs::compute_image::content_store::index::ContentObjectKind::CanonicalWeight,
-========
-                crate::ecs::legacy_compute_image_core::content_store::index::ContentObjectKind::CanonicalWeight,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/weights.rs
             target_layout_id: "layout_1".into(),
             segment_id: "seg_0".into(),
             segment_offset: 0,
@@ -232,13 +214,7 @@ mod tests {
             checksum: ContentHash(0),
             consumers,
             residency_class:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/weights.rs
                 crate::ecs::compute_image::legacy_compute_image_runtime::content_store::index::ResidencyClass::DiskOnly,
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/weights.rs
-                crate::ecs::compute_image::content_store::index::ResidencyClass::DiskOnly,
-========
-                crate::ecs::legacy_compute_image_core::content_store::index::ResidencyClass::DiskOnly,
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/weights.rs
         }
     }
 

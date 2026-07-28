@@ -5,7 +5,7 @@
 //!
 //! [`TextToSpeechGenerator`]: crate::ecs::generation::text_to_speech::TextToSpeechGenerator
 
-use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
+use crate::ecs::legacy_runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 
 /// Stable resource ID for the TTS generator singleton.
 pub const TEXT_TO_SPEECH_RESOURCE: ResourceId = 22;

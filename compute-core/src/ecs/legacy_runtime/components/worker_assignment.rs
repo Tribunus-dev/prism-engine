@@ -5,8 +5,8 @@
 
 use std::time::Instant;
 
-use crate::ecs::runtime::components::WORKER_ASSIGNMENT_COMPONENT;
-use crate::ecs::runtime::scheduling::component_id::SchedulableComponent;
+use crate::ecs::legacy_runtime::components::WORKER_ASSIGNMENT_COMPONENT;
+use crate::ecs::legacy_runtime::scheduling::component_id::SchedulableComponent;
 use serde::{Deserialize, Serialize};
 
 /// Records the worker process assigned to a request entity.

@@ -16,13 +16,7 @@
 //! [`KernelConfiguration`] records the tiling parameters and pipeline id
 //! for a candidate kernel variant.
 //!
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/kernel_selection/mod.rs
 //! [`CompileTimeReceiptBundle`]: crate::ecs::compute_image::legacy_compute_image_runtime::executable::schema::CompileTimeReceiptBundle
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/kernel_selection/mod.rs
-//! [`CompileTimeReceiptBundle`]: crate::ecs::compute_image::executable::schema::CompileTimeReceiptBundle
-========
-//! [`CompileTimeReceiptBundle`]: crate::ecs::legacy_compute_image_core::executable::schema::CompileTimeReceiptBundle
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/kernel_selection/mod.rs
 
 #[cfg(any(
     feature = "mlx-backend",

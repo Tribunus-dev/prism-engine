@@ -353,7 +353,7 @@ mod tests {
     use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
         CimageHeader, SegmentEntry, CIMAGE_PAGE_SIZE, CIMAGE_SEGMENT_CAPACITY, PRISM_MAGIC,
     };
-    use crate::ecs::runtime::npu_pump::AneWeightPump;
+    use crate::ecs::legacy_runtime::npu_pump::AneWeightPump;
 
     /// Build a minimal cimage header + ternary weights in a temp mmap.
     fn make_minimal_cimage(

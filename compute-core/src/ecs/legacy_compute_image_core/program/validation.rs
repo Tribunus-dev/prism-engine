@@ -46,13 +46,7 @@ pub fn validate_program(program: &SerializedPhaseProgram) -> ProgramValidationRe
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/program/validation.rs
     use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::*;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/program/validation.rs
-    use crate::ecs::compute_image::program::phase_program::*;
-========
-    use crate::ecs::legacy_compute_image_core::program::phase_program::*;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/program/validation.rs
 
     #[test]
     fn test_empty_phase_list() {

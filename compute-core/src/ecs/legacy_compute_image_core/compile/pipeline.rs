@@ -6,33 +6,13 @@ use super::emit::{
     compute_manifest_hash, emit_binding_set,
 };
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/pipeline.rs
-use crate::ecs::compute_image::cimage_packer::pack_cimage_from_dir;
-use crate::ecs::compute_image::compatibility::CompatibilityMatrix;
-use crate::ecs::compute_image::legacy_compute_image_compile::hardware::run_hardware_assessment;
-use crate::ecs::compute_image::legacy_compute_image_compile::quantize::apply_quantize_to_loaded;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/pipeline.rs
-use crate::ecs::compute_image::cimage_packer::pack_cimage_from_dir;
-use crate::ecs::compute_image::compatibility::CompatibilityMatrix;
-use crate::ecs::compute_image::compile::hardware::run_hardware_assessment;
-use crate::ecs::compute_image::compile::quantize::apply_quantize_to_loaded;
-========
 use crate::ecs::legacy_compute_image_core::cimage_packer::pack_cimage_from_dir;
 use crate::ecs::legacy_compute_image_core::compatibility::CompatibilityMatrix;
-use crate::ecs::legacy_compute_image_core::compile::hardware::run_hardware_assessment;
-use crate::ecs::legacy_compute_image_core::compile::quantize::apply_quantize_to_loaded;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/pipeline.rs
+use crate::ecs::compute_image::legacy_compute_image_compile::hardware::run_hardware_assessment;
+use crate::ecs::compute_image::legacy_compute_image_compile::quantize::apply_quantize_to_loaded;
 #[cfg(feature = "prism-backend")]
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/pipeline.rs
 use crate::ecs::compute_image::legacy_compute_image_compile::source::load_gguf_source;
 use crate::ecs::compute_image::legacy_compute_image_compile::source::{
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/pipeline.rs
-use crate::ecs::compute_image::compile::source::load_gguf_source;
-use crate::ecs::compute_image::compile::source::{
-========
-use crate::ecs::legacy_compute_image_core::compile::source::load_gguf_source;
-use crate::ecs::legacy_compute_image_core::compile::source::{
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/pipeline.rs
     diff_tensors, ensure_tensor_loaded, LoadedSource,
 };
 use crate::ecs::legacy_compute_image_core::hw_assessment::AssessmentReceipt;
@@ -2143,16 +2123,8 @@ pub(crate) fn emit_heterogeneous_image(
     loaded: &LoadedSource,
     output_dir: &Path,
 ) -> Result<(), String> {
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/pipeline.rs
     use crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::builder::HeterogeneousImageBuilder;
     use crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::types::*;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/pipeline.rs
-    use crate::ecs::compute_image::heterogeneous::builder::HeterogeneousImageBuilder;
-    use crate::ecs::compute_image::heterogeneous::types::*;
-========
-    use crate::ecs::legacy_compute_image_core::heterogeneous::builder::HeterogeneousImageBuilder;
-    use crate::ecs::legacy_compute_image_core::heterogeneous::types::*;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/pipeline.rs
 
     // Build model identity
     let identity = ModelIdentity {

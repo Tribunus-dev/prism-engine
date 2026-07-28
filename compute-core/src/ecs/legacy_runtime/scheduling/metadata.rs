@@ -8,11 +8,11 @@
 //! `SystemSpec::metadata()` bridges the two, producing an immutable
 //! `SystemMetadata` struct consumed by the schedule compiler.
 
-use crate::ecs::runtime::scheduling::access::{ComponentSet, ResourceSet};
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::component_id::{ComponentMask, ResourceMask};
-use crate::ecs::runtime::scheduling::error::ScheduleError;
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::scheduling::access::{ComponentSet, ResourceSet};
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::component_id::{ComponentMask, ResourceMask};
+use crate::ecs::legacy_runtime::scheduling::error::ScheduleError;
+use crate::ecs::legacy_runtime::world::World;
 
 use serde::{Deserialize, Serialize};
 

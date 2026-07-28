@@ -5,13 +5,7 @@
 ))]
 //! Shape-specialized program variant.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/executable/variant.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SerializedPhaseProgram;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/executable/variant.rs
-use crate::ecs::compute_image::program::phase_program::SerializedPhaseProgram;
-========
-use crate::ecs::legacy_compute_image_core::program::phase_program::SerializedPhaseProgram;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/executable/variant.rs
 use crate::integration::ContentHash;
 use serde::{Deserialize, Serialize};
 

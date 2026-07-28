@@ -22,22 +22,10 @@
 //! do not produce prefetch actions — they are handled by other parts
 //! of the runtime memory manager.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/prefetch.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::{
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/prefetch.rs
-use crate::ecs::compute_image::residency::plan::{
-========
-use crate::ecs::legacy_compute_image_core::residency::plan::{
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/prefetch.rs
     PrefetchAction, PrefetchPriority, RequiredWeightObject,
 };
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/prefetch.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::residency::ResidencyClass;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/prefetch.rs
-use crate::ecs::compute_image::residency::ResidencyClass;
-========
-use crate::ecs::legacy_compute_image_core::residency::ResidencyClass;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/prefetch.rs
 
 /// Builds a compiled prefetch schedule from the compiler's required
 /// weight objects and the execution-phase topology.
