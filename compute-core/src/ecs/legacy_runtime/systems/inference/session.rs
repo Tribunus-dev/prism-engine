@@ -10,8 +10,8 @@
 //! Per-generation state lives in ProfiledInferenceSession (owns KV caches,
 //! cancellation flag, token buffer, and timeline).
 
-use crate::ecs::ane::hot_row_predictor::HotRowPredictor;
-use crate::ecs::ane::weight_row_cache::WeightRowCache;
+use crate::ecs::legacy_ane::hot_row_predictor::HotRowPredictor;
+use crate::ecs::legacy_ane::weight_row_cache::WeightRowCache;
 use crate::ecs::autopsy::ModelAutopsy;
 use crate::ecs::cache::chunk_kv::ChunkKvCache;
 use crate::ecs::cache::evolkv::CalibrationSet;

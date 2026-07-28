@@ -30,8 +30,8 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::ecs::ane::draft_model::AneDraftModel;
-use prism_ecs_constitutional::config::{DiffusionConfig, NoiseScheduleType};
+use crate::ecs::legacy_ane::draft_model::AneDraftModel;
+use crate::ecs::config::{DiffusionConfig, NoiseScheduleType};
 use crate::profiled_executor::LoadedProfiledModel;
 
 use mlx_rs::Array;
@@ -773,11 +773,11 @@ impl DiffusionModel {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(4096) as u32,
                 confidence_type: match raw.get("confidence_type").and_then(|v| v.as_str()) {
-                    Some("softmax_margin") => prism_ecs_constitutional::config::ConfidenceType::SoftmaxMargin,
+                    Some("softmax_margin") => crate::ecs::config::ConfidenceType::SoftmaxMargin,
                     Some("normalized_entropy") => {
-                        prism_ecs_constitutional::config::ConfidenceType::NormalizedEntropy
+                        crate::ecs::config::ConfidenceType::NormalizedEntropy
                     }
-                    _ => prism_ecs_constitutional::config::ConfidenceType::LogProb,
+                    _ => crate::ecs::config::ConfidenceType::LogProb,
                 },
                 default_confidence_threshold: raw
                     .get("default_confidence_threshold")
@@ -1193,7 +1193,7 @@ impl DiffusionModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prism_ecs_constitutional::config::{DiffusionConfig, NoiseScheduleType};
+    use crate::ecs::config::{DiffusionConfig, NoiseScheduleType};
 
     #[test]
     fn test_diffusion_config_default() {

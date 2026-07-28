@@ -6,7 +6,7 @@
 //! segments, mapped storage, or test fixtures. The caller is responsible for
 //! calling `eval()` on the result before dropping the weight leases.
 
-use crate::ecs::ane::moe_scheduler::{AneMoEScheduler, ExpertWeights};
+use crate::ecs::legacy_ane::moe_scheduler::{AneMoEScheduler, ExpertWeights};
 use prism_ecs_kernel::backend::routing::{BackendId, BACKEND_ANE, BACKEND_MLX};
 use prism_ecs_constitutional::config::operation_route::OperationRoute;
 use prism_ecs_constitutional::config::{LayerPlan, ProloguePlan};
