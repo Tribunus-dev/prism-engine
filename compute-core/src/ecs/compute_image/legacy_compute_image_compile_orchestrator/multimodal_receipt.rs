@@ -1,6 +1,6 @@
 //! Multimodal assembly receipt for reproducibility and evidence.
 
-use crate::ecs::compute_image::multimodal::{
+use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
     MultimodalAssemblyReceipt, ProjectionBackend, ProjectionPrecision,
 };
 

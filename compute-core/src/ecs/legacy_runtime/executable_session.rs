@@ -15,12 +15,12 @@
 //! 5. **Return the prepared session** for scheduler handoff (E5).
 
 use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-use crate::ecs::compute_image::program::phase_program::SerializedPhaseProgram;
-use crate::ecs::compute_image::residency::admission::{
+use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SerializedPhaseProgram;
+use crate::ecs::compute_image::legacy_compute_image_runtime::residency::admission::{
     ResidencyAdmission, ResidencyAdmissionResult,
 };
-use crate::ecs::compute_image::residency::plan::CompiledResidencyPlan;
-use crate::ecs::compute_image::variants::selection::{
+use crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::CompiledResidencyPlan;
+use crate::ecs::compute_image::legacy_compute_image_runtime::variants::selection::{
     select_program_variant, VariantSelectionRefusal,
 };
 use crate::ecs::runtime::executable_bindings::ExecutableBindings;

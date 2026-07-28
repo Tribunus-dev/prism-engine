@@ -24,8 +24,8 @@
     feature = "prism-backend-ios"
 ))]
 
-use crate::ecs::compute_image::executable::profile::ExecutableTargetProfile;
-use crate::ecs::compute_image::program::phase_program::{ExecutionLane, SerializedPhaseProgram};
+use crate::ecs::compute_image::legacy_compute_image_runtime::executable::profile::ExecutableTargetProfile;
+use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::{ExecutionLane, SerializedPhaseProgram};
 
 // ---------------------------------------------------------------------------
 // Core data structures
@@ -236,12 +236,12 @@ impl std::error::Error for BindingError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::executable::profile::{
+    use crate::ecs::compute_image::legacy_compute_image_runtime::executable::profile::{
         DefaultVariantSelection, ExecutableTargetProfile, HardwareTargetContract,
         RuntimeTargetContract,
     };
-    use crate::ecs::compute_image::executable::variant::{ShapeProfile, ShapeSpecializedProgram};
-    use crate::ecs::compute_image::program::phase_program::{
+    use crate::ecs::compute_image::legacy_compute_image_runtime::executable::variant::{ShapeProfile, ShapeSpecializedProgram};
+    use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::{
         CanonicalArtifactIdentity, ExecutionKind, PhaseArtifactKind, PhaseCompletionContract,
         PhaseDependencyContract, PhaseResourceReservation, ProgramArtifactSelection,
         SerializedPhase, SerializedPhaseProgram,
@@ -283,7 +283,7 @@ mod tests {
         SerializedPhase {
             phase_id: phase_id.into(),
             semantic_operation:
-                crate::ecs::compute_image::program::phase_program::SemanticOperation::RmsNorm,
+                crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SemanticOperation::RmsNorm,
             lane,
             artifact_identity: CanonicalArtifactIdentity {
                 artifact_id: artifact_id.into(),

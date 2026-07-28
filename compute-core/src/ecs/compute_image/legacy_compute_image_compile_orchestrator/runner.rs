@@ -25,11 +25,11 @@ use crate::ecs::compute_image::legacy_compute_image_compile::kernel_dispatch::{
 };
 use crate::ecs::compute_image::legacy_compute_image_compile::kernel_registry::KernelRegistry;
 use crate::ecs::compute_image::legacy_compute_image_compile::kernel_types::{KernelReceipt, ProjectionParams};
-pub use crate::ecs::compute_image::megakernel::kernels::TapMode;
-use crate::ecs::compute_image::megakernel::{KernelBuffers, Megakernel};
-use crate::ecs::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
-use crate::ecs::compute_image::multimodal::binding::SealedMultimodalBindings;
-use crate::ecs::compute_image::multimodal::descriptor::ProjectionTensorRecord;
+pub use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::TapMode;
+use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::{KernelBuffers, Megakernel};
+use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
+use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::binding::SealedMultimodalBindings;
+use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::descriptor::ProjectionTensorRecord;
 use crate::ecs::compute_image::tree_attention::TreeAttention;
 use crate::ecs::compute_image::vm_manager::VmManager;
 use half::f16;
@@ -122,7 +122,7 @@ impl Orchestrator {
         let _ = self.deployment.require_nf4_biases()?;
         let bindings = SealedMultimodalBindings::from_deployment(&self.deployment)?;
         if bindings.projection_precision
-            != crate::ecs::compute_image::multimodal::ProjectionPrecision::Nf4Tile640
+            != crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionPrecision::Nf4Tile640
         {
             return Err(format!(
                 "sealed multimodal projection precision is not NF4Tile640: {:?}",
@@ -292,7 +292,7 @@ impl Orchestrator {
     ) -> Result<Vec<f32>, String> {
         let bindings = SealedMultimodalBindings::from_deployment(&self.deployment)?;
         if bindings.projection_precision
-            != crate::ecs::compute_image::multimodal::ProjectionPrecision::Nf4Tile640
+            != crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::ProjectionPrecision::Nf4Tile640
         {
             return Err(format!(
                 "multimodal projection graph is not sealed as NF4Tile640: {:?}",
@@ -915,7 +915,7 @@ impl Orchestrator {
         seq_position: u32,
         audit_max_seq: u32,
     ) -> Result<Vec<Vec<f32>>, String> {
-        use crate::ecs::compute_image::megakernel::kernels::compile_layer_library;
+        use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::compile_layer_library;
 
         const HIDDEN: usize = 3840;
         if hidden_in.len() != HIDDEN {
@@ -1203,7 +1203,7 @@ impl Orchestrator {
         audit_max_seq: u32,
         groups: &[(u32, u32)],
     ) -> Result<Vec<Vec<f32>>, String> {
-        use crate::ecs::compute_image::megakernel::kernels::compile_layer_library;
+        use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::compile_layer_library;
 
         const HIDDEN: usize = 3840;
         if hidden_in.len() != HIDDEN {
@@ -2086,7 +2086,7 @@ mod stage0_tap_tests {
             return;
         };
         with_taps_env(true, || {
-            use crate::ecs::compute_image::megakernel::kernels::compile_layer_library;
+            use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::compile_layer_library;
             use metal::MTLResourceOptions;
 
             let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");
@@ -2247,7 +2247,7 @@ mod stage0_tap_tests {
             return;
         };
         with_taps_env(true, || {
-            use crate::ecs::compute_image::megakernel::kernels::compile_layer_library;
+            use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::compile_layer_library;
             use metal::MTLResourceOptions;
 
             let mut orch = Orchestrator::from_cimage(&path, 1, false).expect("load");

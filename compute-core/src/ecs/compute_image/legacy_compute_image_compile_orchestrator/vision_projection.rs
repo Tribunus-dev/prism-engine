@@ -14,7 +14,7 @@
 //! the decoder megakernel (Phase B).
 
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
-use crate::ecs::compute_image::megakernel::kernels::HIDDEN_DIM;
+use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::HIDDEN_DIM;
 use crate::ecs::metal_backend::catalogue_source_for;
 use metal::*;
 

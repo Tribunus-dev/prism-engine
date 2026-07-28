@@ -22,6 +22,7 @@ pub mod workspace_legacy_backend_imports;
 pub mod workspace_legacy_bitnet_imports;
 pub mod workspace_legacy_cimage_imports;
 pub mod workspace_legacy_compilation_imports;
+pub mod workspace_legacy_compute_image_runtime_imports;
 pub mod workspace_legacy_compiler_imports;
 pub mod workspace_legacy_compute_image_compile_imports;
 pub mod workspace_legacy_core_imports;

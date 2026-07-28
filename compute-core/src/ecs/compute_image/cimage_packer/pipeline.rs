@@ -20,7 +20,7 @@ use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
 use crate::ecs::compute_image::legacy_compute_image_compile::tts_compile::pack_tts_weights;
 use crate::ecs::compute_image::manifest::Manifest;
 use crate::ecs::compute_image::manifest::SharedWeightLayout;
-use crate::ecs::compute_image::multimodal::descriptor::{
+use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::descriptor::{
     MultimodalInputDescriptorV1, ProjectionRole, ProjectionTensorRecord,
     MULTIMODAL_DESCRIPTOR_MAGIC,
 };

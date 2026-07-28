@@ -12,7 +12,7 @@
 
 use crate::ecs::arena::Arena;
 use crate::ecs::compute_image::cimage_loader::CimageDeployment;
-use crate::ecs::compute_image::multimodal::{
+use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
     MultimodalArtifactSummary, ProjectionTensorRecord, SealedMultimodalBindings,
 };
 use crate::ecs::compute_image::phase_dag::EmittedPhaseGraph;

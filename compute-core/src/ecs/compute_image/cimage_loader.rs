@@ -22,12 +22,12 @@ use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
 use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
     read_matrix_weight_binding_v1_le, MatrixWeightBindingV1, MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH,
 };
-use crate::ecs::compute_image::megakernel::kernels::HIDDEN_DIM;
-use crate::ecs::compute_image::multimodal::descriptor::{
+use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::HIDDEN_DIM;
+use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::descriptor::{
     MultimodalArtifactSummary, MultimodalCapabilities, MultimodalInputDescriptorV1,
     ProjectionBackend, ProjectionPrecision, ProjectionTensorRecord,
 };
-use crate::ecs::compute_image::multimodal::SealedMultimodalBindings;
+use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::SealedMultimodalBindings;
 use crate::quantization::contract::{
     RuntimeRepresentationClass, TailHandlingContract, TileMacroLayout, INT8_TILE640_CODE_BYTES,
     INT8_TILE640_METADATA_BYTES, NF4_TILE640_CODE_BYTES, NF4_TILE640_METADATA_BYTES,
@@ -1009,7 +1009,7 @@ pub fn load_heterogeneous_executor(
 ) -> Result<
     Option<(
         crate::ecs::backend::heterogeneous_executor::HeterogeneousExecutor,
-        crate::ecs::compute_image::heterogeneous::types::HeterogeneousExecutionImage,
+        crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::types::HeterogeneousExecutionImage,
     )>,
     String,
 > {
@@ -1018,7 +1018,7 @@ pub fn load_heterogeneous_executor(
         TensorShape,
     };
     use prism_ecs_kernel::backend::DType;
-    use crate::ecs::compute_image::heterogeneous::types::HeterogeneousExecutionImage;
+    use crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::types::HeterogeneousExecutionImage;
 
     let Some(segment) = header.segment(SegmentKind::HeterogeneousImage) else {
         return Ok(None);
@@ -1369,7 +1369,7 @@ pub fn validate_binding(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::multimodal::descriptor::MULTIMODAL_DESCRIPTOR_MAGIC;
+    use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::descriptor::MULTIMODAL_DESCRIPTOR_MAGIC;
 
     #[test]
     fn descriptor_capabilities_expose_image_and_audio() {

@@ -59,7 +59,7 @@ pub mod vision_projection;
 ))]
 pub use runner::Orchestrator;
 
-pub use crate::ecs::compute_image::multimodal::{
+pub use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
     InputModality, ModalityError, MultimodalArtifactSummary, MultimodalCapabilities,
     ProjectionBackend, ProjectionPrecision,
 };

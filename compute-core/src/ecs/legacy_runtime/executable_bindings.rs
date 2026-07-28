@@ -12,12 +12,12 @@
 //!    from the segment file at the correct offset.
 //! 2. `view_object` returns a byte slice for a previously loaded `object_id`.
 
-use crate::ecs::compute_image::content_store::index::{
+use crate::ecs::compute_image::legacy_compute_image_runtime::content_store::index::{
     ContentAddressedContentStore, ContentObjectEntry, ContentObjectKind,
 };
-use crate::ecs::compute_image::content_store::mmap::{MappedSegment, MmapLoadError, MmapLoader};
-use crate::ecs::compute_image::program::phase_program::SerializedPhaseProgram;
-use crate::ecs::compute_image::residency::plan::CompiledResidencyPlan;
+use crate::ecs::compute_image::legacy_compute_image_runtime::content_store::mmap::{MappedSegment, MmapLoadError, MmapLoader};
+use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SerializedPhaseProgram;
+use crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::CompiledResidencyPlan;
 use serde_json;
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
@@ -169,7 +169,7 @@ impl BindingManager {
 mod tests {
     use super::*;
 
-    use crate::ecs::compute_image::content_store::index::{
+    use crate::ecs::compute_image::legacy_compute_image_runtime::content_store::index::{
         ContentAddressedContentStore, ContentObjectEntry, ContentObjectKind, ContentStoreVersion,
         ImmutableSegment, ResidencyClass,
     };
