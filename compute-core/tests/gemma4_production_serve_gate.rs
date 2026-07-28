@@ -28,7 +28,7 @@ use tribunus_compute_core::ecs::canonical::kernel_abi::{
 };
 use tribunus_compute_core::ecs::canonical::provenance::{LifecycleReceiptBundle, ReplayManifest};
 use tribunus_compute_core::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
-use tribunus_compute_core::ecs::cimage::generation_api::GenerationApi;
+use tribunus_compute_core::ecs::legacy_cimage::generation_api::GenerationApi;
 use tribunus_compute_core::ecs::cimage_runtime::context::CimageRuntimeContext;
 use tribunus_compute_core::ecs::cimage_runtime::tensor_store::RuntimeTensorStore;
 use tribunus_compute_core::ecs::compiler::deployment_compiler::{

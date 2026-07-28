@@ -55,7 +55,7 @@ use tribunus_compute_core::compilation::cancel::CancelToken;
 use tribunus_compute_core::ecs::canonical::{
     CimageGeneration, ExecutionGraph, MemoryPlan, RuntimeStatePlan,
 };
-use tribunus_compute_core::ecs::cimage::CIMAGE_MAGIC;
+use tribunus_compute_core::ecs::legacy_cimage::CIMAGE_MAGIC;
 use tribunus_compute_core::ecs::cimage_runtime::context::CimageRuntimeContext;
 use tribunus_compute_core::ecs::cimage_runtime::tensor_store::RuntimeTensorStore;
 use tribunus_compute_core::ecs::compiler::deployment_compiler::ServingProfile;

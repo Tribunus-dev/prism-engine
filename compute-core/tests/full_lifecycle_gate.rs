@@ -24,7 +24,7 @@ use tribunus_compute_core::ecs::canonical::kernel_abi::{
 };
 use tribunus_compute_core::ecs::canonical::provenance::ReplayManifest;
 use tribunus_compute_core::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
-use tribunus_compute_core::ecs::cimage::generation_api::GenerationApi;
+use tribunus_compute_core::ecs::legacy_cimage::generation_api::GenerationApi;
 use tribunus_compute_core::ecs::compiler::event_emitter::CompilerEvent;
 use tribunus_compute_core::ecs::compiler::lifecycle_coordinator::{
     CompilerRequest, LifecycleCoordinator,
