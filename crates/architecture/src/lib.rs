@@ -11,3 +11,4 @@ pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_evaluator_imports;
 pub mod workspace_legacy_imports;
 pub mod workspace_legacy_models_imports;
+pub mod workspace_legacy_system_imports;
