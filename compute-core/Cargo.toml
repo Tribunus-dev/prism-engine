@@ -82,6 +82,16 @@ prism-audio = { path = "../crates/prism-audio" }
 # at `prism_ecs_codec::lut` (see
 # `changelogs/2026-07-27-engine-subsystem-deletion-lut.md`).
 prism-ecs-codec = { path = "../crates/prism-ecs-codec" }
+# Canonical home of the runtime-facing tool surface — OpenAI-
+# compatible function-call definitions, sandbox file tools,
+# deterministic tool-call parsing & repair, AST-level JS
+# security guard, V8-backed JavaScript runtime, and HTML
+# sanitization for the X-Ray proxy. The engine used to have its
+# own parallel `ecs::tools::*` module (now absorbed); this
+# dependency routes all engine callers through the
+# constitutional surface at `prism_ecs_server::tools` (see
+# `changelogs/2026-07-27-engine-subsystem-deletion-tools.md`).
+prism-ecs-server = { path = "../crates/prism-ecs-server" }
 block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"
