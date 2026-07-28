@@ -9,7 +9,7 @@ use std::collections::HashSet;
 
 use sha2::{Digest, Sha256};
 
-use crate::ecs::cimage::*;
+use crate::ecs::legacy_cimage::*;
 use crate::execution_plan::CodecFamily;
 use crate::ternary::pack::validate_no_reserved_codes;
 use prism_ecs_agent::assistant_graph::{AssistantGraphManifest, AssistantGraphValidator};
@@ -550,7 +550,7 @@ impl CImageValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::payload::CImagePayloadKind;
+    use crate::ecs::legacy_cimage::payload::CImagePayloadKind;
 
     use crate::execution_plan::{DType, HardwareProfileId};
 

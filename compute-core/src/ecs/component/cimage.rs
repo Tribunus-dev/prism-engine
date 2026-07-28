@@ -55,4 +55,4 @@ impl Component for PendingPayload {}
 // so consumers can reference it without deep path imports.
 // ---------------------------------------------------------------------------
 
-pub use crate::ecs::cimage::manifest::CImageTensorEntry;
+pub use crate::ecs::legacy_cimage::manifest::CImageTensorEntry;

@@ -27,7 +27,7 @@ use tribunus_compute_core::ecs::canonical::kernel_abi::{
 };
 use tribunus_compute_core::ecs::canonical::provenance::{LifecycleReceiptBundle, ReplayManifest};
 use tribunus_compute_core::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
-use tribunus_compute_core::ecs::cimage::generation_api::GenerationApi;
+use tribunus_compute_core::ecs::legacy_cimage::generation_api::GenerationApi;
 use tribunus_compute_core::ecs::compute_image::model_family::gemma4_inspect::{
     build_ingestion_receipt, inspect_gemma4_checkpoint,
 };

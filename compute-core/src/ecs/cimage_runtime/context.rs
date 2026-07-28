@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::canonical::kernel_abi::{ArtifactProvenance, KernelSemanticId};
-use crate::ecs::cimage::generation_store::ContentStore;
+use crate::ecs::legacy_cimage::generation_store::ContentStore;
 use crate::ecs::cimage_runtime::tensor_store::{
     RuntimeTensor, RuntimeTensorPayload, RuntimeTensorStore,
 };

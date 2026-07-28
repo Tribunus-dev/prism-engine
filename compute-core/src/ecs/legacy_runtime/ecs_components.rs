@@ -5,7 +5,7 @@
 //! attached to entities representing individual weight matrices.
 
 use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::cimage::generation_store::ContentStore;
+use crate::ecs::legacy_cimage::generation_store::ContentStore;
 use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
 use crate::ecs::compilation::distill_core::OnPolicyRefinementResult;
 use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;

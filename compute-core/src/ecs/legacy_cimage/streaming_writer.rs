@@ -18,7 +18,7 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom};
 
-use crate::ecs::cimage::*;
+use crate::ecs::legacy_cimage::*;
 
 /// Streaming cimage V0 builder that writes payloads to disk immediately.
 pub struct StreamingCImageWriter {

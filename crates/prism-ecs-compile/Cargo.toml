@@ -34,6 +34,7 @@ half = { workspace = true }
 libc.workspace = true
 safetensors = "0.8"
 bincode = "1"
+serde_json_canonicalizer = "0.3"
 
 [features]
 phase4_evaluation = []

@@ -904,7 +904,7 @@ fn infer_binding_role(buffer_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::*;
+    use crate::ecs::legacy_cimage::*;
     use crate::ecs::cimage_runtime::resolver::CImageRuntimeResolver;
     use crate::execution_plan::CodecFamily;
 

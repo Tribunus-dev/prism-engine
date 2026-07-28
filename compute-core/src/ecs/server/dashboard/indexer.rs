@@ -8,7 +8,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-use crate::ecs::cimage::{
+use crate::ecs::legacy_cimage::{
     CImageArtifactKind, CImageLoader, CImagePayloadEntry, CImagePayloadKind, CImagePayloadRef,
     CImageTensorEntry, LoadedCImageV0,
 };
@@ -148,8 +148,8 @@ impl From<std::io::Error> for DashboardError {
     }
 }
 
-impl From<crate::ecs::cimage::CImageError> for DashboardError {
-    fn from(e: crate::ecs::cimage::CImageError) -> Self {
+impl From<crate::ecs::legacy_cimage::CImageError> for DashboardError {
+    fn from(e: crate::ecs::legacy_cimage::CImageError) -> Self {
         DashboardError::Cimage(e.to_string())
     }
 }

@@ -30,7 +30,7 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::ecs::cimage::*;
+use crate::ecs::legacy_cimage::*;
 use crate::ecs::quantization::contract::TernaryCandidateRecipe;
 use crate::execution_plan::{CodecFamily, DType, HardwareProfileId};
 use prism_ecs_quantization::nf4tile640::{

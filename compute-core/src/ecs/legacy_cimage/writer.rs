@@ -21,7 +21,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use crate::ecs::cimage::{
+use crate::ecs::legacy_cimage::{
     canonical::canonical_json_bytes, CImageError, CImageFooterV0, CImageHeaderV0, CImageManifestV0,
     CImagePayloadDirectoryV0, CImagePayloadEntry, CImagePayloadKind, CImageReceiptDirectoryV0,
     CImageReceiptEntry, CImageResult, CImageWriteReceipt, PendingPayload, PendingReceipt,
@@ -291,7 +291,7 @@ impl CImageWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::{
+    use crate::ecs::legacy_cimage::{
         CImageArtifactKind, CImageLoader, CImageManifestV0, ModelExecutionPlanSummary,
     };
     use crate::execution_plan::HardwareProfileId;

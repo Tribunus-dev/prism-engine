@@ -63,7 +63,7 @@ pub use crate::ecs::benchmark;
 pub use crate::ecs::cache;
 #[cfg(any(feature = "prism-backend", feature = "prism-backend-ios"))]
 pub use crate::ecs::calibration;
-pub use crate::ecs::cimage;
+pub use crate::ecs::legacy_cimage;
 pub use crate::ecs::cimage_runtime;
 pub use crate::ecs::compilation;
 #[cfg(any(

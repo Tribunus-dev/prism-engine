@@ -56,7 +56,7 @@ impl CImageKernelCatalog {
     /// The V0 manifest does not yet embed a kernel catalog, so this always
     /// returns an empty catalog. When the manifest is extended with a
     /// catalog payload reference, this method will deserialize it.
-    pub fn from_manifest_or_default(_manifest: &crate::ecs::cimage::CImageManifestV0) -> Self {
+    pub fn from_manifest_or_default(_manifest: &crate::ecs::legacy_cimage::CImageManifestV0) -> Self {
         Self::empty()
     }
 

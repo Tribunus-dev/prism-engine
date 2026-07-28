@@ -7,7 +7,7 @@
 use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::canonical::identity::CandidateId;
 use crate::ecs::canonical::identity::GenerationId;
-use crate::ecs::cimage::generation_api::{GenerationApi, PromotionEvidence};
+use crate::ecs::legacy_cimage::generation_api::{GenerationApi, PromotionEvidence};
 use crate::ecs::compilation::distill_core::{
     on_policy_refine, RefinementConfig, TemperatureSchedule,
 };

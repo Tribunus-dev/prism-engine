@@ -21,10 +21,10 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::ecs::cimage::mlp_reference::{
+use crate::ecs::legacy_cimage::mlp_reference::{
     compute_cosine_similarity, compute_max_abs_error, compute_nrmse,
 };
-use crate::ecs::cimage::{CImageTensorEntry, CImageValidator, LoadedCImageV0, ReceiptEvidenceKind};
+use crate::ecs::legacy_cimage::{CImageTensorEntry, CImageValidator, LoadedCImageV0, ReceiptEvidenceKind};
 use crate::ecs::cimage_runtime::error::{CImageRuntimeError, CImageRuntimeResult};
 use crate::ecs::cimage_runtime::lower_mlp::{CImageMlpRegionPlan, MlpShardRegionBuilder};
 use crate::ecs::cimage_runtime::receipts::{
@@ -39,7 +39,7 @@ use crate::execution_plan::backend_capability::BackendLoweringTarget;
 use crate::execution_plan::HardwareProfileId;
 
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
-use crate::ecs::cimage::CImagePayloadRef;
+use crate::ecs::legacy_cimage::CImagePayloadRef;
 use crate::ecs::cimage_runtime::bitnet_layer_resolver::BitNetLayerTensorResolver;
 use prism_ecs_quantization::bitnet::reference::bitnet_decoder_layer_reference;
 use crate::ecs::cimage_runtime::lower_decoder::DecoderShardRegionBuilder;
@@ -716,7 +716,7 @@ impl CImageMetalRegionRunner {
         // 1. Validate cimage (all 14 gates).
         let load_receipt =
             CImageValidator::validate_loaded(image).map_err(|e| CImageRuntimeError::CImage(e))?;
-        if load_receipt.validation_status != crate::ecs::cimage::CImageValidationStatus::Valid {
+        if load_receipt.validation_status != crate::ecs::legacy_cimage::CImageValidationStatus::Valid {
             return Err(CImageRuntimeError::ValidationFailed(format!(
                 "cimage validation failed: {:?}",
                 load_receipt.errors
@@ -1437,7 +1437,7 @@ impl CImageMetalRegionRunner {
         // 1. Validate cimage (all 14 gates).
         let load_receipt =
             CImageValidator::validate_loaded(image).map_err(|e| CImageRuntimeError::CImage(e))?;
-        if load_receipt.validation_status != crate::ecs::cimage::CImageValidationStatus::Valid {
+        if load_receipt.validation_status != crate::ecs::legacy_cimage::CImageValidationStatus::Valid {
             return Err(CImageRuntimeError::ValidationFailed(format!(
                 "cimage validation failed: {:?}",
                 load_receipt.errors
@@ -1765,7 +1765,7 @@ impl CImageMetalRegionRunner {
         // 1. Validate cimage.
         let load_receipt =
             CImageValidator::validate_loaded(image).map_err(|e| CImageRuntimeError::CImage(e))?;
-        if load_receipt.validation_status != crate::ecs::cimage::CImageValidationStatus::Valid {
+        if load_receipt.validation_status != crate::ecs::legacy_cimage::CImageValidationStatus::Valid {
             return Err(CImageRuntimeError::ValidationFailed(format!(
                 "cimage validation failed: {:?}",
                 load_receipt.errors
@@ -2351,7 +2351,7 @@ impl CImageMetalRegionRunner {
         // 1. Validate cimage.
         let load_receipt =
             CImageValidator::validate_loaded(image).map_err(|e| CImageRuntimeError::CImage(e))?;
-        if load_receipt.validation_status != crate::ecs::cimage::CImageValidationStatus::Valid {
+        if load_receipt.validation_status != crate::ecs::legacy_cimage::CImageValidationStatus::Valid {
             return Err(CImageRuntimeError::ValidationFailed(format!(
                 "cimage validation failed: {:?}",
                 load_receipt.errors
@@ -3682,7 +3682,7 @@ fn load_checkpoint_for_validation(
 #[cfg(all(test, target_os = "macos", feature = "metal-dispatch"))]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::*;
+    use crate::ecs::legacy_cimage::*;
     use crate::ecs::cimage_runtime::tensor_store::MlpRegionExecutionMode;
     use crate::execution_plan::CodecFamily;
 

@@ -9,7 +9,7 @@
 //! - **Ternary (projection weights):** payload IDs preserve the dotted tensor key:
 //!   `p_layer.{layer}.{proj_name}.weight_codes` / `…_scales`.
 
-use crate::ecs::cimage::{CImageManifestV0, CImagePayloadDirectoryV0, CImageTensorEntry};
+use crate::ecs::legacy_cimage::{CImageManifestV0, CImagePayloadDirectoryV0, CImageTensorEntry};
 use crate::execution_plan::CodecFamily;
 
 use super::error::{CImageRuntimeError, CImageRuntimeResult};
@@ -207,7 +207,7 @@ impl<'a> BitNetLayerTensorResolver<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::{
+    use crate::ecs::legacy_cimage::{
         CImageArtifactKind, CImagePayloadEntry, CImagePayloadKind, CImagePayloadRef,
         ModelExecutionPlanSummary, PhysicalTileLayout,
     };

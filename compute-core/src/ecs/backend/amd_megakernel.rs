@@ -32,7 +32,7 @@ use std::ffi::CString;
 use std::path::Path;
 use std::sync::atomic::{fence, AtomicU32, Ordering};
 
-use crate::ecs::cimage::{CImageLoader, CImagePayloadEntry, CImagePayloadRef, LoadedCImageV0};
+use crate::ecs::legacy_cimage::{CImageLoader, CImagePayloadEntry, CImagePayloadRef, LoadedCImageV0};
 
 // ── HIP FFI stubs ──────────────────────────────────────────────────────────
 //

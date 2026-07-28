@@ -6,9 +6,9 @@
 //!
 //! Numerical metrics: NRMSE, cosine similarity, max absolute error
 
-use crate::ecs::cimage::error::{CImageError, CImageResult};
-use crate::ecs::cimage::receipts::{CImageShardValidationReceipt, ReceiptEvidenceKind};
-use crate::ecs::cimage::LoadedCImageV0;
+use crate::ecs::legacy_cimage::error::{CImageError, CImageResult};
+use crate::ecs::legacy_cimage::receipts::{CImageShardValidationReceipt, ReceiptEvidenceKind};
+use crate::ecs::legacy_cimage::LoadedCImageV0;
 use sha2::{Digest, Sha256};
 
 /// Loaded tensors from a cimage shard, used for reconstructed reference execution.
@@ -195,7 +195,7 @@ fn extract_rawf32_reference(loaded: &LoadedCImageV0, tensor_idx: usize) -> CImag
         )));
     };
     let payload_id = match raw_ref {
-        crate::ecs::cimage::CImagePayloadRef::Single { payload_id } => payload_id,
+        crate::ecs::legacy_cimage::CImagePayloadRef::Single { payload_id } => payload_id,
         _ => {
             return Err(CImageError::Other(
                 "raw_f32_reference_ref must be Single".into(),
@@ -226,7 +226,7 @@ fn extract_packed_and_reconstruct(
 ) -> CImageResult<Vec<f32>> {
     let tensor = &loaded.manifest.tensors[tensor_idx];
     let payload_id = match &tensor.payload_ref {
-        crate::ecs::cimage::CImagePayloadRef::Single { payload_id } => payload_id,
+        crate::ecs::legacy_cimage::CImagePayloadRef::Single { payload_id } => payload_id,
         _ => {
             return Err(CImageError::Other(
                 "must use Single payload ref for non-mixed".into(),
@@ -309,9 +309,9 @@ pub fn load_mlp_shard_tensors(loaded: &LoadedCImageV0) -> CImageResult<LoadedMlp
 
     // Find tensors by key
     fn find_tensor<'a>(
-        tensors: &'a [crate::ecs::cimage::CImageTensorEntry],
+        tensors: &'a [crate::ecs::legacy_cimage::CImageTensorEntry],
         key: &str,
-    ) -> Option<&'a crate::ecs::cimage::CImageTensorEntry> {
+    ) -> Option<&'a crate::ecs::legacy_cimage::CImageTensorEntry> {
         tensors
             .iter()
             .find(|t| t.tensor_key == key || t.tensor_id == key)
