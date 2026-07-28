@@ -320,21 +320,6 @@ pub use crate::ecs::core::model;
 pub use crate::ecs::execution_profile;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub use crate::ecs::exo;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-// Re-export of the engine's memory execution-plane surface. The
-// engine's `compute-core/src/ecs/memory/` directory was absorbed
-// into `prism-ecs-data` (data types + pure abstractions) and
-// relocated to `compute-core/src/ecs/memory_impl/` (execution-
-// plane code that depends on engine-internal `Arena`,
-// `ExternalStorage`, `MappedSegment`, `worker_memory`, and the
-// `tribunus_arena_alloc` / `mlx_set_memory_plan` C FFI bridges).
-// The re-export keeps the `crate::memory::*` shorthand working
-// for engine callers; the data types now come from
-// `prism_ecs_data::memory` (re-exported through `memory_impl`).
-pub use crate::ecs::memory_impl;
 // model_adapter removed — legacy, was behind legacy_mutations feature
 #[cfg(any(
     feature = "mlx-backend",
