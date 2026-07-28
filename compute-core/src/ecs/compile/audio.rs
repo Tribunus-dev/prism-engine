@@ -34,6 +34,17 @@ pub fn compile_audio_model(
     }; // Reserved: propagate into CimageManifest metadata
 
     // 3. Construct manifest
+    // The constitutional `CimageManifest` carries its `tensor_table`
+    // as `Vec<serde_json::Value>` (platform-neutral, no engine-coupling).
+    // Convert the engine-internal `TensorEntry` list via the standard
+    // serde pipeline; `serde_json::to_value` on a `Serialize` type
+    // produces a faithful JSON view of every field.
+    let tensor_table: Vec<serde_json::Value> = tensor_table
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()
+        .map_err(|e| anyhow::anyhow!("failed to convert tensor table to JSON: {e}"))?;
+
     let manifest = CimageManifest {
         modality: ManifestModality::Audio,
         architecture: prism_ecs_constitutional::config::ArchitectureConfig::Audio(
