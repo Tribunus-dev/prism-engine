@@ -7,7 +7,8 @@
 //! surface", the legacy engine assistant_graph surface, the legacy
 //! engine evaluator surface, the legacy engine evolution surface,
 //! the legacy engine bitnet surface, the legacy engine LUT
-//! surface, or the legacy engine models surface.
+//! surface, the legacy engine nf4tile640 surface, or the legacy
+//! engine models surface.
 
 pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_bitnet_imports;
@@ -16,4 +17,5 @@ pub mod workspace_legacy_evolution_imports;
 pub mod workspace_legacy_imports;
 pub mod workspace_legacy_lut_imports;
 pub mod workspace_legacy_models_imports;
+pub mod workspace_legacy_nf4tile640_imports;
 pub mod workspace_legacy_system_imports;
