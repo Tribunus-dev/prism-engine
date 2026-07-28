@@ -14,7 +14,7 @@ use crate::ecs::backend::metal_iosurface::{
 use prism_ecs_kernel::backend::shared_event::{
     SharedEventAccess, SharedEventBinding, SharedEventContract,
 };
-use crate::ecs::compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
+use crate::ecs::legacy_compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
 use crate::ecs::compute_image::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
     SharedEventContractManifest,

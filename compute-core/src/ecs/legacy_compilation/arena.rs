@@ -448,7 +448,7 @@ fn timestamp_now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compilation::phase_types::{
+    use crate::ecs::legacy_compilation::phase_types::{
         ElementType, PhysicalLayout, ProviderKind, ResidencyClass,
     };
 

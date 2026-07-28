@@ -3,8 +3,8 @@
 //! post-op observation points with KL divergence and RMSE, then ranked by
 //! aggregate sensitivity.
 
-use crate::ecs::compilation::level1::reducer::DistillObjective;
-use crate::ecs::compilation::matrix_distill::{distill_matrix, DistillFormat};
+use crate::ecs::legacy_compilation::level1::reducer::DistillObjective;
+use crate::ecs::legacy_compilation::matrix_distill::{distill_matrix, DistillFormat};
 
 /// Coarse observation points for boundary sensitivity measurement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

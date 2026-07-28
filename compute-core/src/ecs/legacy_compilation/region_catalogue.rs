@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::compilation::phase_ir::TensorDtype;
+use crate::ecs::legacy_compilation::phase_ir::TensorDtype;
 use EvidenceRequirement::*;
 use RegionAdmission::*;
 

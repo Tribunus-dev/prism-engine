@@ -8,8 +8,8 @@
 //! This is the replacement for blind process_weights() — every matrix gets
 //! teacher/candidate comparison before acceptance.
 
-use crate::ecs::compilation::distill_core::kd_divergence;
-use crate::ecs::compilation::level1::reducer::{AccelerateReducer, DistillObjective};
+use crate::ecs::legacy_compilation::distill_core::kd_divergence;
+use crate::ecs::legacy_compilation::level1::reducer::{AccelerateReducer, DistillObjective};
 use prism_ecs_quantization::nf4tile640::squat::squat_requantize;
 use prism_ecs_quantization::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
 

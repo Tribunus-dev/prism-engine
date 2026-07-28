@@ -27,11 +27,11 @@ use std::collections::HashMap;
 
 // Re-export shared type identities.
 pub use prism_ecs_kernel::backend::placement::ExecutionLane;
-pub use prism_ecs_compile::compilation::activation_abi::ActivationAbi;
+pub use crate::ecs::legacy_compilation::activation_abi::ActivationAbi;
 pub use crate::integration::ContentHash;
 
 #[cfg(test)]
-use prism_ecs_compile::compilation::activation_abi::{DecodeActivationV1Params, PhysicalLayout};
+use crate::ecs::legacy_compilation::activation_abi::{DecodeActivationV1Params, PhysicalLayout};
 #[cfg(test)]
 use prism_ecs_compile::compilation::phase_ir::TensorDtype;
 

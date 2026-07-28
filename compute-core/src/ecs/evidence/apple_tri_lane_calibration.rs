@@ -5,7 +5,7 @@
 //! provides evidence-based decisions for ANE placement.  Decisions are
 //! grounded in real measured latencies, not compile-time heuristics.
 
-use prism_ecs_compile::compilation::tri_lane::AppleTriLaneCalibrationRecord;
+use crate::ecs::legacy_compilation::tri_lane::AppleTriLaneCalibrationRecord;
 
 /// Calibration evidence store — keyed by (device_fingerprint, artifact_digest).
 pub struct CalibrationStore {
@@ -94,7 +94,7 @@ impl CalibrationStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use prism_ecs_compile::compilation::tri_lane::ShapeClass;
+    use crate::ecs::legacy_compilation::tri_lane::ShapeClass;
 
     fn sample_shape() -> ShapeClass {
         ShapeClass {

@@ -9,20 +9,20 @@
 //!   5. BlockReceipt with metrics + execution provenance
 //!   6. Repeat for each block
 
-use prism_ecs_compile::compilation::level1::checkpoint::validate_teacher_checkpoint_against_ternary;
-use prism_ecs_compile::compilation::level1::gates::check_numerical;
+use crate::ecs::legacy_compilation::level1::checkpoint::validate_teacher_checkpoint_against_ternary;
+use crate::ecs::legacy_compilation::level1::gates::check_numerical;
 use prism_ecs_compile::compilation::level1::kd_gate::{
     compute_calibration_logits, kd_available, kd_gate, load_calibration_stream,
     score_student_logits, CalibrationStream, KdGateConfig, KdGateResult, KdReport, ParityRun,
     ParityThresholds,
 };
-use prism_ecs_compile::compilation::level1::scheduler::{Level1Config, Level1Scheduler};
-use prism_ecs_compile::compilation::level2::bridge::CoreMLTeacher;
-use prism_ecs_compile::compilation::level2::compiler::ensure_teacher_bundles;
-use prism_ecs_compile::compilation::level2::gates::{
+use crate::ecs::legacy_compilation::level1::scheduler::{Level1Config, Level1Scheduler};
+use crate::ecs::legacy_compilation::level2::bridge::CoreMLTeacher;
+use crate::ecs::legacy_compilation::level2::compiler::ensure_teacher_bundles;
+use crate::ecs::legacy_compilation::level2::gates::{
     check_joint_acceptance_rate, AcceptanceThresholds, JointAcceptanceResult,
 };
-use prism_ecs_compile::compilation::level2::scheduler::Level2Scheduler;
+use crate::ecs::legacy_compilation::level2::scheduler::Level2Scheduler;
 use prism_ecs_compile::compilation::level3::gates::run_all_gates as run_level3_gates;
 use prism_ecs_compile::compilation::level3::routing::Level3Router;
 use prism_ecs_compile::compilation::phase_types::{

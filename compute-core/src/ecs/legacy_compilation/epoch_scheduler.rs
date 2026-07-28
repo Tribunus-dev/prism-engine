@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::ecs::compilation::tri_lane::{
+use crate::ecs::legacy_compilation::tri_lane::{
     AneAdmission, AneExecutionEvidence, AppleTriLaneExecutionPlan, AppleTriLaneExecutionReceipt,
     CoreAiConfigurationEvidence, EpochResourceCounters, EpochRouteOrigin, ExecutionEpoch,
     ExecutionLane, FallbackStatus, LaneExecutionEvent, NumericalStatus, OverlapMetrics, SlotEvent,
@@ -21,7 +21,7 @@ use crate::ecs::compute_image::apple_shared_arena::{AppleSharedArena, SlotState}
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
-pub use crate::ecs::compilation::tri_lane::{CompletionContract, DependencyKind, LaneDependency};
+pub use crate::ecs::legacy_compilation::tri_lane::{CompletionContract, DependencyKind, LaneDependency};
 
 // ── Activation ring ──────────────────────────────────────────────────────
 
@@ -871,7 +871,7 @@ mod tests {
     use super::*;
 
     fn sample_plan() -> AppleTriLaneExecutionPlan {
-        use crate::ecs::compilation::tri_lane::{
+        use crate::ecs::legacy_compilation::tri_lane::{
             AppleFallbackPlan, AppleHardwareSignature, CoreAiComputeUnitPolicy,
             CoreAiProgramBinding, CoreAiShapeContract, CoreAiTensorContract, CoreAiWarmupContract,
             CpuProgramBinding, LaneCostEstimate, MetalProgramBinding, NumericalPolicy, ShapeClass,
@@ -931,7 +931,7 @@ mod tests {
                     max_warmup_latency_ms: 50,
                     tolerance: 0.01,
                 },
-                qualification: crate::ecs::compilation::tri_lane::AneQualificationRecord {
+                qualification: crate::ecs::legacy_compilation::tri_lane::AneQualificationRecord {
                     compile_success: true,
                     load_success: true,
                     warmup_success: true,
@@ -1257,7 +1257,7 @@ mod tests {
     }
 
     fn executor_with_dep_and_slot() -> AppleTriLaneExecutor {
-        use crate::ecs::compilation::tri_lane::{
+        use crate::ecs::legacy_compilation::tri_lane::{
             CompletionContract, DependencyKind, ExecutionEpoch, LaneDependency,
         };
         use crate::ecs::compute_image::apple_shared_arena::{

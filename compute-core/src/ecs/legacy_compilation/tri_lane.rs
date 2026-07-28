@@ -199,7 +199,7 @@ pub enum AneExperimentalReason {
 }
 
 /// Materialization mode re-exported from the unconditional phase_types module.
-pub use crate::ecs::compilation::phase_types::MaterializationMode;
+pub use crate::ecs::legacy_compilation::phase_types::MaterializationMode;
 
 // ── Buffer ownership ─────────────────────────────────────────────────────
 

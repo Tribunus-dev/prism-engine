@@ -65,7 +65,7 @@ pub use crate::ecs::cache;
 pub use crate::ecs::calibration;
 pub use crate::ecs::cimage;
 pub use crate::ecs::cimage_runtime;
-pub use crate::ecs::compilation;
+pub use crate::ecs::legacy_compilation;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
@@ -503,7 +503,7 @@ pub use crate::session::{
 pub use coreml_proto;
 
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub use crate::compilation::phase_ir::{
+pub use crate::legacy_compilation::phase_ir::{
     LogicalTensorId, MaterializationPlan, PhaseEdge, PhaseRegion, RegionId,
 };
 

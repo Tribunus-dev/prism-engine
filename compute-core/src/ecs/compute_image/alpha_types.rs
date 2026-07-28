@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use prism_ecs_compile::compilation::phase_ir::TensorDtype;
-use prism_ecs_compile::compilation::region_planner::RegionExecutionPlan;
+use crate::ecs::legacy_compilation::region_planner::RegionExecutionPlan;
 
 // ── Compute image ────────────────────────────────────────────────────────
 

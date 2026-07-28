@@ -7,7 +7,7 @@
 
 use super::super::receipt::ObjectiveWeights;
 use crate::ecs::calibration::accelerate::dot_product;
-use crate::ecs::compilation::distill_core::kd_divergence;
+use crate::ecs::legacy_compilation::distill_core::kd_divergence;
 use serde::{Deserialize, Serialize};
 
 /// Distillation objective weights — 8 λ hyper-parameters for the composite

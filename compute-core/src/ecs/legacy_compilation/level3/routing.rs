@@ -291,7 +291,7 @@ impl Default for Level3Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
+    use crate::ecs::legacy_compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
 
     fn dummy_descriptor() -> TensorDescriptor {
         TensorDescriptor {

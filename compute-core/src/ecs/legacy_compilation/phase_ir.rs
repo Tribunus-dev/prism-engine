@@ -262,11 +262,11 @@ pub struct BoundaryTensorContract {
 pub struct PhaseRegion {
     pub region_id: RegionId,
     pub operations: Vec<CompilePhaseDescriptor>,
-    pub placement_candidates: Vec<crate::ecs::compilation::phase_ir::CompilePlacement>,
+    pub placement_candidates: Vec<crate::ecs::legacy_compilation::phase_ir::CompilePlacement>,
     #[cfg(target_os = "macos")]
-    pub ane_eligibility: crate::ecs::compilation::ane_eligibility::AneEligibility,
-    pub input_contract: Option<crate::ecs::compilation::activation_abi::ActivationContract>,
-    pub output_contract: Option<crate::ecs::compilation::activation_abi::ActivationContract>,
+    pub ane_eligibility: crate::ecs::legacy_compilation::ane_eligibility::AneEligibility,
+    pub input_contract: Option<crate::ecs::legacy_compilation::activation_abi::ActivationContract>,
+    pub output_contract: Option<crate::ecs::legacy_compilation::activation_abi::ActivationContract>,
 }
 
 /// Edge connecting two PhaseIR phases with ABI contract and materialization plan.
@@ -276,8 +276,8 @@ pub struct PhaseEdge {
     pub producer: PhaseId,
     pub consumer: PhaseId,
     pub logical_tensor: LogicalTensorId,
-    pub producer_output_abi: crate::ecs::compilation::activation_abi::ActivationAbi,
-    pub consumer_input_abi: crate::ecs::compilation::activation_abi::ActivationAbi,
+    pub producer_output_abi: crate::ecs::legacy_compilation::activation_abi::ActivationAbi,
+    pub consumer_input_abi: crate::ecs::legacy_compilation::activation_abi::ActivationAbi,
     pub materialization_plan: MaterializationPlan,
 }
 

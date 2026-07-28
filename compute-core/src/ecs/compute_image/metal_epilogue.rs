@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use prism_ecs_kernel::backend::placement::ExecutionLane;
-use prism_ecs_compile::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
+use crate::ecs::legacy_compilation::activation_abi::{ActivationAbi, SlotLeaseId};
 
 // ── Epilogue variant ─────────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ pub fn choose_epilogue(
 #[cfg(test)]
 mod tests {
     use prism_ecs_kernel::backend::placement::ExecutionLane;
-    use prism_ecs_compile::compilation::activation_abi::{ActivationAbi, SlotLeaseId};
+    use crate::ecs::legacy_compilation::activation_abi::{ActivationAbi, SlotLeaseId};
     use crate::ecs::compute_image::metal_epilogue::{
         choose_epilogue, select_epilogue, EpilogueSelectionRule, MetalCodegenContext,
         MetalKernelEpilogue,
@@ -106,7 +106,7 @@ mod tests {
     /// A stub `ActivationAbi` value used throughout — the actual variant
     /// does not affect the selection logic, so any valid variant suffices.
     fn stub_abi() -> ActivationAbi {
-        use prism_ecs_compile::compilation::activation_abi::MetalOnlyParams;
+        use crate::ecs::legacy_compilation::activation_abi::MetalOnlyParams;
         use prism_ecs_compile::compilation::phase_ir::TensorDtype;
         ActivationAbi::MetalOnly(MetalOnlyParams {
             name: "test".into(),

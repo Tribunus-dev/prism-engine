@@ -281,7 +281,7 @@ pub fn run_all_gates(router: &Level3Router, source: &TensorDescriptor) -> Certif
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
+    use crate::ecs::legacy_compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
 
     fn dummy_descriptor() -> TensorDescriptor {
         TensorDescriptor {

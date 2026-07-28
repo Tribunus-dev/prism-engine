@@ -39,7 +39,7 @@ pub mod capability;
 pub mod cimage;
 pub mod cimage_runtime;
 pub mod cli;
-pub mod compilation;
+pub mod legacy_compilation;
 pub mod compile;
 pub mod compile_pipeline;
 pub mod compile_progress;
