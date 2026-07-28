@@ -102,7 +102,10 @@ pub mod image_provider;
 // constitutional phase-graph surface. See
 // `changelogs/2026-07-25-compute-core-absorption-phase-0-1.md`.
 pub mod integration;
-pub mod kv_arena;
+// `kv_arena/` was deleted in the engine-subsystem deletion pass; the
+// canonical home for the paged KV-cache arena is
+// `prism_kv_cache::arena`. See
+// `changelogs/2026-07-27-engine-subsystem-deletion-kv-arena.md`.
 // `kv_cache/` was deleted in Phase 1 (already absorbed into `prism-kv-cache`).
 pub mod kv_cache_types;
 pub mod layout_compiler;
