@@ -223,6 +223,15 @@ pub use compilation_systems::*;
 // catalogue, and tri-lane (Apple three-lane execution).
 pub mod compilation;
 
+// `compute_image_compile/` — constitutional surface for the engine's
+// `compute-core/src/ecs/compute_image/{compile,orchestrator}/` directories
+// (32 files, ~24K LOC), absorbed on 2026-07-27 as part of the
+// `ci-compile` migration. Houses the CImage wire format, the
+// execution-graph descriptor, the per-tensor matrix binding, the
+// tile640 ternary quantisation pipeline, the kernel receipt types,
+// and the orchestrator data types (phases, MTP, decode policy).
+pub mod compute_image_compile;
+
 pub mod runtime;
 pub use runtime::{CImageXdnaRouteDispatcher, ExecutionMode, RuntimeError, RuntimeModel};
 pub mod observability;
