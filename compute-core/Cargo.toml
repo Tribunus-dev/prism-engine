@@ -54,6 +54,15 @@ prism-ecs-compile = { path = "../crates/prism-ecs-compile" }
 # the constitutional surface at `prism_audio::asr_pipeline`
 # (see `changelogs/2026-07-27-engine-subsystem-deletion-audio.md`).
 prism-audio = { path = "../crates/prism-audio" }
+# Canonical home of the LUT (lookup-table) codec surface —
+# model graph descriptors, palettized matrix format, FP16 CPU
+# math kernels, INT8 KV-cache quantization helpers, and the
+# `CompiledTensor` data type. The engine used to have its own
+# parallel `ecs::lut::*` module (now absorbed); this dependency
+# routes all engine callers through the constitutional surface
+# at `prism_ecs_codec::lut` (see
+# `changelogs/2026-07-27-engine-subsystem-deletion-lut.md`).
+prism-ecs-codec = { path = "../crates/prism-ecs-codec" }
 block = { version = "0.1", optional = true }
 mpsgraph = { version = "0.2", optional = true }
 hf-hub = "0.4"

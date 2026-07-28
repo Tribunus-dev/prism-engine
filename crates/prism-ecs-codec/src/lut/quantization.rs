@@ -1,14 +1,34 @@
-//! Quantization helpers for INT8 KV cache and weight dequantization.
+//! INT8 KV cache and ternary weight quantization helpers.
 //!
-//! Provides symmetric per-token INT8 quantization and dequantization
-//! for KV cache entries stored as scaled `i8` byte arrays.
+//! This module owns the canonical authority for symmetric
+//! per-token INT8 quantization of FP16 vectors (used by the
+//! per-token KV cache format) and the 2-bit ternary packing of
+//! `{-1, 0, +1}` weight values. The byte format is the only
+//! contract this module exposes; all callers consume
+//! quantized bytes and validate the format themselves.
+//!
+//! # Per-token INT8 layout
+//!
+//! Each token block is `kv_dim + 4` bytes:
+//! - bytes `[0..4)` — `f32` scale in little-endian
+//! - bytes `[4..)` — `i8` quantized values (padded to `kv_dim`),
+//!   stored as `u8`
+//!
+//! # Ternary packing
+//!
+//! Each `f32` input maps to a 2-bit value:
+//! - values >= 0.5 → `0b01` (ternary +1)
+//! - values <= -0.5 → `0b10` (ternary -1)
+//! - values between -0.5 and 0.5 → `0b00` (ternary 0)
+//!
+//! 4 values pack per byte; the lowest-index element occupies the
+//! lowest 2 bits of the byte.
 
 /// Dequantize a contiguous INT8 KV cache block back to FP16.
 ///
-/// # Format
-/// Each token block is `kv_dim + 4` bytes:
-/// - bytes `[0..4)` — `f32` scale in little-endian
-/// - bytes `[4..)` — `i8` quantized values (padded to `kv_dim`), stored as `u8`
+/// See module docs for the on-disk layout. Returns an empty
+/// vector if the buffer is too small to contain a single
+/// `kv_dim + 4` token block.
 pub fn dequant_inline(data: &[u8], kv_dim: usize) -> Vec<u16> {
     let ts = kv_dim + 4;
     if data.len() < ts {
@@ -20,29 +40,29 @@ pub fn dequant_inline(data: &[u8], kv_dim: usize) -> Vec<u16> {
         let o = t * ts;
         let s = f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
         for j in 0..kv_dim {
-            out.push(half::f16::from_f32(((data[o + 4 + j] as i8) as f32) * (1.0 / s)).to_bits());
+            out.push(
+                half::f16::from_f32(((data[o + 4 + j] as i8) as f32) * (1.0 / s)).to_bits(),
+            );
         }
     }
     out
 }
 
-/// Symmetric per-token INT8 quantization: `data → [scale: f32 LE][i8 × n]`.
+/// Symmetric per-token INT8 quantization:
+/// `data → [scale: f32 LE][i8 × n]`.
 ///
-/// The scale is `127 / max_abs(data)` so quantized values fill `[-127, 127]`.
+/// The scale is `127 / max_abs(data)` so quantized values fill
+/// `[-127, 127]`. Returns an empty vector for empty input.
 pub fn quantize_token(data: &[u16]) -> Vec<u8> {
     let token_size = data.len() + 4;
     let mut out = Vec::with_capacity(token_size);
     if data.is_empty() {
         return out;
     }
-    let max_abs = data.iter().fold(0.0f32, |a, &v| {
-        a.max(half::f16::from_bits(v).to_f32().abs())
-    });
-    let scale = if max_abs > 1e-10 {
-        127.0 / max_abs
-    } else {
-        1.0
-    };
+    let max_abs = data
+        .iter()
+        .fold(0.0f32, |a, &v| a.max(half::f16::from_bits(v).to_f32().abs()));
+    let scale = if max_abs > 1e-10 { 127.0 / max_abs } else { 1.0 };
     out.extend_from_slice(&scale.to_le_bytes());
     for &v in data {
         let f = half::f16::from_bits(v).to_f32();
@@ -51,14 +71,11 @@ pub fn quantize_token(data: &[u16]) -> Vec<u8> {
     out
 }
 
-/// Pack ternary weights (-1, 0, +1) into a compact 2-bit representation.
+/// Pack ternary weights (-1, 0, +1) into a compact 2-bit
+/// representation. See module docs for the threshold rules.
 ///
-/// Each f32 input maps to a 2-bit value:
-/// - values <= -0.5 → 0b10 (ternary -1)
-/// - values between -0.5 and 0.5 → 0b00 (ternary 0)
-/// - values >= 0.5 → 0b01 (ternary +1)
-///
-/// Returns 4 f32 values packed per byte (2 bits each).
+/// Returns 4 f32 values packed per byte (2 bits each). The
+/// output length is `(data.len() + 3) / 4` bytes.
 pub fn pack_ternary_weights(data: &[f32]) -> Vec<u8> {
     let mut out = vec![0u8; (data.len() + 3) / 4];
     for (i, &v) in data.iter().enumerate() {
@@ -76,9 +93,10 @@ pub fn pack_ternary_weights(data: &[f32]) -> Vec<u8> {
     out
 }
 
-/// Extract the f32 scale from the first 4 bytes (little-endian) of a data slice.
-///
-/// Used for INT8 KV cache blocks where the first 4 bytes encode the scale.
+/// Extract the f32 scale from the first 4 bytes (little-endian)
+/// of a data slice. Returns `1.0` if the buffer is shorter than
+/// 4 bytes. Used for INT8 KV cache blocks where the first 4
+/// bytes encode the scale.
 pub fn extract_scale(data: &[u8]) -> f32 {
     if data.len() < 4 {
         return 1.0;
@@ -91,8 +109,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_quantize_roundtrip() {
-        let original: Vec<u16> = [1.0, 2.5, -3.0, 0.5]
+    fn quantize_roundtrip_preserves_values() {
+        let original: Vec<u16> = [1.0f32, 2.5, -3.0, 0.5]
             .iter()
             .map(|&f| half::f16::from_f32(f).to_bits())
             .collect();
@@ -112,28 +130,30 @@ mod tests {
     }
 
     #[test]
-    fn test_dequant_empty() {
+    fn dequant_inline_returns_empty_for_short_input() {
         assert_eq!(dequant_inline(&[], 4).len(), 0);
         assert_eq!(dequant_inline(&[0u8; 3], 4).len(), 0);
     }
 
     #[test]
-    fn test_pack_ternary_weights() {
+    fn quantize_token_returns_empty_for_empty_input() {
+        let out = quantize_token(&[]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn pack_ternary_weights_matches_bit_layout() {
+        // 1.0 (+1) → 0b01, 0.0 → 0b00, -1.0 → 0b10, 0.3 → 0b00
+        // packed byte 0 = 0b00_10_00_01 = 0x21
         let data = vec![1.0, 0.0, -1.0, 0.3, -0.7];
         let packed = pack_ternary_weights(&data);
-        // First byte: 01|00|10|00 (bit order within each 2-bit group: LSB first)
-        // bit 0-1: 1.0 => 01 = 0x01
-        // bit 2-3: 0.0 => 00 = 0x00
-        // bit 4-5: -1.0 => 10 = 0x02
-        // bit 6-7: 0.3 => 00 = 0x00
-        // Byte 0: 0b00_10_00_01 = 0x21
         assert_eq!(packed[0], 0b00_10_00_01);
-        // Second byte: -0.7 => 10 = 0x02 in lowest 2 bits
+        // -0.7 → 0b10 in lowest 2 bits of byte 1
         assert_eq!(packed[1], 0b10);
     }
 
     #[test]
-    fn test_extract_scale() {
+    fn extract_scale_reads_le_f32() {
         let scale = 127.0f32;
         let mut bytes = scale.to_le_bytes().to_vec();
         bytes.extend_from_slice(&[1u8; 10]);

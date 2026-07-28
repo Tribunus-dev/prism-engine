@@ -326,7 +326,6 @@ pub use crate::ecs::core::model;
 pub use crate::ecs::execution_profile;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub use crate::ecs::exo;
-pub use crate::ecs::lut;
 #[cfg(all(
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")

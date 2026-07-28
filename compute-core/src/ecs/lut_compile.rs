@@ -3,6 +3,13 @@
 //! Takes a `ModelGraph`, iterates every `PalettizedMatmul` node, loads
 //! weights in any format (F32/BF16/F16/U32 block-quantized), runs k-means
 //! per row, builds split-block payloads, and writes a `.cimage` file.
+//!
+//! This is the engine-side legacy compile path. The data types
+//! (`CompiledTensor`, `ModelGraph`, `TensorBlueprint`) are re-exported
+//! from the constitutional `prism_ecs_codec::lut` surface; the
+//! orchestration and CImage I/O stay engine-side because they
+//! depend on the engine's `CImageWriter`, GGUF parser, palette
+//! k-means, and Metal/Q8_0 GPU paths.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -20,17 +27,11 @@ use std::io::Write;
 use crate::config_namespace::resolve_namespace;
 use crate::ecs::config::build_execution_plan;
 use crate::ecs::config::parse_config;
-use crate::ecs::lut::graph::{ModelGraph, TensorBlueprint};
 use crate::quantization::cimage::CImageWriter;
 use crate::quantization::palette::palettize_matrix;
 
-pub struct CompiledTensor {
-    pub key: String,
-    pub dim_m: u32,
-    pub dim_n: u32,
-    pub payload: Vec<u8>,
-    pub effective_bpp: f32,
-}
+pub use prism_ecs_codec::lut::compile::CompiledTensor;
+use prism_ecs_codec::lut::graph::{ModelGraph, TensorBlueprint, UnifiedConfig};
 
 /// Compile an entire model into a `.cimage` file.
 pub fn compile_to_cimage(
@@ -394,8 +395,8 @@ pub fn compile_gguf_to_cimage(gguf_path: &Path, output_path: &Path) -> Result<()
     write_gguf_config_json(&config_path, &arch, &metadata)?;
 
     // 3. Build the ModelGraph from the config
-    let unified = crate::lut::graph::UnifiedConfig::from_file(&config_path)?;
-    let graph = crate::lut::graph::ModelGraph::build(&unified);
+    let unified = UnifiedConfig::from_file(&config_path)?;
+    let graph = ModelGraph::build(&unified);
     eprintln!(
         "[gguf] graph: {} layers, {} nodes",
         graph.num_layers,

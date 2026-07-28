@@ -3915,6 +3915,7 @@ name = "prism-ecs-codec"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "half",
  "serde",
  "serde_json",
  "tempfile",
@@ -6600,6 +6601,7 @@ dependencies = [
  "prism-audio",
  "prism-ecs-agent",
  "prism-ecs-backend",
+ "prism-ecs-codec",
  "prism-ecs-compile",
  "prism-ecs-constitutional",
  "prism-ecs-core",

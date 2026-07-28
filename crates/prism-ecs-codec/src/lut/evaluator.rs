@@ -1,15 +1,24 @@
-//! CPU math operations for LUT-based inference.
+//! FP16 CPU math kernels for LUT-based inference.
 //!
-//! Pure FP16 arithmetic kernels used as fallback when Metal/ANE backends
-//! are unavailable. All operations operate on `u16` bit patterns
-//! (half-precision floats via the `half` crate).
+//! This module owns the canonical authority for the
+//! backend-neutral CPU math kernels used as a fallback when
+//! Metal/ANE backends are unavailable: palettized matrix-vector
+//! multiply, RMS layer normalization, vector add, attention,
+//! rotary position embedding, token embedding lookup, and the
+//! activation functions.
+//!
+//! All kernels operate on FP16 values stored as `u16` bit
+//! patterns (half-precision floats via the `half` crate). They
+//! are pure functions; no I/O, no global state, no allocation
+//! beyond the output vector.
 
-use crate::ecs::lut::graph::ActivationFunction;
+use crate::lut::graph::ActivationFunction;
 
-// ── Palettized GEMV ────────────────────────────────────────────────────
+// ── Palettized GEMV ──────────────────────────────────────────────────
 
-/// Palettized matrix-vector multiply: `o = W @ inp` where `W` is stored as a
-/// 16-entry codebook per row + packed 4-bit indices.
+/// Palettized matrix-vector multiply: `o = W @ inp` where `W`
+/// is stored as a 16-entry codebook per row + packed 4-bit
+/// indices.
 ///
 /// # Format
 /// - `p[0..32)` — row 0 codebook (16 × u16 LE)
@@ -43,7 +52,7 @@ pub fn lut_gemv_cpu(inp: &[u16], p: &[u8], dm: u32, dn: u32) -> Vec<u16> {
     o
 }
 
-// ── Normalisation ──────────────────────────────────────────────────────
+// ── Normalisation ────────────────────────────────────────────────────
 
 /// In-place RMS layer normalisation.
 pub fn rms_norm_inplace(x: &mut [u16], eps: f32) {
@@ -72,9 +81,10 @@ pub fn vec_add_inplace(a: &mut [u16], b: &[u16]) {
     }
 }
 
-// ── Activation functions ───────────────────────────────────────────────
+// ── Activation functions ─────────────────────────────────────────────
 
-/// In-place SiLU (sigmoid linear unit): `x[i] = x[i] / (1 + exp(-x[i]))`.
+/// In-place SiLU (sigmoid linear unit):
+/// `x[i] = x[i] / (1 + exp(-x[i]))`.
 pub fn silu_inplace(x: &mut [u16]) {
     for v in x.iter_mut() {
         let f = half::f16::from_bits(*v).to_f32();
@@ -82,7 +92,8 @@ pub fn silu_inplace(x: &mut [u16]) {
     }
 }
 
-/// In-place GELU (Gaussian Error Linear Unit, tanh approximation).
+/// In-place GELU (Gaussian Error Linear Unit, tanh
+/// approximation).
 pub fn gelu_inplace(x: &mut [u16]) {
     let s = (2.0 / std::f32::consts::PI).sqrt();
     for v in x.iter_mut() {
@@ -92,9 +103,10 @@ pub fn gelu_inplace(x: &mut [u16]) {
     }
 }
 
-// ── Attention (CPU fallback) ───────────────────────────────────────────
+// ── Attention (CPU fallback) ─────────────────────────────────────────
 
-/// Grouped-query attention on FP16 data: `softmax(Q @ K^T / sqrt(d)) @ V`.
+/// Grouped-query attention on FP16 data:
+/// `softmax(Q @ K^T / sqrt(d)) @ V`.
 ///
 /// - `q`:  `[nh × hd]` FP16 values
 /// - `kc`: `[sl × nkv × hd]` FP16 values
@@ -146,11 +158,12 @@ pub fn attention_cpu(
     o
 }
 
-// ── Rotary Position Embedding ──────────────────────────────────────────
+// ── Rotary Position Embedding ────────────────────────────────────────
 
 /// In-place rotary position embedding (RoPE) for FP16 data.
 ///
-/// Applies rotation to contiguous `hd`-sized groups (one head at a time).
+/// Applies rotation to contiguous `hd`-sized groups (one head
+/// at a time).
 pub fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, _th: f32) {
     for i in (0..x.len()).step_by(hd) {
         let h = hd / 2;
@@ -165,14 +178,17 @@ pub fn rope_inplace(x: &mut [u16], pos: i64, hd: usize, _th: f32) {
     }
 }
 
-// ── Token embedding lookup ─────────────────────────────────────────────
+// ── Token embedding lookup ───────────────────────────────────────────
 
-/// Look up a single token embedding from a palettized LUT tensor.
+/// Look up a single token embedding from a palettized LUT
+/// tensor.
 ///
 /// # Format
-/// - Per-row codebook: 16 × u16 LE at `payload[row * 32 .. row * 32 + 32]`
+/// - Per-row codebook: 16 × u16 LE at
+///   `payload[row * 32 .. row * 32 + 32]`
 /// - Then packed 4-bit indices: `vocab_size × dm / 8` bytes
-/// - The codebook prefix: `vocab_size × 32` bytes total for all rows
+/// - The codebook prefix: `vocab_size × 32` bytes total for
+///   all rows
 pub fn lut_embed(token: u32, payload: &[u8], vocab_size: u32, hidden_dim: u32) -> Vec<u16> {
     let hd = hidden_dim as usize;
     let t = token as usize;
@@ -196,16 +212,19 @@ pub fn lut_embed(token: u32, payload: &[u8], vocab_size: u32, hidden_dim: u32) -
     v
 }
 
-// ── Activation evaluation ───────────────────────────────────────────
+// ── Activation evaluation ──────────────────────────────────────────
 
-/// Evaluate an activation function in-place on gate data, with optional
-/// element-wise multiply with up-projection values (for SwiGLU/MLP).
+/// Evaluate an activation function in-place on gate data,
+/// with optional element-wise multiply with up-projection
+/// values (for SwiGLU/MLP).
 ///
 /// # Arguments
 /// * `func` — Which activation to apply (Silu or Gelu)
-/// * `gate` — In-place gate values (FP16 u16), modified in place
-/// * `up` — Optional up-projection values; if Some, performs element-wise
-///   multiply `gate[i] = gate[i] * up[i]` after activation (SwiGLU pattern)
+/// * `gate` — In-place gate values (FP16 u16), modified in
+///   place
+/// * `up` — Optional up-projection values; if Some, performs
+///   element-wise multiply `gate[i] = gate[i] * up[i]` after
+///   activation (SwiGLU pattern)
 pub fn evaluate_activations(func: ActivationFunction, gate: &mut [u16], up: Option<&[u16]>) {
     match func {
         ActivationFunction::Silu => {
@@ -229,7 +248,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lut_gemv() {
+    fn lut_gemv_cpu_sums_codebook_times_input() {
+        // Build a payload with 2 rows of all-1.0 codebook
+        // entries; indices all 0 → output = dn ones = 8.
         let mut p = Vec::new();
         for _ in 0..16 {
             p.extend_from_slice(&0x3c00u16.to_le_bytes());
@@ -242,11 +263,14 @@ mod tests {
         }
         let o = lut_gemv_cpu(&[0x3c00u16; 8], &p, 2, 8);
         let v = half::f16::from_bits(o[0]).to_f32();
-        assert!((v - 8.0).abs() < 0.01);
+        assert!((v - 8.0).abs() < 0.01, "row 0 sum: {v}");
+        // row 1 has codebook values 2.0 → output 16
+        let v1 = half::f16::from_bits(o[1]).to_f32();
+        assert!((v1 - 16.0).abs() < 0.02, "row 1 sum: {v1}");
     }
 
     #[test]
-    fn test_rms() {
+    fn rms_norm_inplace_normalizes_constant_input() {
         let mut x = vec![0x3c00u16; 4];
         rms_norm_inplace(&mut x, 1e-6);
         for &v in &x {
@@ -255,7 +279,7 @@ mod tests {
     }
 
     #[test]
-    fn test_vec_add() {
+    fn vec_add_inplace_sums_in_place() {
         let mut a = vec![half::f16::from_f32(1.0).to_bits(); 4];
         let b = vec![half::f16::from_f32(2.0).to_bits(); 4];
         vec_add_inplace(&mut a, &b);
@@ -265,47 +289,83 @@ mod tests {
     }
 
     #[test]
-    fn test_lut_embed() {
-        let mut payload = Vec::new();
-        // 2 vocab entries × 32 bytes codebook
-        for _ in 0..2 * 16 {
-            payload.extend_from_slice(&0x3c00u16.to_le_bytes());
+    fn silu_matches_manual_calculation() {
+        let mut x = vec![half::f16::from_f32(2.0).to_bits(); 3];
+        silu_inplace(&mut x);
+        let expected = 2.0 / (1.0 + (-2.0f32).exp());
+        for &v in &x {
+            assert!(
+                (half::f16::from_bits(v).to_f32() - expected).abs() < 0.01,
+                "silu(2.0)"
+            );
         }
-        // packed indices for 8-dim
-        for _ in 0..2 * (8 / 2) {
-            payload.push(0);
-        }
-        let v = lut_embed(0, &payload, 2, 8);
-        assert_eq!(v.len(), 8);
-        let v2 = lut_embed(5, &payload, 2, 8);
-        assert_eq!(v2.len(), 8);
-        // Out-of-bounds returns zeros
-        assert_eq!(v2, vec![0; 8]);
     }
 
     #[test]
-    fn test_evaluate_activations_silu() {
-        use crate::ecs::lut::graph::ActivationFunction;
+    fn gelu_is_close_to_tanh_approximation() {
+        let mut x = vec![half::f16::from_f32(1.0).to_bits(); 2];
+        gelu_inplace(&mut x);
+        let got = half::f16::from_bits(x[0]).to_f32();
+        assert!(got > 0.8 && got < 0.9, "gelu(1.0) ≈ {got}");
+    }
+
+    #[test]
+    fn attention_cpu_returns_full_output_shape() {
+        // nh=2, nkv=1, hd=4, sl=3
+        let q = vec![0x3c00u16; 8];
+        let k = vec![0x3c00u16; 12];
+        let v = vec![0x3c00u16; 12];
+        let o = attention_cpu(&q, &k, &v, 2, 1, 4, 3);
+        assert_eq!(o.len(), 8);
+    }
+
+    #[test]
+    fn rope_inplace_preserves_length() {
+        let mut x = vec![0x3c00u16; 8];
+        rope_inplace(&mut x, 0, 4, 10000.0);
+        assert_eq!(x.len(), 8);
+        // At pos=0, ang=0 → sin=0, cos=1 → each pair (a,b) → (a, b)
+        // So the values should still be ~1.0 (modulo FP16 round).
+        for &v in &x {
+            assert!((half::f16::from_bits(v).to_f32() - 1.0).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn lut_embed_returns_zero_for_out_of_bounds() {
+        // vocab=2, hidden_dim=8
+        let mut payload = Vec::new();
+        for _ in 0..2 * 16 {
+            payload.extend_from_slice(&0x3c00u16.to_le_bytes());
+        }
+        for _ in 0..2 * (8 / 2) {
+            payload.push(0);
+        }
+        let v0 = lut_embed(0, &payload, 2, 8);
+        let v_oob = lut_embed(5, &payload, 2, 8);
+        assert_eq!(v0.len(), 8);
+        assert_eq!(v_oob.len(), 8);
+        assert_eq!(v_oob, vec![0u16; 8]);
+    }
+
+    #[test]
+    fn evaluate_activations_silu_multiply_with_up() {
         let mut gate = vec![half::f16::from_f32(2.0).to_bits(); 4];
         let up = vec![half::f16::from_f32(3.0).to_bits(); 4];
         evaluate_activations(ActivationFunction::Silu, &mut gate, Some(&up));
-        // SiLU(2.0) = 2.0 / (1.0 + exp(-2.0)) ≈ 1.7616
-        // After gate*up: 1.7616 * 3.0 ≈ 5.2848
-        let expected = half::f16::from_f32(2.0).to_f32() / (1.0 + (-2.0f32).exp());
+        let expected_silu = 2.0 / (1.0 + (-2.0f32).exp());
+        let expected = expected_silu * 3.0;
         let got = half::f16::from_bits(gate[0]).to_f32();
         assert!(
-            (got - expected * 3.0).abs() < 0.01,
-            "silu gate*up: got={got}, expected={}",
-            expected * 3.0
+            (got - expected).abs() < 0.01,
+            "silu(2)*3: got={got}, expected={expected}"
         );
     }
 
     #[test]
-    fn test_evaluate_activations_gelu() {
-        use crate::ecs::lut::graph::ActivationFunction;
+    fn evaluate_activations_gelu_no_up() {
         let mut gate = vec![half::f16::from_f32(1.0).to_bits(); 2];
         evaluate_activations(ActivationFunction::Gelu, &mut gate, None);
-        // GELU(1.0) ≈ 0.84119 via tanh approximation
         let got = half::f16::from_bits(gate[0]).to_f32();
         assert!(got > 0.8 && got < 0.9, "gelu(1.0) ≈ {got}");
     }

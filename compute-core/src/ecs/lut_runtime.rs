@@ -1,7 +1,17 @@
 //! Prism Engine — unified inference runtime for `.cimage` models.
+//!
+//! This is the engine-side legacy LUT inference runtime. The
+//! data types (`CompiledTensor`, `ModelGraph`, `ComputeNode`,
+//! `ActivationFunction`, `TensorRole`) are re-exported from the
+//! constitutional `prism_ecs_codec::lut` surface; the
+//! Metal/ANE backend wiring and the inference loop stay
+//! engine-side because they depend on engine-specific FFI and
+//! backends.
 
-use crate::ecs::lut::compiler::CompiledTensor;
-use crate::ecs::lut::graph::{ActivationFunction, ComputeNode, ModelGraph, TensorRole};
+use crate::ecs::lut_compile::CompiledTensor;
+use prism_ecs_codec::lut::graph::{
+    ActivationFunction, ComputeNode, ModelGraph, TensorBlueprint, TensorRole,
+};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -29,7 +39,7 @@ mod metal_backend {
     }
     impl MetalBackend {
         pub fn new(
-            tensors: &HashMap<String, crate::lut::compiler::CompiledTensor>,
+            tensors: &HashMap<String, CompiledTensor>,
             mh: u64,
             _mi: u64,
         ) -> Result<Self, String> {
@@ -505,7 +515,7 @@ impl PrismEngine {
                 _ => None,
             }) {
                 if let Some(ct) = self.tensors.get(&k) {
-                    let tb = crate::lut::graph::TensorBlueprint {
+                    let tb = TensorBlueprint {
                         key: k.clone(),
                         dim_m: ct.dim_m,
                         dim_n: ct.dim_n,
@@ -602,7 +612,7 @@ impl PrismEngine {
     fn gemv(
         &self,
         input: &[u16],
-        tensor: &crate::lut::graph::TensorBlueprint,
+        tensor: &TensorBlueprint,
         _payload: &[u8],
     ) -> Vec<u16> {
         #[cfg(feature = "metal-dispatch")]

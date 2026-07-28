@@ -110,7 +110,14 @@ pub mod layout_transform;
 pub mod loader;
 pub mod logging;
 pub mod lora;
-pub mod lut;
+// `pub mod lut;` is removed during the LUT engine-deletion
+// migration; the engine-side compile and runtime paths
+// (formerly compute-core/src/ecs/lut/{compiler,engine}.rs)
+// now live as sibling top-level files. The data types are
+// imported from the constitutional `prism_ecs_codec::lut`
+// surface.
+pub mod lut_compile;
+pub mod lut_runtime;
 pub mod mapped_image;
 pub mod memory;
 pub mod metal_backend;
