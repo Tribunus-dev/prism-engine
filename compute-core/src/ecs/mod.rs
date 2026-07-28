@@ -143,7 +143,6 @@ pub mod model_runtime;
 pub mod model_store;
 pub mod mtp;
 pub mod native_kernel;
-pub mod nf4tile640;
 pub mod operation_catalog;
 pub mod parsing;
 pub mod pg_receipt_subscriber;

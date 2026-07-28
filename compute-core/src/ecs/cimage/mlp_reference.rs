@@ -277,7 +277,7 @@ fn extract_packed_and_reconstruct(
     let in_features = tensor.logical_shape[1] as usize;
     let out_features = tensor.logical_shape[0] as usize;
 
-    use crate::nf4tile640::*;
+    use prism_ecs_quantization::nf4tile640::*;
     let reconstructed = match tensor.codec {
         crate::execution_plan::CodecFamily::Nf4 => {
             unpack_nf4_weights(&codes, &scales, &biases, in_features, out_features)

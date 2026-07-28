@@ -10,14 +10,14 @@
 
 use std::collections::HashMap;
 
-use crate::ecs::nf4tile640::learn::{
+use super::learn::{
     select_profile_for_matrix, LearnedProfile, LearningConfig, LearningReceipt, SelectionReason,
 };
-use crate::ecs::nf4tile640::profile::{BiasPolicy, ClippingPolicy, SidecarPolicy};
-use crate::ecs::nf4tile640::roles::MatrixRole;
-use crate::ecs::nf4tile640::NF4_CODEBOOK;
+use super::profile::{BiasPolicy, ClippingPolicy, SidecarPolicy};
+use super::roles::MatrixRole;
+use super::NF4_CODEBOOK;
 #[cfg(feature = "prism-backend")]
-use crate::ecs::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
+use super::{dequant_matmul_reference, pack_nf4_weights};
 
 /// Create a matrix with Gaussian N(0, 0.02^2) weights — attention-like.
 fn make_attention_like(rows: usize, cols: usize) -> Vec<f32> {

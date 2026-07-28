@@ -7,7 +7,7 @@
 //! one buffer per matrix instead of three, one IOSurface for ANE binding,
 //! one segment table entry for mmap.
 
-use crate::ecs::nf4tile640::{pack_nf4_tile, unpack_nf4_tile, TILE_ELEMENTS};
+use super::{pack_nf4_tile, unpack_nf4_tile, TILE_ELEMENTS};
 
 const BYTES_PER_TILE: usize = 360; // 320 codes + 20 scales + 20 biases
 

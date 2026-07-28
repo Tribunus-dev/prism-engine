@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::nf4tile640::{pack_nf4_weights, unpack_nf4_weights};
+use super::{pack_nf4_weights, unpack_nf4_weights};
 
 /// Configuration for squat requantization.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -5,16 +5,9 @@
 //! where a_i = E[x_i^2] (activation second moment), c_{q_i} is the NF4 codebook
 //! entry for weight w_i, and s,b are the group's scale and bias.
 
-use crate::ecs::compilation::cancel::CancelToken;
-use crate::ecs::nf4tile640::NF4_CODEBOOK;
+use crate::nf4tile640::NF4_CODEBOOK;
+use prism_ecs_core::compilation::cancel::CancelToken;
 use serde::Serialize;
-
-#[cfg(any(feature = "prism-backend", feature = "mlx-backend"))]
-use crate::ecs::compute_image::compile::ternary::{verify_cimage, SegmentKind};
-#[cfg(any(feature = "prism-backend", feature = "mlx-backend"))]
-use crate::ecs::nf4tile640::{
-    GROUPS_PER_TILE, GROUP_SIZE, PACKED_BYTES_PER_GROUP, PACKED_BYTES_PER_TILE,
-};
 
 /// Optimal scale and bias for one 128-element group.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -179,140 +172,6 @@ pub fn compute_weighted_mse(
             (a as f64) * (err as f64).powi(2)
         })
         .sum::<f64>()
-}
-
-#[cfg(any(feature = "prism-backend", feature = "mlx-backend"))]
-/// Load an NF4Tile640 cimage and run 2-iteration AW-LS optimization on every
-/// quantization group, saving per-group profiles as JSON files.
-///
-/// Returns the list of saved profile file paths.
-pub fn run_background_calibration(
-    cimage_path: &str,
-    cancel_token: &CancelToken,
-    output_dir: &str,
-) -> Result<Vec<String>, String> {
-    std::fs::create_dir_all(output_dir)
-        .map_err(|e| format!("create output dir {}: {}", output_dir, e))?;
-
-    // Open and mmap the cimage file.
-    let file =
-        std::fs::File::open(cimage_path).map_err(|e| format!("open {}: {}", cimage_path, e))?;
-    let mmap =
-        unsafe { memmap2::Mmap::map(&file).map_err(|e| format!("mmap {}: {}", cimage_path, e))? };
-
-    let (header, _layout) = verify_cimage(&mmap).map_err(|e| format!("verify cimage: {}", e))?;
-
-    if !header.is_nf4_tile640() {
-        return Err("cimage is not NF4Tile640 format".into());
-    }
-
-    // Locate the three NF4 tile segments.
-    let codes_seg = header
-        .segment(SegmentKind::Nf4Tile640Weights)
-        .ok_or_else(|| "missing Nf4Tile640Weights segment".to_string())?;
-    let scales_seg = header
-        .segment(SegmentKind::BlockScales)
-        .ok_or_else(|| "missing BlockScales segment".to_string())?;
-    let biases_seg = header
-        .segment(SegmentKind::BlockBiases)
-        .ok_or_else(|| "missing BlockBiases segment".to_string())?;
-
-    let cstart = codes_seg.offset as usize;
-    let cend = cstart + codes_seg.length as usize;
-    let sstart = scales_seg.offset as usize;
-    let send = sstart + scales_seg.length as usize;
-    let bstart = biases_seg.offset as usize;
-    let bend = bstart + biases_seg.length as usize;
-
-    if cend > mmap.len() || send > mmap.len() || bend > mmap.len() {
-        return Err("segment extends past mmap end".into());
-    }
-
-    let packed_codes = &mmap[cstart..cend];
-    let scales: &[f32] = unsafe {
-        std::slice::from_raw_parts(
-            mmap[sstart..send].as_ptr() as *const f32,
-            (send - sstart) / 4,
-        )
-    };
-    let biases: &[f32] = unsafe {
-        std::slice::from_raw_parts(
-            mmap[bstart..bend].as_ptr() as *const f32,
-            (bend - bstart) / 4,
-        )
-    };
-
-    let num_tiles = packed_codes.len() / PACKED_BYTES_PER_TILE;
-    let mut saved = Vec::new();
-
-    for tile in 0..num_tiles {
-        cancel_token
-            .heartbeat()
-            .map_err(|e| format!("cancelled: {}", e))?;
-
-        let tile_base = tile * PACKED_BYTES_PER_TILE;
-        let sb_base = tile * GROUPS_PER_TILE;
-
-        for group in 0..GROUPS_PER_TILE {
-            cancel_token.heartbeat().ok();
-
-            let codes_base = tile_base + group * PACKED_BYTES_PER_GROUP;
-            let orig_scale = scales[sb_base + group];
-            let orig_bias = biases[sb_base + group];
-
-            // Decode packed NF4 codes and dequantize weights.
-            let mut code_indices = [0u8; 128];
-            let mut weights = [0.0f32; 128];
-            for i in 0..(GROUP_SIZE / 2) {
-                let packed = packed_codes[codes_base + i];
-                let code0 = packed & 0x0F;
-                let code1 = (packed >> 4) & 0x0F;
-                code_indices[2 * i] = code0;
-                code_indices[2 * i + 1] = code1;
-                weights[2 * i] = NF4_CODEBOOK[code0 as usize] * orig_scale + orig_bias;
-                weights[2 * i + 1] = NF4_CODEBOOK[code1 as usize] * orig_scale + orig_bias;
-            }
-
-            // Run 2-iteration AW-LS with uniform activation weights.
-            let act_weights = [1.0f32; 128];
-            let result =
-                optimize_scale_bias(&weights, &code_indices, &act_weights, 2, cancel_token);
-
-            // Build the profile and serialise to JSON.
-            let profile = GroupCalibrationProfile {
-                tile_index: tile,
-                group_index: group,
-                original_scale: orig_scale,
-                original_bias: orig_bias,
-                optimal_scale: result.scale,
-                optimal_bias: result.bias,
-                weighted_mse: result.aw_mse,
-                iterations: result.iterations,
-            };
-
-            let filename = format!("tile{:04}_group{}.json", tile, group);
-            let path = std::path::Path::new(output_dir).join(&filename);
-            let json = serde_json::to_string_pretty(&profile)
-                .map_err(|e| format!("serialize profile: {}", e))?;
-            std::fs::write(&path, &json).map_err(|e| format!("write {}: {}", filename, e))?;
-            saved.push(path.to_string_lossy().into_owned());
-        }
-    }
-
-    Ok(saved)
-}
-
-#[cfg(any(feature = "prism-backend", feature = "mlx-backend"))]
-#[derive(Debug, Clone, Serialize)]
-struct GroupCalibrationProfile {
-    tile_index: usize,
-    group_index: usize,
-    original_scale: f32,
-    original_bias: f32,
-    optimal_scale: f32,
-    optimal_bias: f32,
-    weighted_mse: f64,
-    iterations: u8,
 }
 
 #[cfg(test)]

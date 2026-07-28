@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 
-use crate::ecs::nf4tile640::calibration::CalibrationResult;
-use crate::ecs::nf4tile640::profile::{BiasPolicy, ClippingPolicy, SidecarPolicy};
-use crate::ecs::nf4tile640::roles::MatrixRole;
-use crate::ecs::nf4tile640::NF4_CODEBOOK;
+use super::calibration::CalibrationResult;
+use super::profile::{BiasPolicy, ClippingPolicy, SidecarPolicy};
+use super::roles::MatrixRole;
+use super::NF4_CODEBOOK;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Configuration
@@ -1113,8 +1113,8 @@ mod tests {
     /// Select best profile picks the best from candidates.
     #[test]
     fn test_select_best_profile_fallback() {
-        use crate::ecs::nf4tile640::calibration::CoverageReceipt;
-        use crate::ecs::nf4tile640::calibration::{CalibrationConfig, CalibrationReceipt};
+        use crate::nf4tile640::calibration::CoverageReceipt;
+        use crate::nf4tile640::calibration::{CalibrationConfig, CalibrationReceipt};
         use std::collections::HashMap;
         // Empty samples_by_role → fallback path.
         let cal = CalibrationResult {

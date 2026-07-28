@@ -19,7 +19,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::nf4tile640::nf4_dequantize;
+use super::nf4_dequantize;
 
 // ═════════════════════════════════════════════════════════════════════════
 // Types
@@ -706,8 +706,8 @@ mod tests {
     #[test]
     fn test_nf4_reconstruct_value() {
         // Build a single tile of 640 values, pack it, then reconstruct one element.
-        use crate::ecs::nf4tile640::nf4_quantize;
-        use crate::ecs::nf4tile640::pack_nf4_tile;
+        use crate::nf4tile640::nf4_quantize;
+        use crate::nf4tile640::pack_nf4_tile;
 
         let values = [0.5_f32; 640];
         let (codes, scales, biases) = pack_nf4_tile(&values);
@@ -734,7 +734,7 @@ mod tests {
         weights[0] = 100.0; // one outlier
 
         let groups: Vec<Vec<f32>> = weights.chunks(128).map(|c| c.to_vec()).collect();
-        use crate::ecs::nf4tile640::pack_nf4_tile;
+        use crate::nf4tile640::pack_nf4_tile;
         let mut arr = [0.0_f32; 640];
         arr.copy_from_slice(&weights);
         let (codes, scales, biases) = pack_nf4_tile(&arr);

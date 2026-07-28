@@ -55,8 +55,8 @@ impl MatrixRole {
     }
 
     /// Default profile ID for this role.
-    pub fn default_profile_id(self) -> crate::nf4tile640::profile::ProfileId {
-        use crate::ecs::nf4tile640::profile::{
+    pub fn default_profile_id(self) -> super::profile::ProfileId {
+        use super::profile::{
             PROFILE_ID_CANONICAL_NF4_V1, PROFILE_ID_GEMMA_ATTENTION_V1,
             PROFILE_ID_GEMMA_BOUNDARY_V1, PROFILE_ID_GEMMA_FFN_V1, PROFILE_ID_TTS_CODEC_V1,
         };

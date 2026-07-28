@@ -41,7 +41,7 @@ pub mod awls;
 pub mod fused;
 pub mod protection;
 
-use crate::quantization::sweep::spec::Nf4CodebookId;
+use crate::sweep::spec::Nf4CodebookId;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Section 1: Format Constants
@@ -375,7 +375,7 @@ pub fn pack_nf4_tile_awls(
                 &code_indices,
                 &act_chunk,
                 max_awls_iters,
-                &crate::ecs::compilation::cancel::CancelToken::new(None),
+                &prism_ecs_core::compilation::cancel::CancelToken::new(None),
             );
             // Use the exact joint state from the optimizer
             code_indices = result.codes;

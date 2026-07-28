@@ -1,4 +1,4 @@
-use crate::ecs::nf4tile640::roles::classify_matrix_role;
+use super::roles::classify_matrix_role;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -91,8 +91,8 @@ pub fn structural_verify(
     original_rows: u32,
     original_cols: u32,
 ) -> Result<(), Vec<String>> {
-    use crate::ecs::nf4tile640::packed_size;
-    use crate::ecs::nf4tile640::TILE_ELEMENTS;
+    use crate::nf4tile640::packed_size;
+    use crate::nf4tile640::TILE_ELEMENTS;
     let rows = original_rows as usize;
     let cols = original_cols as usize;
     let mut errors: Vec<String> = Vec::new();
@@ -237,7 +237,7 @@ pub fn compute_matrix_metrics(
     }
 
     // Unpack (structural checks passed, so buffer sizes are correct).
-    use crate::ecs::nf4tile640::unpack_nf4_weights;
+    use crate::nf4tile640::unpack_nf4_weights;
     let reconstructed = unpack_nf4_weights(codes, scales, biases, rows, cols);
 
     // Compute per-element error.
@@ -541,8 +541,8 @@ pub fn apply_quality_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::nf4tile640::profile::PROFILE_ID_CANONICAL_NF4_V1;
-    use crate::ecs::nf4tile640::{pack_nf4_tile, pack_nf4_weights, TILE_ELEMENTS};
+    use crate::nf4tile640::profile::PROFILE_ID_CANONICAL_NF4_V1;
+    use crate::nf4tile640::{pack_nf4_tile, pack_nf4_weights, TILE_ELEMENTS};
 
     /// Helper: generate a random-ish test tile.
     fn make_test_tile() -> [f32; TILE_ELEMENTS] {

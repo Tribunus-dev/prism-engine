@@ -10,8 +10,8 @@
 
 use crate::ecs::compilation::distill_core::kd_divergence;
 use crate::ecs::compilation::level1::reducer::{AccelerateReducer, DistillObjective};
-use crate::nf4tile640::squat::squat_requantize;
-use crate::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
+use prism_ecs_quantization::nf4tile640::squat::squat_requantize;
+use prism_ecs_quantization::nf4tile640::{dequant_matmul_reference, pack_nf4_weights};
 
 /// Quantization format for a matrix in a distillation comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -10,8 +10,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::ecs::nf4tile640::roles::MatrixRole;
-use crate::ecs::nf4tile640::NF4_CODEBOOK;
+use super::roles::MatrixRole;
+use super::NF4_CODEBOOK;
 
 // ────────────────────────────────────────────────────────────────────────────
 // Config

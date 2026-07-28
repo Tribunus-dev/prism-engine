@@ -1,7 +1,7 @@
 //! Tests for Metal-profile descriptor compatibility.
 //! These tests verify the CPU-Metal boundary without requiring GPU hardware.
 
-use crate::ecs::nf4tile640::profile::{
+use super::profile::{
     CodebookDescriptor, QuantizerProfile, PROFILE_ID_CANONICAL_NF4_V1,
     PROFILE_ID_GEMMA_ATTENTION_V1,
 };

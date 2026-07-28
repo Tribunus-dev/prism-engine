@@ -85,7 +85,11 @@ pub mod gguf_reader;
 pub mod kv_search;
 /// MLX model adapter — format detection and config parsing.
 pub mod mlx_adapter;
-/// NF4 tile640 weight format — local copy for crate-internal use.
+/// NF4 tile640 packed weight format — canonical authority for the
+/// constitutional NF4-tile640 quantization surface (binary spec,
+/// pack/unpack, calibration, learn, profile, role, outliers, plan,
+/// verify, protection, AW-LS fitting, fused layout, INT8 packing,
+/// CPU reference matmul, and the Apple Accelerate vDSP helpers).
 pub mod nf4tile640;
 /// ONNX model adapter — minimal protobuf parser + TensorProvider
 pub mod onnx_adapter;
