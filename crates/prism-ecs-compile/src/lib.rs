@@ -223,6 +223,16 @@ pub use compilation_systems::*;
 // catalogue, and tri-lane (Apple three-lane execution).
 pub mod compilation;
 
+// Canonical home of the `compute_image/` core surface (52 top-level
+// files + `cimage_packer/` + `manifest/`) absorbed from
+// `compute-core/src/ecs/compute_image/`. Houses data-only types
+// for fusion receipts, phase graph metadata, KV cache plans, slot
+// state, residency plans, and CImage manifest data shapes. Engine-
+// coupled implementations (Metal epilogues, ANE MIL builders, Core
+// ML pipeline code) stay engine-side at
+// `compute-core/src/ecs/legacy_compute_image_core/`.
+pub mod compute_image_core;
+
 pub mod runtime;
 pub use runtime::{CImageXdnaRouteDispatcher, ExecutionMode, RuntimeError, RuntimeModel};
 pub mod observability;
