@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::ecs::decode_attribution::backend_adapters::BackendKind;
+use crate::ecs::legacy_decode_attribution::backend_adapters::BackendKind;
 use crate::pipeline_parity::{
     decode_microphase_support_for, kv_phase_support_for, support_matrix_for, PendingCode,
     PhaseSupportStatus, PipelinePhase,

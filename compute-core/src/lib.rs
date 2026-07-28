@@ -168,7 +168,7 @@ pub use crate::ecs::coreai;
     target_os = "macos",
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
-pub use crate::ecs::decode_attribution;
+pub use crate::ecs::legacy_decode_attribution;
 /// Device registry — runtime hardware enumeration and capability discovery.
 pub use crate::ecs::device;
 pub use crate::ecs::diffusion;

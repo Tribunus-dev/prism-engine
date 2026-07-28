@@ -4,7 +4,7 @@
 //! This stub provides the same public API.  Replace with the full port when
 //! the decode-attribution module is brought up to parity with the monorepo.
 
-use crate::ecs::decode_attribution::backend_adapters::BackendSupportTier;
+use crate::ecs::legacy_decode_attribution::backend_adapters::BackendSupportTier;
 
 /// Simplified result until the full port lands.
 #[derive(Clone)]
@@ -12,7 +12,7 @@ pub struct AccelerateDomainResult {
     pub output: Vec<f32>,
     pub duration_ns: u64,
     pub execution_kind: String,
-    pub execution_proof: crate::ecs::decode_attribution::receipt::ExecutionProof,
+    pub execution_proof: crate::ecs::legacy_decode_attribution::receipt::ExecutionProof,
 }
 
 /// Return the support tier for a given operation family.
@@ -25,7 +25,7 @@ pub fn run_family(
     _family_name: &str,
     _input_data: &[f32],
     _weights: &[f32],
-    _profile: &crate::ecs::decode_attribution::shape_profiles::ShapeProfile,
+    _profile: &crate::ecs::legacy_decode_attribution::shape_profiles::ShapeProfile,
 ) -> Result<AccelerateDomainResult, String> {
     Err("Accelerate domain adapter not yet ported".into())
 }
