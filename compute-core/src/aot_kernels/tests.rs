@@ -5,7 +5,7 @@
 
 use crate::aot_kernels::{AppleSiliconProfileDb, AppleSiliconProfileId, ProfileEvidenceStatus};
 use crate::ecs::aot::template::{MetalKernelTemplate, TemplateError};
-use crate::ecs::system::kernel_gen::TemplateExpander;
+use prism_ecs_runtime::systems::kernel_gen::TemplateExpander;
 
 use super::*;
 

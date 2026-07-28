@@ -16,3 +16,4 @@ pub mod workspace_legacy_evolution_imports;
 pub mod workspace_legacy_imports;
 pub mod workspace_legacy_lut_imports;
 pub mod workspace_legacy_models_imports;
+pub mod workspace_legacy_system_imports;

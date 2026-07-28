@@ -24,7 +24,7 @@ use super::super::phase_types::{
     ElementType, PhaseId, PhysicalLayout, ProviderKind, ResidencyClass, TensorDescriptor,
 };
 use super::super::receipt::{BridgeEvidenceSection, BridgeReceipt, PhaseExecutionRecord};
-use crate::ecs::system::planning_core::MemoryBudget;
+use crate::ecs::system_adapters::planning_core::MemoryBudget;
 
 use super::super::level1::reducer::AccelerateReducer;
 use super::super::level1::scheduler::Level1Config;

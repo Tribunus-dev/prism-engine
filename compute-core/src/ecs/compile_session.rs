@@ -52,7 +52,7 @@ impl CompileSession {
     /// [`load_model`](Self::load_model) so that the adapter only fires when
     /// a model has actually been loaded.
     pub fn register_builtin_systems(&mut self) {
-        use crate::ecs::system::*;
+        use crate::ecs::system_adapters::*;
 
         // ── Phase A: ModelLoading ────────────────────────────────────────
         #[cfg(target_os = "macos")]
@@ -323,7 +323,7 @@ impl CompileSession {
     /// token budget, phase engine, work dispatch, completion ingestion,
     /// and slot leases.
     pub fn register_execution_systems(&mut self) {
-        use crate::ecs::system::*;
+        use crate::ecs::system_adapters::*;
 
         // ── Backend dispatch & eval systems (Validation phase) ────────────
         self.world
@@ -382,7 +382,7 @@ impl CompileSession {
     /// Call `register_builtin_systems()` **before** this method so that
     /// downstream phases (B–G) are ready.
     pub fn load_model(&mut self, path: &str) -> anyhow::Result<()> {
-        use crate::ecs::system::*;
+        use crate::ecs::system_adapters::*;
 
         self.input_path = Some(path.to_string());
 

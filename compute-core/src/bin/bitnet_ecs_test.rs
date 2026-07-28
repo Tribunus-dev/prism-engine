@@ -14,11 +14,11 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
 
+use prism_ecs_runtime::systems::engine_systems::CimageLoadRequest;
 use tribunus_compute_core::ecs::component::engine::InFlightDecode;
-use tribunus_compute_core::ecs::system::engine_systems::{
-    CimageGenerateSystem, CimageLoadRequest, CimageLoadSystem, EngineInitSystem,
+use tribunus_compute_core::ecs::system_adapters::{
+    CimageGenerateSystem, CimageLoadSystem, EngineInitSystem, MetalInitSystem,
 };
-use tribunus_compute_core::ecs::system::metal_init::MetalInitSystem;
 use tribunus_compute_core::ecs::WorldSystemsExt;
 use tribunus_compute_core::ecs::{EntityKind, SchedulePhase, World};
 

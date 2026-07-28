@@ -12,6 +12,7 @@ pub mod ports;
 pub mod schedule;
 pub mod scheduling;
 pub mod speculative_decoding;
+pub mod systems;
 pub mod test_adapters;
 pub mod worker_protocol;
 pub mod world_view;

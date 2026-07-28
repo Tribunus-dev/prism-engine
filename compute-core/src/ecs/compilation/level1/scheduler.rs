@@ -16,7 +16,7 @@ use super::super::phase_types::{
     ElementType, PhysicalLayout, ProviderKind, ResidencyClass, TensorDescriptor,
 };
 use super::super::receipt::{ObjectiveWeights, PhaseExecutionRecord};
-use crate::ecs::system::planning_core::MemoryBudget;
+use crate::ecs::system_adapters::planning_core::MemoryBudget;
 
 use super::reducer::AccelerateReducer;
 use super::student::TernaryStudent;
