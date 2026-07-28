@@ -8,15 +8,15 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::ecs::backend::routing::{BackendId, EvidenceDigest, OperationFamily, OperationId};
-use crate::ecs::compiler::backend_assessment::{
-    BackendAssessmentPass, GraphOperation, ModelOperationGraph,
-};
-use crate::ecs::compiler::compile_schedule::compile_model_to_scheduled_module;
-use crate::ecs::compiler::graph_optimizer::optimize;
-use crate::ecs::compiler::pass::TransformPass;
-use crate::ecs::compiler::scheduled::ScheduledModule;
 use crate::ecs::component::compilation::{GraphNode, GraphNodeKind, NodeId};
 use crate::ecs::config::ModelExecutionPlan;
+use prism_ecs_compile::pipeline::backend_assessment::{
+    BackendAssessmentPass, GraphOperation, ModelOperationGraph,
+};
+use prism_ecs_compile::pipeline::compile_schedule::compile_model_to_scheduled_module;
+use prism_ecs_compile::pipeline::graph_optimizer::optimize;
+use prism_ecs_compile::pipeline::pass::TransformPass;
+use prism_ecs_compile::pipeline::scheduled::ScheduledModule;
 use crate::ecs::runtime::constitutional_world_txn::ConstitutionalWorldTxn;
 
 use crate::ecs::Entity;
