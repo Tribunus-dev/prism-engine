@@ -126,7 +126,7 @@ pub struct TensorMaterializationId(pub u64);
 
 // ── Evidence / digest ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EvidenceDigest(pub String);
 
 // ── Backend artifact identity ───────────────────────────────────────────
