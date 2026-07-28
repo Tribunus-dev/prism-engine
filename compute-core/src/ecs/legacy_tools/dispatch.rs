@@ -20,7 +20,10 @@
 use crate::ecs::device;
 use prism_ecs_server::tools::list_devices::DeviceInfo as ConstitutionalDeviceInfo;
 use prism_ecs_server::tools::sandbox::sandbox_root;
-use prism_ecs_server::tools::sandbox::{tool_edit_file, tool_file_info, tool_glob_files, tool_list_directory, tool_read_file, tool_read_file_lines, tool_search_files, tool_write_file};
+use prism_ecs_server::tools::sandbox::{
+    tool_edit_file, tool_file_info, tool_glob_files, tool_list_directory, tool_read_file,
+    tool_read_file_lines, tool_search_files, tool_write_file,
+};
 use prism_ecs_server::tools::{FunctionCall, ToolDefinition};
 use std::path::Path;
 
@@ -88,9 +91,7 @@ pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
     // request device listings. This matches the prior engine
     // behavior where `list_devices` was in the default set.
     let mut tools = prism_ecs_server::tools::dispatch::default_sandbox_tools();
-    tools.push(
-        prism_ecs_server::tools::dispatch::list_devices_tool_def(),
-    );
+    tools.push(prism_ecs_server::tools::dispatch::list_devices_tool_def());
     tools
 }
 

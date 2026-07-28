@@ -49,7 +49,11 @@ pub struct DeviceInfo {
 ///
 /// The caller is responsible for providing the device slice; this
 /// keeps the constitutional surface free of engine-internal state.
-pub fn tool_list_devices(devices: &[DeviceInfo], _root: &Path, _args: &serde_json::Value) -> serde_json::Value {
+pub fn tool_list_devices(
+    devices: &[DeviceInfo],
+    _root: &Path,
+    _args: &serde_json::Value,
+) -> serde_json::Value {
     let entries: Vec<serde_json::Value> = devices
         .iter()
         .map(|d| {
