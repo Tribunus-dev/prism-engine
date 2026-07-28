@@ -9,7 +9,7 @@ use mlx_rs::Array;
 use crate::ecs::arena::Arena;
 use crate::ecs::arena::DataType;
 use crate::ecs::config::operation_route::OperationRoute;
-use crate::ecs::memory::allocator::IosurfaceAllocator;
+use crate::ecs::memory_impl::allocator::IosurfaceAllocator;
 use crate::log_debug;
 
 use crate::ecs::compute_lane::{
@@ -87,7 +87,7 @@ impl SharedMemoryIsland {
         drop(alloc);
         let arena_arc = Arc::new(arena);
         let arr =
-            crate::memory::iosurface_storage::arena_to_mlx_array(arena_arc.clone(), shape, dtype)
+            crate::memory_impl::iosurface_storage::arena_to_mlx_array(arena_arc.clone(), shape, dtype)
                 .map_err(|e| mlx_rs::error::Exception::from(e.as_str()))?;
         Ok((arena_arc, arr))
     }

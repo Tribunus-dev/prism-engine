@@ -1,45 +1,56 @@
-//! Memory plan bridge — pre-computed IOSurface allocation plans for the
+//! Memory plan FFI bridge — sends a [`prism_ecs_data::memory::MemoryPlan`]
+//! to the MLX Metal allocator via the C FFI bridge, and walks a
+//! compiler `ScheduledModule` to build one.
 //!
-#![cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-//! Metal allocator.
-//!
-//! The memory plan tells MLX's Metal allocator exactly which IOSurface slice
-//! to use for each allocation in sequence.  This replaces the runtime
-//! allocation + copy + JIT compile pattern with a compile-time planned
-//! sequence of zero-copy IOSurface-backed allocations.
+//! The plan *data type* lives in
+//! `prism_ecs_data::memory::{MemoryPlan, MemoryPlanSlot}` (E-1).
+//! This module owns the engine-internal execution-plane side of
+//! the same surface: the `mlx_set_memory_plan` / `mlx_clear_memory_plan`
+//! C FFI declarations, the `apply` / `clear` safe wrappers, and the
+//! `plan_from_scheduled_module` walker that depends on
+//! engine-internal `Arena` and `ScheduledModule` types.
 //!
 //! # Architecture
 //!
-//! 1. The compiler produces a [`MemoryPlan`] with an ordered list of
-//!    (iosurface_ptr, size) pairs — one per allocation the model needs
-//!    during a forward pass.
+//! 1. The compiler produces a [`prism_ecs_data::memory::MemoryPlan`]
+//!    with an ordered list of `(iosurface_ptr, size)` pairs — one
+//!    per allocation the model needs during a forward pass.
 //! 2. Before executing a planned region, the executor calls
-//!    [`set_memory_plan`] which passes the plan to the Metal allocator
-//!    via the C FFI bridge.
-//! 3. For each `malloc(size)` call during execution, the Metal allocator
-//!    checks the next plan slot.  If it exists and sizes match, it wraps
-//!    the IOSurface pointer as an `MTLBuffer` instead of allocating new
-//!    GPU memory.
-//! 4. After the region completes, the executor calls [`clear_memory_plan`].
+//!    [`apply`] which passes the plan to the Metal allocator via
+//!    the C FFI bridge.
+//! 3. For each `malloc(size)` call during execution, the Metal
+//!    allocator checks the next plan slot. If it exists and sizes
+//!    match, it wraps the IOSurface pointer as an `MTLBuffer`
+//!    instead of allocating new GPU memory.
+//! 4. After the region completes, the executor calls [`clear`].
 
 use std::ffi::c_void;
 
+use prism_ecs_data::memory::{MemoryPlan, MemoryPlanSlot};
+
 // ── C-compatible types ────────────────────────────────────────────────────
+//
+// `MemoryPlanSlot` and `MemoryPlan` are now defined in
+// `prism_ecs_data::memory`. They are `#[repr(C)]` POD; the C ABI
+// matches the `mlx_memory_plan_slot` C struct.
 
-/// Memory plan slot — matches `mlx_memory_plan_slot` in mlx/c/memory.h.
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct MemoryPlanSlot {
-    /// Base address of the pre-assigned IOSurface slice.
-    pub iosurface_ptr: *mut c_void,
-    /// Expected allocation size in bytes.
-    pub size: usize,
-}
-
-// Safety: the type is POD (plain old data) with no references or Drop.
+// ── Send / Sync bridge for the raw-pointer slot ──────────────────────────
+//
+// `MemoryPlanSlot` contains a raw `*mut c_void` and is therefore
+// `!Send + !Sync` by default in the data crate. The MLX Metal
+// allocator FFI is thread-safe (it serialises internally), so the
+// engine is allowed to add the cross-thread marker here on the
+// engine side where the hardware-FFI invariant lives. The
+// data crate does not need this — it only carries the data type.
+//
+// SAFETY: `MemoryPlanSlot` is `#[repr(C)]` POD. The raw pointer is
+// a `*mut c_void`; the engine never dereferences it — it only
+// hands the slot array to the C FFI. The C allocator takes a
+// copy internally (`mlx_set_memory_plan` documents that the
+// allocator copies the plan entries). Therefore sending the slot
+// across threads is sound: the pointer is treated as an opaque
+// handle to IOSurface-backed memory whose lifetime is managed
+// by the engine's `Arena`, not by the slot itself.
 unsafe impl Send for MemoryPlanSlot {}
 unsafe impl Sync for MemoryPlanSlot {}
 
@@ -56,78 +67,39 @@ extern "C" {
     fn mlx_clear_memory_plan() -> i32;
 }
 
-// ── Safe wrapper ──────────────────────────────────────────────────────────
+// ── Safe wrappers ─────────────────────────────────────────────────────────
 
-/// A pre-computed memory plan: an ordered list of (ptr, size) pairs that
-/// the Metal allocator will use instead of allocating new GPU memory.
-#[derive(Debug, Clone)]
-pub struct MemoryPlan {
-    /// Ordered allocation slots.
-    pub slots: Vec<MemoryPlanSlot>,
-}
-
-impl MemoryPlan {
-    /// Create a new empty memory plan.
-    pub fn new() -> Self {
-        Self { slots: Vec::new() }
+/// Send the plan to the Metal allocator via the C FFI bridge.
+///
+/// The allocator will use the pre-assigned IOSurface slices for its
+/// next `plan.len()` allocations, in order.
+///
+/// # Safety
+///
+/// Caller must ensure that:
+/// - All `iosurface_ptr` values point to valid, mapped IOSurface memory
+/// - The IOSurface memory remains valid until `clear()` is called or
+///   all plan slots are consumed
+/// - The actual allocations made by MLX during the planned region
+///   match the plan slots in both count and size
+pub unsafe fn apply(plan: &MemoryPlan) -> Result<(), String> {
+    if plan.is_empty() {
+        return Ok(());
     }
-
-    /// Add a slot: an IOSurface pointer and its expected allocation size.
-    pub fn add_slot(&mut self, ptr: *mut c_void, size: usize) {
-        self.slots.push(MemoryPlanSlot {
-            iosurface_ptr: ptr,
-            size,
-        });
+    let ret = mlx_set_memory_plan(plan.len(), plan.slots.as_ptr());
+    if ret != 0 {
+        return Err(format!("mlx_set_memory_plan returned {}", ret));
     }
-
-    /// Number of slots in the plan.
-    pub fn len(&self) -> usize {
-        self.slots.len()
-    }
-
-    /// True if the plan has no slots.
-    pub fn is_empty(&self) -> bool {
-        self.slots.is_empty()
-    }
-
-    /// Send this plan to the Metal allocator via the C FFI bridge.
-    ///
-    /// The allocator will use the pre-assigned IOSurface slices for its
-    /// next `len()` allocations, in order.
-    ///
-    /// # Safety
-    ///
-    /// Caller must ensure that:
-    /// - All `iosurface_ptr` values point to valid, mapped IOSurface memory
-    /// - The IOSurface memory remains valid until `clear_memory_plan()` is
-    ///   called or all plan slots are consumed
-    /// - The actual allocations made by MLX during the planned region match
-    ///   the plan slots in both count and size
-    pub unsafe fn apply(&self) -> Result<(), String> {
-        if self.slots.is_empty() {
-            return Ok(());
-        }
-        let ret = mlx_set_memory_plan(self.slots.len(), self.slots.as_ptr());
-        if ret != 0 {
-            return Err(format!("mlx_set_memory_plan returned {}", ret));
-        }
-        Ok(())
-    }
-}
-
-impl Default for MemoryPlan {
-    fn default() -> Self {
-        Self::new()
-    }
+    Ok(())
 }
 
 /// Clear the active memory plan from the Metal allocator.
 ///
-/// After calling this, subsequent `malloc`s will use normal Metal buffer
-/// allocation (heap/cache) instead of the plan.
+/// After calling this, subsequent `malloc`s will use normal Metal
+/// buffer allocation (heap/cache) instead of the plan.
 ///
 /// Safe to call when no plan is active (no-op).
-pub fn clear_memory_plan() -> Result<(), String> {
+pub fn clear() -> Result<(), String> {
     let ret = unsafe { mlx_clear_memory_plan() };
     if ret != 0 {
         return Err(format!("mlx_clear_memory_plan returned {}", ret));
@@ -135,20 +107,29 @@ pub fn clear_memory_plan() -> Result<(), String> {
     Ok(())
 }
 
+/// Backwards-compatible alias for [`clear`]. Engine callers
+/// imported `crate::memory::plan::clear_memory_plan` before the
+/// memory deletion; keep the named function available so the
+/// migration is a pure import-path swap.
+pub fn clear_memory_plan() -> Result<(), String> {
+    clear()
+}
+
 // ── Integration with the compiler ─────────────────────────────────────────
 
 /// Generate a memory plan from the compiler's `ScheduledModule`.
 ///
-/// Walks the scheduled regions' [`MemoryPlan`] and produces an ordered
-/// list of [`MemoryPlanSlot`] entries that the executor passes to the
-/// Metal allocator before running the module.
+/// Walks the scheduled regions' [`MemoryPlan`] and produces an
+/// ordered list of [`MemoryPlanSlot`] entries that the executor
+/// passes to the Metal allocator before running the module.
 ///
-/// When `compression_ratio` is `Some(r)`, the estimated KV cache byte sizes
-/// are scaled down by `r` (e.g. 4.57 for TurboQuant3: 16 bits / 3.5 bits).
-/// Pass `None` for uncompressed FP16 mode (no scaling).
+/// When `compression_ratio` is `Some(r)`, the estimated KV cache
+/// byte sizes are scaled down by `r` (e.g. 4.57 for TurboQuant3:
+/// 16 bits / 3.5 bits). Pass `None` for uncompressed FP16 mode
+/// (no scaling).
 ///
-/// Returns `None` if the scheduled module has no material allocations
-/// that need planning (empty or all in-place).
+/// Returns `None` if the scheduled module has no material
+/// allocations that need planning (empty or all in-place).
 pub fn plan_from_scheduled_module(
     scheduled: &crate::ecs::compiler::scheduled::ScheduledModule,
     arena: &crate::ecs::arena::Arena,
@@ -185,14 +166,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_empty_plan() {
+    fn empty_plan_is_empty() {
         let plan = MemoryPlan::new();
         assert!(plan.is_empty());
         assert_eq!(plan.len(), 0);
     }
 
     #[test]
-    fn test_add_slot() {
+    fn add_slot_increments_len() {
         let mut plan = MemoryPlan::new();
         let dummy = 0xdeadbeef as *mut c_void;
         plan.add_slot(dummy, 4096);
@@ -203,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn test_default_is_empty() {
+    fn default_matches_new() {
         let plan: MemoryPlan = Default::default();
         assert!(plan.is_empty());
     }

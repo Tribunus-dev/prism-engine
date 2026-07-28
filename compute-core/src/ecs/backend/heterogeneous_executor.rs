@@ -20,7 +20,7 @@ use crate::ecs::backend::DType;
 use crate::ecs::backend::TensorBackend;
 use crate::ecs::backend::TensorHandle;
 #[cfg(feature = "mlx-backend")]
-use crate::memory::allocator::IosurfaceAllocator;
+use crate::memory_impl::allocator::IosurfaceAllocator;
 
 /// Number of slots in the decode slot pool.
 const NUM_SLOTS: u32 = 32;

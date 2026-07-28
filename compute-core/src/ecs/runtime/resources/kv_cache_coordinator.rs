@@ -28,7 +28,7 @@ use crate::ecs::state_store::{
     KvAppendReceipt, KvCacheLayout, KvCacheManager, KvCacheStoreDecl, KvCodecPolicy, KvReadReceipt,
     KvResidencyPolicy,
 };
-use crate::memory::allocator::BlockHandle;
+use crate::memory_impl::allocator::BlockHandle;
 use crate::quantization::turboquant_kv::{AsymmetricQuantMode, KvQuantMode, TurboQuantKvCache};
 
 /// Resource ID for KVCacheCoordinator.

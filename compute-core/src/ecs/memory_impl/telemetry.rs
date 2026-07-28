@@ -4,7 +4,7 @@
 //!
 //! Reference: `docs/unified-memory-island.md`
 
-use crate::ecs::memory::allocator::IosurfaceAllocator;
+use crate::ecs::memory_impl::allocator::IosurfaceAllocator;
 use crate::worker_memory::{
     detect_machine_profile, sample_mlx_memory, sample_page_faults, sample_process_rss_self,
     MachineProfile, MlxMemorySnapshot,

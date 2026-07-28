@@ -7,7 +7,7 @@ use crate::ecs::backend::{
     QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle,
 };
 #[cfg(feature = "mlx-backend")]
-use crate::memory::allocator::IosurfaceAllocator;
+use crate::memory_impl::allocator::IosurfaceAllocator;
 #[cfg(feature = "mlx-backend")]
 use parking_lot::Mutex;
 use std::ptr::NonNull;
