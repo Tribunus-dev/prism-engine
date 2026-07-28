@@ -108,8 +108,8 @@ pub fn clear() -> Result<(), String> {
 }
 
 /// Backwards-compatible alias for [`clear`]. Engine callers
-/// imported `crate::memory::plan::clear_memory_plan` before the
-/// memory deletion; keep the named function available so the
+/// imported `crate::memory_impl::plan::clear_memory_plan` after
+/// the memory deletion; keep the named function available so the
 /// migration is a pure import-path swap.
 pub fn clear_memory_plan() -> Result<(), String> {
     clear()

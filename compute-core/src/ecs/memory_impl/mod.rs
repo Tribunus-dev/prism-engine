@@ -10,9 +10,9 @@
 //! # Re-exports
 //!
 //! The data types that are now in `prism_ecs_data::memory` are
-//! re-exported here so existing engine callers (and the engine's
-//! `pub use crate::ecs::memory;` re-export) continue to compile
-//! unchanged. New engine code should prefer the
+//! re-exported here so existing engine callers that import
+//! `crate::memory_impl::MemoryEnforcer` etc. continue to work.
+//! New engine code should prefer the
 //! `prism_ecs_data::memory::...` import path; the re-exports here
 //! are the migration bridge.
 //!
@@ -34,8 +34,8 @@ pub mod telemetry;
 
 // Re-exports of the constitutional data types (see
 // `prism_ecs_data::memory`). Existing engine callers that import
-// `crate::memory::MemoryEnforcer` etc. continue to work; new code
-// should prefer the constitutional path.
+// `crate::memory_impl::MemoryEnforcer` etc. continue to work;
+// new code should prefer the constitutional path.
 pub use prism_ecs_data::memory::{
     EngineEntry, EngineLifecycle, EnginePool, MemoryEnforcer, MemoryMonitor, MemoryPressure,
 };
