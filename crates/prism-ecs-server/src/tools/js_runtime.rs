@@ -1,9 +1,23 @@
-//! Sandboxed JavaScript runtime via deno_core (V8) with Rust↔JS ops.
+//! Sandboxed JavaScript runtime via deno_core (V8) with Rust↔JS ops
+//! (constitutional home).
 //!
 //! Ops access sandbox configuration via thread-local storage (the
 //! approach that works with deno_core v0.405's public API).
+//!
+//! This module is feature-gated behind `deno_core` because deno_core
+//! is a heavier dependency than the rest of the tool surface.
+//!
+//! # Authority boundary
+//!
+//! This is the execution-plane for model-issued JavaScript. The
+//! [`crate::tools::ast_guard::validate_agent_script`] function is a
+//! hard precondition: callers must validate the script before
+//! calling [`run_javascript`]. JS execution is an effect of an
+//! authenticated model call, sandboxed via the configured root and
+//! the thread-local config, returning a JSON result carrier to the
+//! model. It does not mutate ECS world state.
 
-use crate::ecs::tools::ast_guard;
+use crate::tools::ast_guard;
 use deno_core::{extension, op2, JsRuntime, RuntimeOptions};
 use std::cell::RefCell;
 use std::io;
@@ -133,7 +147,7 @@ fn op_web_download(#[string] url: String, #[string] filename: String) -> Result<
 #[op2]
 #[string]
 fn op_read_file(#[string] path: String) -> Result<String, io::Error> {
-    use crate::ecs::tools::sandbox;
+    use crate::tools::sandbox;
     let root = SANDBOX_CFG.with(|c| c.borrow().as_ref().unwrap().root.clone());
     let root = Path::new(&root);
     let canon = sandbox::resolve_sandbox_path(&path, root)
@@ -144,7 +158,7 @@ fn op_read_file(#[string] path: String) -> Result<String, io::Error> {
 
 #[op2(fast)]
 fn op_write_file(#[string] path: String, #[string] content: String) -> Result<(), io::Error> {
-    use crate::ecs::tools::sandbox;
+    use crate::tools::sandbox;
     let root = SANDBOX_CFG.with(|c| c.borrow().as_ref().unwrap().root.clone());
     let root = Path::new(&root);
     let canon = sandbox::resolve_sandbox_path_relaxed(&path, root).map_err(|e| {
@@ -163,7 +177,7 @@ fn op_write_file(#[string] path: String, #[string] content: String) -> Result<()
 #[op2]
 #[string]
 fn op_list_directory(#[string] path: String) -> Result<String, io::Error> {
-    use crate::ecs::tools::sandbox;
+    use crate::tools::sandbox;
     let root = SANDBOX_CFG.with(|c| c.borrow().as_ref().unwrap().root.clone());
     let root = Path::new(&root);
     let canon = sandbox::resolve_sandbox_path(&path, root)

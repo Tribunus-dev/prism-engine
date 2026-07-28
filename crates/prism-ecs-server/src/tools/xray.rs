@@ -1,8 +1,15 @@
-//! X-Ray HTML proxy: fetches raw HTML over HTTP, strips malicious scripts
-//! using swc AST validation, injects a strict CSP, and returns sanitized HTML.
+//! X-Ray HTML proxy (constitutional home): fetches raw HTML over HTTP,
+//! strips malicious scripts using swc AST validation, injects a
+//! strict CSP, and returns sanitized HTML.
 //!
-//! Tier 1 of the tri-modal routing strategy — completely bypasses WebKit
-//! for raw HTML ingestion.
+//! Tier 1 of the tri-modal routing strategy — completely bypasses
+//! WebKit for raw HTML ingestion.
+//!
+//! # Authority boundary
+//!
+//! This is a one-shot effect that fetches and rewrites external HTML
+//! to a hardened shape. The result is returned to the model as a
+//! string; it does not mutate ECS world state.
 
 use lol_html::html_content::ContentType;
 use lol_html::{element, RewriteStrSettings};
@@ -88,7 +95,7 @@ fn is_trusted_script_domain(src: &str) -> bool {
     ];
     let src_lower = src.to_lowercase();
     trusted.iter().any(|d| src_lower.contains(d))
-        || src_lower.starts_with("/")
+        || src_lower.starts_with('/')
         || src_lower.starts_with("./")
         || src_lower.starts_with("../")
         || src_lower.starts_with("//")

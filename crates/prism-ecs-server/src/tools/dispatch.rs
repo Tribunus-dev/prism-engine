@@ -1,45 +1,78 @@
-use crate::ecs::tools::list_devices::tool_list_devices;
-use crate::ecs::tools::{FunctionCall, ToolDefinition};
+//! Tool-call dispatch layer (constitutional home).
+//!
+//! Routes a parsed [`FunctionCall`] to the appropriate tool
+//! implementation and returns a JSON result. The constitutional
+//! surface is engine-agnostic; the `list_devices` tool needs a
+//! device list, so the dispatch layer takes the device slice as a
+//! parameter and the engine-internal caller fills it in from
+//! `device::global_registry()`.
+//!
+//! # Authority boundary
+//!
+//! Dispatch is an effect router: the JSON result it returns is the
+//! evidence the model receives about the side effect. It does not
+//! mutate ECS world state directly. The runtime that calls dispatch
+//! is responsible for the surrounding `WorldTxn` semantics if the
+//! tool call is part of a constitutional command.
+
+use crate::tools::list_devices::{tool_def as list_devices_def, tool_list_devices, DeviceInfo};
+use crate::tools::sandbox::{
+    sandbox_root, tool_edit_file, tool_file_info, tool_glob_files, tool_list_directory,
+    tool_read_file, tool_read_file_lines, tool_search_files, tool_write_file,
+};
+use crate::tools::{FunctionCall, ToolDefinition};
 #[cfg(feature = "deno_core")]
 use serde_json::json;
 use std::path::Path;
 
 /// Execute a tool call and return the result as a JSON value.
 /// Routes to sandbox tools by name.
-pub fn execute_tool_call(call: &FunctionCall) -> Result<serde_json::Value, String> {
-    sandbox_execute(call, None)
+pub fn execute_tool_call(
+    call: &FunctionCall,
+    devices: &[DeviceInfo],
+) -> Result<serde_json::Value, String> {
+    sandbox_execute(call, devices, None)
 }
 
 /// Execute a sandbox tool call with an explicit sandbox root.
 pub fn sandbox_execute(
     call: &FunctionCall,
+    devices: &[DeviceInfo],
     root: Option<&Path>,
 ) -> Result<serde_json::Value, String> {
     let root = sandbox_root(root);
     let result = match call.name.as_str() {
-        "read_file" => crate::ecs::tools::sandbox::tool_read_file(&root, &call.arguments),
-        "read_file_lines" => {
-            crate::ecs::tools::sandbox::tool_read_file_lines(&root, &call.arguments)
-        }
-        "write_file" => crate::ecs::tools::sandbox::tool_write_file(&root, &call.arguments),
-        "edit_file" => crate::ecs::tools::sandbox::tool_edit_file(&root, &call.arguments),
-        "list_directory" => crate::ecs::tools::sandbox::tool_list_directory(&root, &call.arguments),
-        "glob_files" => crate::ecs::tools::sandbox::tool_glob_files(&root, &call.arguments),
-        "search_files" => crate::ecs::tools::sandbox::tool_search_files(&root, &call.arguments),
-        "file_info" => crate::ecs::tools::sandbox::tool_file_info(&root, &call.arguments),
+        "read_file" => tool_read_file(&root, &call.arguments),
+        "read_file_lines" => tool_read_file_lines(&root, &call.arguments),
+        "write_file" => tool_write_file(&root, &call.arguments),
+        "edit_file" => tool_edit_file(&root, &call.arguments),
+        "list_directory" => tool_list_directory(&root, &call.arguments),
+        "glob_files" => tool_glob_files(&root, &call.arguments),
+        "search_files" => tool_search_files(&root, &call.arguments),
+        "file_info" => tool_file_info(&root, &call.arguments),
         #[cfg(feature = "deno_core")]
         "run_javascript" => tool_javascript(&root, &call.arguments),
-        "list_devices" => tool_list_devices(&root, &call.arguments),
+        "list_devices" => tool_list_devices(devices, &root, &call.arguments),
         _ => return Err(format!("unknown tool '{}'", call.name)),
     };
     Ok(result)
 }
 
-use crate::ecs::tools::sandbox::sandbox_root;
-
 /// Return the set of built-in sandbox tool definitions (OpenAI Tool format).
+///
+/// This is the engine-agnostic default; the engine-internal wrapper
+/// at `compute-core/src/ecs/legacy_tools/dispatch.rs` appends the
+/// `list_devices` tool definition (which the engine wants to expose
+/// to the model) so the engine retains the prior public shape
+/// without re-implementing the rest.
 pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
-    vec![
+    default_sandbox_tools_with_extras(&[])
+}
+
+/// Return the set of built-in sandbox tool definitions, optionally
+/// including engine-specific extras (e.g. `list_devices`).
+pub fn default_sandbox_tools_with_extras(extras: &[ToolDefinition]) -> Vec<ToolDefinition> {
+    let mut tools = vec![
         ToolDefinition {
             name: "read_file".into(),
             description: "Read the full contents of a text file within the sandbox.".into(),
@@ -158,8 +191,18 @@ pub fn default_sandbox_tools() -> Vec<ToolDefinition> {
             }),
             required: vec!["code".into()],
         },
-        crate::ecs::tools::list_devices::tool_def(),
-    ]
+    ];
+    tools.extend_from_slice(extras);
+    tools
+}
+
+/// Convenience: return the canonical `list_devices` tool definition.
+///
+/// Engine-internal callers use this in their `default_sandbox_tools`
+/// extras so the model can request device listings without
+/// re-implementing the schema.
+pub fn list_devices_tool_def() -> ToolDefinition {
+    list_devices_def()
 }
 
 #[cfg(feature = "deno_core")]
@@ -171,7 +214,7 @@ fn tool_javascript(root: &Path, args: &serde_json::Value) -> serde_json::Value {
         }
     };
     let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64());
-    let result = crate::ecs::tools::js_runtime::run_javascript(code, Some(root), timeout_ms);
+    let result = crate::tools::js_runtime::run_javascript(code, Some(root), timeout_ms);
     json!({
         "ok": result.ok,
         "output": result.output,

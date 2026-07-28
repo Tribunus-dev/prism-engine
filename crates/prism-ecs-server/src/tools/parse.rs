@@ -1,16 +1,29 @@
-//! Deterministic tool call parsing & repair for OpenAI-compatible function calling.
+//! Deterministic tool call parsing & repair for OpenAI-compatible
+//! function calling (constitutional home).
 //!
-//! When the model generates a malformed function call (broken JSON, missing params,
-//! wrong function name), this module detects it, repairs it deterministically, and
-//! only retries generation if repair is impossible.
+//! When the model generates a malformed function call (broken JSON,
+//! missing params, wrong function name), this module detects it,
+//! repairs it deterministically, and only retries generation if repair
+//! is impossible.
 //!
 //! # Pipeline
 //!
 //! 1. [`parse_and_repair`] — try up to 4 strategies to extract JSON from raw text
 //! 2. [`validate_and_fix`] — check required fields, fix type mismatches, correct names
-//! 3. [`retry_with_error`] — if unrepairable, regenerate with error context
+//! 3. (engine-internal) `retry_with_error` — if unrepairable, regenerate
+//!    with error context. Lives engine-side at
+//!    `compute-core/src/ecs/legacy_tools/retry_with_error.rs` because it
+//!    needs engine-internal `profiled_executor` types. The constitutional
+//!    surface stops at the parse step; the engine-owned retry wrapper
+//!    re-uses [`parse_and_repair`] for the final repair.
+//!
+//! # Authority boundary
+//!
+//! These are pure text-repair helpers. They do not mutate ECS world
+//! state; they are the JSON-cleanup gate that runs between the model's
+//! raw text output and the tool dispatch.
 
-use crate::ecs::tools::{ToolCallResult, ToolDefinition};
+use crate::tools::{ToolCallResult, ToolDefinition};
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -282,185 +295,7 @@ pub fn fix_type_mismatches_in_object(
     }
 }
 
-// ── Retry ──────────────────────────────────────────────────────────────────
-
-/// Retry generation after a failed tool call by appending an error
-/// description as a system message and regenerating.
-///
-/// The `messages` slice should match the original request's messages array
-/// (serde_json::Value objects with `role` and `content`).  Returns the
-/// parsed-and-repaired result, or an error string on generation failure.
-#[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
-pub fn retry_with_error(
-    sess: &mut crate::profiled_executor::ProfiledInferenceSession,
-    model: &crate::profiled_executor::LoadedProfiledModel,
-    messages: &[serde_json::Value],
-    error: &str,
-    tool: &ToolDefinition,
-    max_tokens: u64,
-) -> Result<ToolCallResult, String> {
-    let correction_msg = format!(
-        "The previous function call was invalid: {}\n\
-         Please call the `{}` function with valid JSON matching this schema:\n{}\n\
-         Required parameters: {}",
-        error,
-        tool.name,
-        serde_json::to_string_pretty(&tool.parameters).unwrap_or_default(),
-        tool.required.join(", "),
-    );
-
-    // Append a system message with the correction.
-    let mut new_messages: Vec<serde_json::Value> = messages.to_vec();
-    new_messages.push(serde_json::json!({
-        "role": "system",
-        "content": correction_msg
-    }));
-
-    // Build a chat prompt from the augmented messages.
-    let prompt = build_chat_prompt(&new_messages);
-
-    let sampler_config = crate::session::SamplerConfig {
-        temperature: Some(0.0),
-        top_k: Some(1),
-        top_p: None,
-        repetition_penalty: None,
-        seed: None,
-        stop_token_ids: Vec::new(),
-        grammar: None,
-        grammar_tokenizer: None,
-    };
-
-    let output_text = sess
-        .chat_with_sampler(&prompt, max_tokens, &sampler_config, model)
-        .map_err(|e| format!("retry inference failed: {e}"))?;
-
-    Ok(parse_and_repair(&output_text, tool))
-}
-
-/// Check whether the request body includes a `tools` parameter.
-pub fn has_tools_request(body: &serde_json::Value) -> bool {
-    body.get("tools")
-        .and_then(|t| t.as_array())
-        .map(|arr| !arr.is_empty())
-        .unwrap_or(false)
-}
-
-/// Extract the first tool definition from the request body.
-pub fn extract_tool(body: &serde_json::Value) -> Result<ToolDefinition, String> {
-    let tools = body
-        .get("tools")
-        .and_then(|t| t.as_array())
-        .ok_or_else(|| "no tools in request".to_string())?;
-
-    let first_tool = tools
-        .first()
-        .ok_or_else(|| "empty tools array".to_string())?;
-
-    let function = first_tool
-        .get("function")
-        .ok_or_else(|| "tool missing 'function' field".to_string())?;
-
-    let name = function
-        .get("name")
-        .and_then(|n| n.as_str())
-        .ok_or_else(|| "function missing 'name'".to_string())?
-        .to_string();
-
-    let description = function
-        .get("description")
-        .and_then(|d| d.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    let parameters = function
-        .get("parameters")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-
-    let required = parameters
-        .get("required")
-        .and_then(|r| r.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    Ok(ToolDefinition {
-        name,
-        description,
-        parameters,
-        required,
-    })
-}
-
-/// Extract all tool definitions from the request body.
-pub fn extract_tools(body: &serde_json::Value) -> Result<Vec<ToolDefinition>, String> {
-    let tools = body
-        .get("tools")
-        .and_then(|t| t.as_array())
-        .ok_or_else(|| "no tools in request".to_string())?;
-
-    tools
-        .iter()
-        .map(|t| {
-            let function = t
-                .get("function")
-                .ok_or_else(|| "tool missing 'function' field".to_string())?;
-
-            let name = function
-                .get("name")
-                .and_then(|n| n.as_str())
-                .ok_or_else(|| "function missing 'name'".to_string())?
-                .to_string();
-
-            let description = function
-                .get("description")
-                .and_then(|d| d.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            let parameters = function
-                .get("parameters")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-
-            let required = parameters
-                .get("required")
-                .and_then(|r| r.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            Ok(ToolDefinition {
-                name,
-                description,
-                parameters,
-                required,
-            })
-        })
-        .collect()
-}
-
 // ── Internal helpers ───────────────────────────────────────────────────────
-
-/// Build a chat prompt string from a messages array (serde_json::Value).
-/// Each message should have `role` and `content` fields.
-#[allow(dead_code)]
-fn build_chat_prompt(messages: &[serde_json::Value]) -> String {
-    let mut prompt = String::new();
-    for msg in messages {
-        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-        let content = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
-        prompt.push_str(&format!("<|{}|>\n{}\n", role, content));
-    }
-    prompt.push_str("<|assistant|>\n");
-    prompt
-}
 
 /// Attempt to fix control characters and other common JSON-breaking issues
 /// in a candidate JSON string.
@@ -603,6 +438,115 @@ fn fix_single_value(
         // Not supported; leave as-is.
         _ => None,
     }
+}
+
+/// Check whether the request body includes a `tools` parameter.
+pub fn has_tools_request(body: &serde_json::Value) -> bool {
+    body.get("tools")
+        .and_then(|t| t.as_array())
+        .map(|arr| !arr.is_empty())
+        .unwrap_or(false)
+}
+
+/// Extract the first tool definition from the request body.
+pub fn extract_tool(body: &serde_json::Value) -> Result<ToolDefinition, String> {
+    let tools = body
+        .get("tools")
+        .and_then(|t| t.as_array())
+        .ok_or_else(|| "no tools in request".to_string())?;
+
+    let first_tool = tools
+        .first()
+        .ok_or_else(|| "empty tools array".to_string())?;
+
+    let function = first_tool
+        .get("function")
+        .ok_or_else(|| "tool missing 'function' field".to_string())?;
+
+    let name = function
+        .get("name")
+        .and_then(|n| n.as_str())
+        .ok_or_else(|| "function missing 'name'".to_string())?
+        .to_string();
+
+    let description = function
+        .get("description")
+        .and_then(|d| d.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let parameters = function
+        .get("parameters")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+
+    let required = parameters
+        .get("required")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(ToolDefinition {
+        name,
+        description,
+        parameters,
+        required,
+    })
+}
+
+/// Extract all tool definitions from the request body.
+pub fn extract_tools(body: &serde_json::Value) -> Result<Vec<ToolDefinition>, String> {
+    let tools = body
+        .get("tools")
+        .and_then(|t| t.as_array())
+        .ok_or_else(|| "no tools in request".to_string())?;
+
+    tools
+        .iter()
+        .map(|t| {
+            let function = t
+                .get("function")
+                .ok_or_else(|| "tool missing 'function' field".to_string())?;
+
+            let name = function
+                .get("name")
+                .and_then(|n| n.as_str())
+                .ok_or_else(|| "function missing 'name'".to_string())?
+                .to_string();
+
+            let description = function
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let parameters = function
+                .get("parameters")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+
+            let required = parameters
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            Ok(ToolDefinition {
+                name,
+                description,
+                parameters,
+                required,
+            })
+        })
+        .collect()
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────

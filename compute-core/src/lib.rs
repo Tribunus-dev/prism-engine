@@ -479,7 +479,15 @@ pub use crate::ecs::storage_adapters;
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub use crate::ecs::tools;
+// `tools/` was deleted in the engine-subsystem deletion pass; the
+// canonical home for the tool surface is `prism_ecs_server::tools`,
+// re-exported through the engine-internal façade at
+// `compute-core/src/ecs/legacy_tools/`. The re-export below keeps
+// the historical `tribunus_compute_core::tools` path working for
+// downstream consumers (`prism-bridge`, etc.) — the actual surface
+// is the constitutional one. See
+// `changelogs/2026-07-27-engine-subsystem-deletion-tools.md`.
+pub use crate::ecs::legacy_tools as tools;
 /// Training-aware compilation — targets, gates, feedback, and receipts.
 pub use crate::ecs::training_target;
 #[cfg(any(

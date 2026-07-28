@@ -34,6 +34,17 @@ axum = { version = "0.8", optional = true }
 tokio-stream = { version = "0.1", optional = true }
 futures = "0.3"
 tower-http = { version = "0.6", optional = true, features = ["cors"] }
+# AST-level security guard dependencies (tool surface)
+lol_html = "2"
+swc_common = { version = "23", default-features = false, features = [] }
+swc_ecma_ast = { version = "25", default-features = false, features = [] }
+swc_ecma_parser = { version = "41", default-features = false, features = [] }
+# HTTP client for X-Ray HTML proxy
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# V8-backed sandboxed JavaScript runtime (deno_core is optional; only
+# the prism-bridge crate enables the feature flag today).
+deno_core = { version = "0.405", optional = true }
+deno_core_icudata = { version = "0.77", optional = true }
 
 [features]
 gguf-compile = []
@@ -46,3 +57,8 @@ generation-audio = []
 generation-video = []
 generation-diffusion = []
 metal-dispatch = []
+# Enable the V8-backed sandboxed JavaScript runtime (used by
+# `tools::js_runtime`). Mirrors the engine's prior `deno_core`
+# feature; disabled by default because the JS runtime is a
+# heavier dependency than the rest of the tool surface.
+deno_core = ["dep:deno_core", "dep:deno_core_icudata"]

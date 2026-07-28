@@ -1,8 +1,15 @@
-//! AST-level security guard for JavaScript code run in the V8 sandbox.
+//! AST-level security guard for JavaScript code run in the V8 sandbox
+//! (constitutional home).
 //!
 //! Parses the JS source with swc and rejects code containing dangerous
 //! dynamic execution patterns like `eval()`, `new Function()`, or
 //! string-argument `setTimeout`/`setInterval`.
+//!
+//! # Authority boundary
+//!
+//! This is a static-analysis gate. It runs on the JS source before
+//! `js_runtime::run_javascript` boots a V8 isolate. It does not mutate
+//! ECS world state; it is a precondition for the execution effect.
 
 use swc_common::sync::Lrc;
 use swc_common::{FileName, SourceMap};

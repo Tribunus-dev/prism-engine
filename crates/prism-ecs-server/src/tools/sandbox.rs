@@ -1,8 +1,22 @@
-//! Sandbox file-system tool implementations.
+//! Sandbox file-system tool implementations (constitutional home).
 //!
-//! All file operations are constrained to a sandbox root directory to prevent
-//! path-traversal attacks. Paths are canonicalized and verified to be within
-//! the sandbox before any read/write operation proceeds.
+//! This module owns the canonical authority for the sandboxed
+//! file-system tool implementations that back the model-issued
+//! `read_file`, `read_file_lines`, `write_file`, `edit_file`,
+//! `list_directory`, `glob_files`, `search_files`, and `file_info`
+//! function calls. All file operations are constrained to a sandbox
+//! root directory to prevent path-traversal attacks. Paths are
+//! canonicalized and verified to be within the sandbox before any
+//! read/write operation proceeds.
+//!
+//! # Authority boundary
+//!
+//! These are execution-plane helpers: each tool runs against the
+//! runtime's sandbox root and returns a JSON result to the model.
+//! Writes are atomic via `tempfile::NamedTempFile::persist`. The
+//! functions are pure I/O — they do not touch ECS world state, so
+//! they are not authority-bearing from the constitutional world's
+//! perspective; they are effects of an authenticated model call.
 
 use std::fs;
 use std::io::{self, Write};
@@ -333,11 +347,11 @@ fn build_context(line: &str, col: usize, match_len: usize) -> String {
 
     let mut snippet = String::new();
     if start > 0 {
-        snippet.push_str("…");
+        snippet.push('…');
     }
     snippet.push_str(&line[start..end]);
     if end < line_len {
-        snippet.push_str("…");
+        snippet.push('…');
     }
     snippet
 }
