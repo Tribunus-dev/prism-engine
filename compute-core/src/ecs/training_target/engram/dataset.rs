@@ -1,4 +1,4 @@
-use crate::ecs::canonical::identity::CorpusId;
+use prism_ecs_constitutional::canonical::identity::CorpusId;
 use serde::{Deserialize, Serialize};
 
 /// Engram training dataset — actual examples, activations, targets, holdouts.

@@ -5,8 +5,8 @@
 use std::path::Path;
 
 use crate::ecs::aot::prism_compiler::ModelFrontend;
-use crate::ecs::canonical::compile_plan::{InspectRequest, ModelInspection};
-use crate::ecs::canonical::model_ir::{
+use prism_ecs_constitutional::canonical::compile_plan::{InspectRequest, ModelInspection};
+use prism_ecs_constitutional::canonical::model_ir::{
     ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
     SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
 };

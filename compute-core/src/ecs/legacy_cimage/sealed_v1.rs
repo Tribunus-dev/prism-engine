@@ -30,8 +30,8 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::canonical::kernel_abi::{CompiledKernelArtifact, KernelAbi};
+use prism_ecs_constitutional::canonical::generation::CimageGeneration;
+use prism_ecs_constitutional::canonical::kernel_abi::{CompiledKernelArtifact, KernelAbi};
 use prism_ecs_compile::pipeline::deployment_compiler::ServingProfile;
 use crate::ecs::plan::CodecFamily;
 // ---------------------------------------------------------------------------
@@ -472,7 +472,7 @@ impl SealedCimageBuilder {
         let required_capabilities = capabilities.clone();
         let optional_capabilities: Vec<String> = Vec::new();
 
-        let now = crate::ecs::canonical::compile_plan::compile_timestamp();
+        let now = prism_ecs_constitutional::canonical::compile_plan::compile_timestamp();
 
         Ok(SealedCimageV1 {
             generation,
@@ -1513,16 +1513,16 @@ impl ValidatedSealedCimage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::canonical::execution_graph::{
+    use prism_ecs_constitutional::canonical::execution_graph::{
         ExecutionGraph, ExecutionLane, ExecutionRegion, FusionConstraints, MemoryPlan, RegionId,
         RuntimeStatePlan,
     };
-    use crate::ecs::canonical::generation::RepresentationBinding;
-    use crate::ecs::canonical::identity::{
+    use prism_ecs_constitutional::canonical::generation::RepresentationBinding;
+    use prism_ecs_constitutional::canonical::identity::{
         CompilerIdentity, GenerationId, HardwareProfileId, LogicalTensorId, ModelSourceId,
         PhysicalSegmentId, ReceiptId, RepresentationId, Timestamp,
     };
-    use crate::ecs::canonical::kernel_abi::{
+    use prism_ecs_constitutional::canonical::kernel_abi::{
         DispatchGeometryPolicy, KernelAbi, KernelImplementationId, KernelSemanticId,
     };
     use crate::ecs::execution_profile::PhysicalTileLayout;

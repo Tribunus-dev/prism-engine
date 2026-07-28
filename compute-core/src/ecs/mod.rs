@@ -1,5 +1,11 @@
 #![allow(deprecated)]
-pub mod canonical;
+// Renamed from `canonical` to `legacy_canonical` as part of the
+// canonical engine-deletion migration (2026-07-28). The engine
+// home for the canonical compiler types is now
+// `prism_ecs_constitutional::canonical`; the
+// `compute-core/src/ecs/legacy_canonical/` directory is a thin
+// re-export shim that preserves the engine-internal import path.
+pub mod legacy_canonical;
 
 pub mod adapter;
 pub mod aot;

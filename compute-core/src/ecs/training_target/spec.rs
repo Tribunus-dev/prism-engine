@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::canonical::identity::{
+use prism_ecs_constitutional::canonical::identity::{
     CorpusId, EngramArtifactId, EngramId, PhysicalSegmentId, ReceiptId, RegionId, TensorShape,
 };
 use crate::ecs::execution_profile::PhysicalTileLayout;
@@ -483,6 +483,6 @@ pub struct MixedPrecisionTrainingTarget {
 //
 // Identity types (EngramArtifactId, EngramId, PhysicalSegmentId, CorpusId,
 // RegionId, TensorShape, ReceiptId) are now imported from
-// crate::ecs::canonical::identity.
+// prism_ecs_constitutional::canonical::identity.
 
 // ── EngramMemoryKind ───────────────────────────────────────────────────

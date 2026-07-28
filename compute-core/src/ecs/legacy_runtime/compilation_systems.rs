@@ -4,9 +4,9 @@
 //! compilation lifecycle for all matching entities.  Systems are idempotent
 //! in the sense that they only operate on entities in the expected phase.
 
-use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::canonical::identity::CandidateId;
-use crate::ecs::canonical::identity::GenerationId;
+use prism_ecs_constitutional::canonical::generation::CimageGeneration;
+use prism_ecs_constitutional::canonical::identity::CandidateId;
+use prism_ecs_constitutional::canonical::identity::GenerationId;
 use crate::ecs::legacy_cimage::generation_api::{GenerationApi, PromotionEvidence};
 use prism_ecs_compile::compilation::distill_core::{
     on_policy_refine, RefinementConfig, TemperatureSchedule,
@@ -782,7 +782,7 @@ pub fn engram_training_system(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::canonical::ReceiptId;
+    use prism_ecs_constitutional::canonical::ReceiptId;
     use crate::training_target::{EngramTrainingTarget, TrainingTargetPriority};
 
     #[test]
@@ -872,10 +872,10 @@ mod tests {
     #[test]
     fn test_engram_training_promotion_lifecycle() {
         // ── Setup ──────────────────────────────────────────────────────────
-        use crate::ecs::canonical::identity::{
+        use prism_ecs_constitutional::canonical::identity::{
             CompilerIdentity, CorpusId, HardwareProfileId, ModelSourceId, Timestamp,
         };
-        use crate::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
+        use prism_ecs_constitutional::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
         use crate::ecs::training_target::engram::config::EngramTrainConfig;
         use crate::execution_plan::CodecFamily;
         use std::collections::BTreeMap;

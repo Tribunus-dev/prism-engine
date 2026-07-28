@@ -20,7 +20,7 @@ use crate::ecs::backend::{
     BackendCapabilities, DType, EvaluationReceipt, MatmulOp, QuantizedMatmulOp,
     QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle,
 };
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::metal_backend::{catalogue_source_for, MetalImplementationCatalogue};
 use crate::ecs::mlir::runtime_lowering_artifact;
 

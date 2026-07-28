@@ -13,7 +13,7 @@
 //! This is Phase A (multimodal preparation + projection), separate from
 //! the decoder megakernel (Phase B).
 
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
 <<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile_orchestrator/vision_projection.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::megakernel::kernels::HIDDEN_DIM;
 |||||||| e64c7d94:compute-core/src/ecs/compute_image/orchestrator/vision_projection.rs

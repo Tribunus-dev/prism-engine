@@ -5,14 +5,34 @@ use super::emit::{
     build_source_identity, compile_audio_encoder_tensors, compile_vision_encoder_tensors,
     compute_manifest_hash, emit_binding_set,
 };
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
-use crate::ecs::legacy_compute_image_core::cimage_packer::pack_cimage_from_dir;
-use crate::ecs::legacy_compute_image_core::compatibility::CompatibilityMatrix;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
+<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/pipeline.rs
+use crate::ecs::compute_image::cimage_packer::pack_cimage_from_dir;
+use crate::ecs::compute_image::compatibility::CompatibilityMatrix;
 use crate::ecs::compute_image::legacy_compute_image_compile::hardware::run_hardware_assessment;
 use crate::ecs::compute_image::legacy_compute_image_compile::quantize::apply_quantize_to_loaded;
+|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/pipeline.rs
+use crate::ecs::compute_image::cimage_packer::pack_cimage_from_dir;
+use crate::ecs::compute_image::compatibility::CompatibilityMatrix;
+use crate::ecs::compute_image::compile::hardware::run_hardware_assessment;
+use crate::ecs::compute_image::compile::quantize::apply_quantize_to_loaded;
+========
+use crate::ecs::legacy_compute_image_core::cimage_packer::pack_cimage_from_dir;
+use crate::ecs::legacy_compute_image_core::compatibility::CompatibilityMatrix;
+use crate::ecs::legacy_compute_image_core::compile::hardware::run_hardware_assessment;
+use crate::ecs::legacy_compute_image_core::compile::quantize::apply_quantize_to_loaded;
+>>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/pipeline.rs
 #[cfg(feature = "prism-backend")]
+<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/pipeline.rs
 use crate::ecs::compute_image::legacy_compute_image_compile::source::load_gguf_source;
 use crate::ecs::compute_image::legacy_compute_image_compile::source::{
+|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/pipeline.rs
+use crate::ecs::compute_image::compile::source::load_gguf_source;
+use crate::ecs::compute_image::compile::source::{
+========
+use crate::ecs::legacy_compute_image_core::compile::source::load_gguf_source;
+use crate::ecs::legacy_compute_image_core::compile::source::{
+>>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/pipeline.rs
     diff_tensors, ensure_tensor_loaded, LoadedSource,
 };
 use crate::ecs::legacy_compute_image_core::hw_assessment::AssessmentReceipt;
@@ -2123,8 +2143,16 @@ pub(crate) fn emit_heterogeneous_image(
     loaded: &LoadedSource,
     output_dir: &Path,
 ) -> Result<(), String> {
+<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/pipeline.rs
     use crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::builder::HeterogeneousImageBuilder;
     use crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::types::*;
+|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/pipeline.rs
+    use crate::ecs::compute_image::heterogeneous::builder::HeterogeneousImageBuilder;
+    use crate::ecs::compute_image::heterogeneous::types::*;
+========
+    use crate::ecs::legacy_compute_image_core::heterogeneous::builder::HeterogeneousImageBuilder;
+    use crate::ecs::legacy_compute_image_core::heterogeneous::types::*;
+>>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/pipeline.rs
 
     // Build model identity
     let identity = ModelIdentity {
@@ -2230,7 +2258,7 @@ pub fn compile_to_canonical(
     output_dir: &str,
     skip_validation: bool,
     quantize_mode: Option<CompileQuantMode>,
-) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
+) -> crate::Result<(CompiledImage, prism_ecs_constitutional::canonical::CompileOutcome)> {
     let compiled = compile_unchecked(source_dir, output_dir, skip_validation, quantize_mode)?;
 
     // Build canonical ModelIr from the loaded source and manifest
@@ -2255,7 +2283,7 @@ pub fn compile_gguf_to_canonical(
     ane_models_dir: Option<&str>,
     metallib_path: Option<&str>,
     mlx_capture_dir: Option<&str>,
-) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
+) -> crate::Result<(CompiledImage, prism_ecs_constitutional::canonical::CompileOutcome)> {
     let compiled = compile_gguf_unchecked(
         gguf_path,
         output_dir,
@@ -2284,16 +2312,16 @@ pub fn compile_gguf_to_canonical(
 /// them as structural empties.
 fn build_canonical_outcome(
     compiled: CompiledImage,
-    model_ir: crate::ecs::canonical::ModelIr,
-    rep_plan: crate::ecs::canonical::RepresentationPlan,
+    model_ir: prism_ecs_constitutional::canonical::ModelIr,
+    rep_plan: prism_ecs_constitutional::canonical::RepresentationPlan,
     output_dir: &str,
-) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
-    use crate::ecs::canonical::compile_plan::CompilerStage;
-    use crate::ecs::canonical::kernel_abi::{
+) -> crate::Result<(CompiledImage, prism_ecs_constitutional::canonical::CompileOutcome)> {
+    use prism_ecs_constitutional::canonical::compile_plan::CompilerStage;
+    use prism_ecs_constitutional::canonical::kernel_abi::{
         CompiledKernelArtifact, DispatchGeometryPolicy, KernelAbi, KernelImplementationId,
         KernelSemanticId,
     };
-    use crate::ecs::canonical::{
+    use prism_ecs_constitutional::canonical::{
         CimageBuildInput, CompileEventStream, CompileOutcome, CompilePlan, CompiledKernelEntry,
         CompilerReceipt, CompilerReceiptSet, ExecutionGraph, KernelPlan, MemoryPlan,
         RuntimeStatePlan,
@@ -2420,7 +2448,7 @@ fn build_canonical_outcome(
 fn build_canonical_model_ir(
     source_dir: &str,
     compiled: &CompiledImage,
-) -> crate::Result<crate::ecs::canonical::ModelIr> {
+) -> crate::Result<prism_ecs_constitutional::canonical::ModelIr> {
     let manifest = &compiled.manifest;
 
     // Read config.json for architecture params
@@ -2438,8 +2466,8 @@ fn build_canonical_model_ir(
 fn build_canonical_model_ir_from_manifest(
     compiled: &CompiledImage,
     output_dir: &str,
-) -> crate::ecs::canonical::ModelIr {
-    use crate::ecs::canonical::{
+) -> prism_ecs_constitutional::canonical::ModelIr {
+    use prism_ecs_constitutional::canonical::{
         ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
         SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
     };
@@ -2514,8 +2542,8 @@ fn build_model_ir_from_config(
     cfg: &serde_json::Value,
     manifest: &crate::ecs::legacy_compute_image_core::manifest::Manifest,
     source_dir: &str,
-) -> crate::Result<crate::ecs::canonical::ModelIr> {
-    use crate::ecs::canonical::{
+) -> crate::Result<prism_ecs_constitutional::canonical::ModelIr> {
+    use prism_ecs_constitutional::canonical::{
         ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
         SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
     };
@@ -2597,8 +2625,8 @@ fn build_model_ir_from_config(
 /// Build a canonical RepresentationPlan from the compiled image manifest.
 fn build_canonical_representation_plan(
     compiled: &CompiledImage,
-) -> crate::ecs::canonical::RepresentationPlan {
-    use crate::ecs::canonical::{
+) -> prism_ecs_constitutional::canonical::RepresentationPlan {
+    use prism_ecs_constitutional::canonical::{
         RepresentationPlan, TensorId, TensorRepresentation, TensorRepresentationEntry,
     };
 

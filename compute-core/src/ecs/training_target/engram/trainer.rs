@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use super::config::EngramTrainConfig;
 use super::dataset::EngramTrainingDataset;
 use super::receipt::EngramTrainingReceipt;
-use crate::ecs::canonical::identity::{
+use prism_ecs_constitutional::canonical::identity::{
     CorpusId, EngramArtifactId, EngramId, PhysicalSegmentId, ReceiptId, RegionId, TensorShape,
 };
 use crate::ecs::training_target::spec::{

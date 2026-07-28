@@ -7,8 +7,8 @@
 use half::f16;
 use std::collections::BTreeMap;
 
-use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::canonical::kernel_abi::{ArtifactProvenance, KernelSemanticId};
+use prism_ecs_constitutional::canonical::generation::CimageGeneration;
+use prism_ecs_constitutional::canonical::kernel_abi::{ArtifactProvenance, KernelSemanticId};
 use crate::ecs::legacy_cimage::generation_store::ContentStore;
 use crate::ecs::cimage_runtime::tensor_store::{
     RuntimeTensor, RuntimeTensorPayload, RuntimeTensorStore,

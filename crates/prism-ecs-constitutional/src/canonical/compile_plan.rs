@@ -1,8 +1,15 @@
-//! CompilePlan, CompilerReceipt — the public compilation API types.
+//! CompilePlan, CompilerReceipt — the public compilation API
+//! types. Authority: the compiler pipeline contract.
 //!
-//! These types define the request/response contract for the PrismCompiler.
-//! All binary entry points, server endpoints, tests, and constitutional
-//! commands call through this API.
+//! These types define the request/response contract for the
+//! `PrismCompiler`. All binary entry points, server endpoints,
+//! tests, and constitutional commands call through this API. The
+//! `compile_id()` and `compile_timestamp()` helpers produce
+//! monotonic identifiers for one compiler run; they are
+//! deliberately non-deterministic across process restarts and
+//! are NOT part of the canonical identity chain (the
+//! `GenerationId` and `ReceiptId` newtypes in [`super::identity`]
+//! are).
 
 use super::execution_graph::ExecutionGraph;
 use super::kernel_abi::{CompiledKernelArtifact, KernelPlan};
@@ -177,8 +184,9 @@ impl Default for CompilerReceiptSet {
 }
 
 /// Full event from one compilation stage with provenance data.
-/// Richer than CompilerReceipt — includes digests and toolchain identity
-/// for evidence chaining between compilation and execution.
+/// Richer than CompilerReceipt — includes digests and toolchain
+/// identity for evidence chaining between compilation and
+/// execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileEvent {
     pub stage: CompilerStage,
@@ -238,7 +246,8 @@ impl CompileEventStream {
         self.events.iter().find(|e| !e.success)
     }
 
-    /// The last event is the terminal one (CimageSealed or CompilationFailed).
+    /// The last event is the terminal one (CimageSealed or
+    /// CompilationFailed).
     pub fn terminal_event(&self) -> Option<&CompileEvent> {
         self.events.last()
     }
@@ -286,4 +295,105 @@ pub fn compile_timestamp() -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| format!("{:020}", d.as_nanos()))
         .unwrap_or_else(|_| "0".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compile_request_default_is_empty() {
+        let r = CompileRequest::default();
+        assert_eq!(r.source_path, "");
+        assert!(r.source_type.is_none());
+        assert!(r.target_lanes.is_empty());
+        assert!(r.authority.is_none());
+    }
+
+    #[test]
+    fn compile_receipt_set_push_and_all_success() {
+        let mut set = CompilerReceiptSet::new();
+        assert!(set.all_success(), "empty set is vacuously successful");
+        set.push(CompilerReceipt {
+            stage: CompilerStage::FrontendImport,
+            success: true,
+            duration_ms: 10.0,
+            message: None,
+        });
+        assert!(set.all_success());
+        set.push(CompilerReceipt {
+            stage: CompilerStage::BackendLowering,
+            success: false,
+            duration_ms: 5.0,
+            message: Some("metal failed".into()),
+        });
+        assert!(!set.all_success());
+    }
+
+    #[test]
+    fn compile_event_stream_first_failure_and_terminal_event() {
+        let mut stream = CompileEventStream::new("/tmp/x.gguf");
+        assert!(stream.first_failure().is_none());
+        stream.push(CompileEvent {
+            stage: CompilerStage::SourceResolution,
+            success: true,
+            timestamp: "t1".into(),
+            duration_ms: 1.0,
+            message: None,
+            source_digest: None,
+            policy_digest: None,
+            artifact_digest: None,
+            toolchain_version: None,
+            failure_detail: None,
+        });
+        stream.push(CompileEvent {
+            stage: CompilerStage::BackendLowering,
+            success: false,
+            timestamp: "t2".into(),
+            duration_ms: 1.0,
+            message: Some("err".into()),
+            source_digest: None,
+            policy_digest: None,
+            artifact_digest: None,
+            toolchain_version: None,
+            failure_detail: Some("metal linker error".into()),
+        });
+        let f = stream.first_failure().expect("one failure");
+        assert_eq!(f.stage, CompilerStage::BackendLowering);
+        let t = stream.terminal_event().expect("terminal event");
+        assert_eq!(t.stage, CompilerStage::BackendLowering);
+    }
+
+    #[test]
+    fn compile_event_stream_to_receipt_set_preserves_count() {
+        let mut stream = CompileEventStream::new("/tmp/x.gguf");
+        for i in 0..3 {
+            stream.push(CompileEvent {
+                stage: CompilerStage::FrontendImport,
+                success: true,
+                timestamp: format!("t{}", i),
+                duration_ms: 1.0,
+                message: None,
+                source_digest: None,
+                policy_digest: None,
+                artifact_digest: None,
+                toolchain_version: None,
+                failure_detail: None,
+            });
+        }
+        let set = stream.to_receipt_set();
+        assert_eq!(set.receipts.len(), 3);
+    }
+
+    #[test]
+    fn compile_id_and_timestamp_are_stable_strings() {
+        // The two helpers produce deterministic-shape strings even
+        // if the actual time is not pinned. We verify the
+        // shape: `compile_id` is `compile-` + hex; `compile_timestamp`
+        // is 20-char zero-padded decimal.
+        let id = compile_id();
+        let ts = compile_timestamp();
+        assert!(id.starts_with("compile-"));
+        assert_eq!(ts.len(), 20);
+    }
 }

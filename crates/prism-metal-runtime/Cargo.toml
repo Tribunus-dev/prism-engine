@@ -6,6 +6,14 @@ license.workspace = true
 
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
+# Canonical home of the constitutional surface for kernel ABI,
+# execution graph, model IR, and the rest of the canonical
+# compiler pipeline types. The engine used to have its own
+# parallel `ecs::canonical::*` module (now absorbed); this
+# dependency routes all prism-metal-runtime callers through
+# the constitutional surface at
+# `prism_ecs_constitutional::canonical::*`.
+prism-ecs-constitutional = { path = "../prism-ecs-constitutional" }
 tribunus-compute-core = { path = "../../compute-core" }
 metal = { version = "0.32" }
 objc = { version = "0.2" }

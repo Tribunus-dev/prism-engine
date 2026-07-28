@@ -1,24 +1,29 @@
-//! Provenance, receipt, and lifecycle contract types.
+//! Provenance, receipt, and lifecycle contract types. Authority:
+//! the evidence chain.
 //!
-//! Every compilation, evaluation, and promotion event produces evidence
-//! captured in these types. No evidence is reconstructed post-hoc — the
-//! artifacts reference each other by digest, forming an auditable chain.
+//! Every compilation, evaluation, and promotion event produces
+//! evidence captured in these types. No evidence is reconstructed
+//! post-hoc — the artifacts reference each other by digest,
+//! forming an auditable chain. The bundle types here are the
+//! single authority for what a "complete" receipt bundle looks
+//! like; the gate enforcers consume them.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::canonical::identity::{
+use super::generation::CimageGeneration;
+use super::identity::{
     CandidateId, GenerationId, LogicalTensorId, PhysicalSegmentId, ReceiptId,
 };
-use crate::ecs::canonical::kernel_abi::{ArtifactProvenance, KernelAbi, KernelSemanticId};
+use super::kernel_abi::{ArtifactProvenance, KernelAbi, KernelSemanticId};
 use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 
-/// Aggregate of all evidence produced during one compilation lifecycle.
+/// Aggregate of all evidence produced during one compilation
+/// lifecycle.
 ///
-/// A gate accepts or rejects based on the complete bundle — no gate
-/// makes a decision without seeing compiler, numerical, quality,
-/// performance, policy, and promotion evidence together.
+/// A gate accepts or rejects based on the complete bundle — no
+/// gate makes a decision without seeing compiler, numerical,
+/// quality, performance, policy, and promotion evidence together.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LifecycleReceiptBundle {
     /// Receipt ids for each stage.
@@ -37,7 +42,9 @@ pub struct LifecycleReceiptBundle {
 impl LifecycleReceiptBundle {
     /// Verify that every receipt field is non-empty.
     ///
-    /// A bundle with any empty/missing receipt is rejected as incomplete.
+    /// A bundle with any empty/missing receipt is rejected as
+    /// incomplete. The full set of required fields is enumerated
+    /// here; an error includes the offending field name.
     pub fn verify_complete(&self) -> Result<(), String> {
         if self.compiler_receipt.0.is_empty() {
             return Err("compiler_receipt is empty".into());
@@ -67,10 +74,11 @@ impl LifecycleReceiptBundle {
     }
 }
 
-/// Persisted record of one measured candidate in an evolutionary search.
+/// Persisted record of one measured candidate in an evolutionary
+/// search.
 ///
-/// Survives serialization so the search, frontier, replay, and promotion
-/// paths all reference the same evidence.
+/// Survives serialization so the search, frontier, replay, and
+/// promotion paths all reference the same evidence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeasuredCandidateRecord {
     /// Candidate identity (hash of the genome).
@@ -111,8 +119,8 @@ pub struct PromotionRequest {
     pub generation: CimageGeneration,
 }
 
-/// Manifest that resolves everything required to reproduce a promoted
-/// generation without ambient state.
+/// Manifest that resolves everything required to reproduce a
+/// promoted generation without ambient state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplayManifest {
     /// The generation to replay.
@@ -122,8 +130,9 @@ pub struct ReplayManifest {
     /// Compiled kernel artifacts keyed by semantic id.
     pub artifacts: BTreeMap<KernelSemanticId, ArtifactProvenance>,
     /// Compiled kernel artifact bytes keyed by semantic ID.
-    /// Present when the replay has access to the original compiled artifacts.
-    /// When absent, the replay must recompile from the catalogue source.
+    /// Present when the replay has access to the original compiled
+    /// artifacts. When absent, the replay must recompile from the
+    /// catalogue source.
     pub compiled_artifacts: BTreeMap<KernelSemanticId, Vec<u8>>,
     /// ABI contracts for replay dispatch.
     pub abi: KernelAbi,
@@ -196,4 +205,51 @@ pub struct KvLayerMeta {
     pub num_blocks: usize,
     pub bytes_per_block: u64,
     pub dtype: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_bundle() -> LifecycleReceiptBundle {
+        LifecycleReceiptBundle {
+            compiler_receipt: ReceiptId("c".into()),
+            numerical_receipt: ReceiptId("n".into()),
+            quality_receipt: ReceiptId("q".into()),
+            performance_receipt: ReceiptId("p".into()),
+            policy_receipt: ReceiptId("po".into()),
+            promotion_receipt: ReceiptId("pr".into()),
+            generation_id: GenerationId("g".into()),
+            sealed_at: "2026-07-28T00:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn verify_complete_accepts_fully_populated_bundle() {
+        assert!(sample_bundle().verify_complete().is_ok());
+    }
+
+    #[test]
+    fn verify_complete_rejects_empty_receipt_field() {
+        let mut bundle = sample_bundle();
+        bundle.compiler_receipt = ReceiptId(String::new());
+        let err = bundle.verify_complete().expect_err("should fail");
+        assert!(err.contains("compiler_receipt"), "got: {}", err);
+    }
+
+    #[test]
+    fn verify_complete_rejects_empty_generation_id() {
+        let mut bundle = sample_bundle();
+        bundle.generation_id = GenerationId(String::new());
+        let err = bundle.verify_complete().expect_err("should fail");
+        assert!(err.contains("generation_id"), "got: {}", err);
+    }
+
+    #[test]
+    fn verify_complete_rejects_empty_sealed_at() {
+        let mut bundle = sample_bundle();
+        bundle.sealed_at = String::new();
+        let err = bundle.verify_complete().expect_err("should fail");
+        assert!(err.contains("sealed_at"), "got: {}", err);
+    }
 }

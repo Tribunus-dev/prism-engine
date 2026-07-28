@@ -1,8 +1,12 @@
-//! RepresentationPlan — decides how each tensor is stored and executed.
+//! RepresentationPlan — per-tensor representation decision
+//! (codec, scale structure, residual plan). Authority: the
+//! per-tensor representation decision.
 //!
-//! The representation planner consumes ModelIr and produces a plan that
-//! the rest of the compiler respects. No silent RawF32 fallback is allowed
-//! unless the policy explicitly permits it.
+//! The representation planner consumes `ModelIr` and produces a
+//! plan that the rest of the compiler respects. No silent
+//! RawF32 fallback is allowed unless the policy explicitly
+//! permits it; the `FallbackPolicy` enum encodes the three
+//! admissible fallback strategies.
 
 use std::collections::BTreeMap;
 
@@ -75,9 +79,10 @@ pub struct AdmissionReceipt {
 
 /// The complete representation plan for a model.
 ///
-/// Every tensor that appears in the compiled artifact has an entry.
-/// The plan is produced by the RepresentationPlanner and consumed by
-/// the execution graph lowerer and the cimage packer.
+/// Every tensor that appears in the compiled artifact has an
+/// entry. The plan is produced by the `RepresentationPlanner` and
+/// consumed by the execution graph lowerer and the cimage
+/// packer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RepresentationPlan {
     /// Per-tensor representation decision, keyed by TensorId.
@@ -99,4 +104,41 @@ pub enum FallbackPolicy {
     AllowHigherPrecision,
     /// Allow falling back to CPU-only execution for problematic tensors.
     AllowCpuRegion,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn representation_plan_tensors_are_deterministic_under_btreemap() {
+        // The constitutional surface stores the per-tensor map in a
+        // BTreeMap so the iteration order is observable and stable
+        // across runs. A HashMap would risk non-deterministic
+        // serialization of the plan; the BTreeMap choice is part of
+        // the canonical contract.
+        let mut plan = RepresentationPlan {
+            tensors: BTreeMap::new(),
+            calibration_receipt: None,
+            admission_receipt: None,
+            all_raw_f32: false,
+        };
+        // Insert in non-sorted order
+        for id in [3u32, 1, 4, 1, 5, 9, 2, 6] {
+            plan.tensors.insert(
+                TensorId(id as usize),
+                TensorRepresentationEntry {
+                    tensor_id: TensorId(id as usize),
+                    representation: TensorRepresentation::Bf16,
+                    residual: None,
+                    compiled_byte_size: 0,
+                    weight_nrmse: 0.0,
+                },
+            );
+        }
+        let ids: Vec<_> = plan.tensors.keys().map(|t| t.0).collect();
+        // BTreeMap dedupes by key, so we get a sorted iteration of
+        // the unique keys.
+        assert_eq!(ids, vec![1, 2, 3, 4, 5, 6, 9]);
+    }
 }

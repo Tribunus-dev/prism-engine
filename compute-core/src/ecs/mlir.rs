@@ -6,8 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::canonical::identity::LogicalTensorId;
-use crate::ecs::canonical::kernel_abi::{
+use prism_ecs_constitutional::canonical::identity::LogicalTensorId;
+use prism_ecs_constitutional::canonical::kernel_abi::{
     generate_buffer_constants, generate_constant_indices, KernelAbi, KernelSemanticId,
 };
 use crate::ecs::metal_backend::{catalogue_source_for, MetalImplementationCatalogue};

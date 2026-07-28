@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
 
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
 use super::manifest::MetalKernelArtifact;
 use crate::ecs::metal_backend::catalogue_source_for;
 use std::fs;

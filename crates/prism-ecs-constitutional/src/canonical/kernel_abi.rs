@@ -1,13 +1,24 @@
-//! KernelAbi, KernelPlan — backend-neutral kernel grouping and ABI contracts.
+//! KernelAbi, KernelPlan — backend-neutral kernel grouping and
+//! ABI contracts. Authority: the kernel interface contract.
 //!
-//! Every kernel implementation registers against a semantic contract.
-//! The ABI defines buffer bindings, constants, threadgroup geometry, and
-//! dispatch policy. Handwritten and generated kernels use the same
-//! semantic catalogue and the same ABI.
+//! Every kernel implementation registers against a semantic
+//! contract. The ABI defines buffer bindings, constants,
+//! threadgroup geometry, and dispatch policy. Handwritten and
+//! generated kernels use the same semantic catalogue and the
+//! same ABI.
+//!
+//! The `KernelSemanticId` primitive is re-exported from
+//! `prism_ecs_core::canonical::kernel_abi` (the source of truth).
+//! Everything else in this module is the constitutional surface
+//! for kernel ABI types: the implementation identity newtype,
+//! the implementation class enum, the buffer / constant /
+//! threadgroup binding structs, the dispatch geometry policy,
+//! the kernel plan and group types, the compiled-kernel artifact
+//! and provenance types, and the helper functions for digest
+//! computation, Metal code generation, and ABI validation.
 
 use super::execution_graph::{ExecutionLane, ExecutionOp};
-use super::identity::RegionId;
-use super::identity::{TargetIdentity, ToolchainIdentity};
+use super::identity::{RegionId, TargetIdentity, ToolchainIdentity};
 use super::model_ir::ArchitectureId;
 use super::representation::TensorRepresentation;
 use serde::{Deserialize, Serialize};
@@ -250,13 +261,14 @@ pub fn compute_dispatch_geometry(abi: &KernelAbi, output_elements: u64) -> (u32,
 /// Returns Ok(()) if every required buffer slot in the ABI has a
 /// corresponding entry in `actual_slots`, and no extra slots exist.
 pub fn validate_bindings(abi: &KernelAbi, actual_slots: &[u32]) -> Result<(), String> {
-    let required: std::collections::HashSet<u32> = abi
+    use std::collections::BTreeSet;
+    let required: BTreeSet<u32> = abi
         .buffers
         .iter()
         .filter(|b| !b.optional)
         .map(|b| b.slot)
         .collect();
-    let provided: std::collections::HashSet<u32> = actual_slots.iter().copied().collect();
+    let provided: BTreeSet<u32> = actual_slots.iter().copied().collect();
 
     for slot in &required {
         if !provided.contains(slot) {
@@ -302,4 +314,146 @@ pub fn validate_artifact_abi(artifact: &CompiledKernelArtifact) -> Result<(), St
         return Err("compiled artifact with no buffer bindings declared in ABI".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::canonical::identity::RegionId;
+
+    fn sample_abi() -> KernelAbi {
+        KernelAbi {
+            version: 1,
+            buffers: vec![
+                BufferBinding {
+                    slot: 0,
+                    name: "input".into(),
+                    byte_size: 1024,
+                    optional: false,
+                },
+                BufferBinding {
+                    slot: 1,
+                    name: "weights".into(),
+                    byte_size: 4096,
+                    optional: false,
+                },
+                BufferBinding {
+                    slot: 2,
+                    name: "scratch".into(),
+                    byte_size: 0,
+                    optional: true,
+                },
+            ],
+            constants: vec![ConstantBinding {
+                index: 0,
+                name: "tile_m".into(),
+                default_value: Some(64),
+            }],
+            threadgroup_memory: vec![ThreadgroupAllocation { byte_size: 256 }],
+            dispatch_geometry: DispatchGeometryPolicy::FromOutputBuffer,
+            threads_per_threadgroup: (64, 1, 1),
+        }
+    }
+
+    #[test]
+    fn buffer_constants_match_slot_index() {
+        let s = generate_buffer_constants(&sample_abi());
+        assert!(s.contains("#define SLOT_INPUT 0"), "got:\n{}", s);
+        assert!(s.contains("#define SLOT_WEIGHTS 1"), "got:\n{}", s);
+        assert!(s.contains("#define SLOT_SCRATCH 2"), "got:\n{}", s);
+    }
+
+    #[test]
+    fn constant_indices_match_const_index() {
+        let s = generate_constant_indices(&sample_abi());
+        assert!(s.contains("#define CONSTANT_TILE_M 0"), "got:\n{}", s);
+    }
+
+    #[test]
+    fn dispatch_geometry_from_output_uses_threadgroup_size() {
+        let abi = sample_abi();
+        // threads_per_threadgroup.0 = 64
+        // 1024 elements / 64 = 16 grid_x
+        let (x, _y, _z) = compute_dispatch_geometry(&abi, 1024);
+        assert_eq!(x, 16);
+    }
+
+    #[test]
+    fn dispatch_geometry_fixed_returns_inline_dims() {
+        let mut abi = sample_abi();
+        abi.dispatch_geometry = DispatchGeometryPolicy::Fixed(7, 3, 2);
+        let (x, y, z) = compute_dispatch_geometry(&abi, 1024);
+        assert_eq!((x, y, z), (7, 3, 2));
+    }
+
+    #[test]
+    fn validate_bindings_rejects_missing_required_slot() {
+        let abi = sample_abi();
+        // Only slot 0 provided; slot 1 (weights) is required.
+        let err = validate_bindings(&abi, &[0]).expect_err("should fail");
+        assert!(err.contains("slot 1"), "got: {}", err);
+    }
+
+    #[test]
+    fn validate_bindings_rejects_extra_slot() {
+        let abi = sample_abi();
+        // Provide slot 99 which is not in the ABI.
+        let err = validate_bindings(&abi, &[0, 1, 99]).expect_err("should fail");
+        assert!(err.contains("99"), "got: {}", err);
+    }
+
+    #[test]
+    fn validate_bindings_accepts_full_required_set() {
+        let abi = sample_abi();
+        // slot 2 is optional; required is [0, 1]. Provide just [0, 1].
+        assert!(validate_bindings(&abi, &[0, 1]).is_ok());
+    }
+
+    #[test]
+    fn abi_digest_is_deterministic_and_distinct() {
+        let abi_a = sample_abi();
+        let mut abi_b = sample_abi();
+        abi_b.version = 2;
+        assert_eq!(compute_abi_digest(&abi_a), compute_abi_digest(&abi_a));
+        assert_ne!(compute_abi_digest(&abi_a), compute_abi_digest(&abi_b));
+    }
+
+    #[test]
+    fn kernel_plan_groups_for_lane_filters_correctly() {
+        let plan = KernelPlan {
+            groups: vec![KernelGroup {
+                semantic_id: KernelSemanticId("a".into()),
+                implementation_class: KernelImplementationClass::PerLayer,
+                operations: vec![],
+                specialization: SpecializationParameters {
+                    tile_m: None,
+                    tile_k: None,
+                    tile_n: None,
+                    group_size: None,
+                    metadata_layout: None,
+                },
+                abi: sample_abi(),
+                source_region: RegionId("r".into()),
+                target_lane: ExecutionLane::Cpu,
+            }],
+        };
+        assert_eq!(plan.group_count(), 1);
+        assert_eq!(plan.groups_for_lane(ExecutionLane::Cpu).len(), 1);
+        assert_eq!(plan.groups_for_lane(ExecutionLane::MetalGpu).len(), 0);
+    }
+
+    #[test]
+    fn validate_artifact_abi_rejects_empty_buffers_with_bytes() {
+        let mut abi = sample_abi();
+        abi.buffers.clear();
+        let artifact = CompiledKernelArtifact {
+            implementation_id: KernelImplementationId("impl-1".into()),
+            semantic_id: KernelSemanticId("k-1".into()),
+            compiled_bytes: vec![0u8; 8],
+            sha256: "deadbeef".into(),
+            entry_point: "main".into(),
+            abi,
+        };
+        assert!(validate_artifact_abi(&artifact).is_err());
+    }
 }

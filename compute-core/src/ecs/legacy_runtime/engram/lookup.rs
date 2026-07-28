@@ -4,7 +4,7 @@
 //! policy against an optional query vector to decide whether the engram
 //! should be applied at the current inference step.
 
-use crate::ecs::canonical::identity::EngramArtifactId;
+use prism_ecs_constitutional::canonical::identity::EngramArtifactId;
 use crate::ecs::training_target::spec::{
     EngramInsertionContract, EngramLookupReceipt, EngramRoutingPolicy,
 };
@@ -98,7 +98,7 @@ fn similarity(query: &[f32], payload: &[u8]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::canonical::identity::{EngramArtifactId, RegionId};
+    use prism_ecs_constitutional::canonical::identity::{EngramArtifactId, RegionId};
     use crate::ecs::training_target::spec::{
         EngramApplication, EngramInsertionContract, EngramOperation, EngramRoutingPolicy,
     };
@@ -109,8 +109,8 @@ mod tests {
             EngramInsertionContract {
                 region: RegionId("region".into()),
                 operation: EngramOperation::Adapter,
-                input_shape: crate::ecs::canonical::identity::TensorShape { dims: vec![] },
-                output_shape: crate::ecs::canonical::identity::TensorShape { dims: vec![] },
+                input_shape: prism_ecs_constitutional::canonical::identity::TensorShape { dims: vec![] },
+                output_shape: prism_ecs_constitutional::canonical::identity::TensorShape { dims: vec![] },
                 application: EngramApplication::AdditiveResidual,
                 routing: EngramRoutingPolicy::ThresholdedSimilarity(threshold),
                 maximum_latency_ns: None,

@@ -1,4 +1,4 @@
-use crate::ecs::canonical::identity::HardwareProfileId;
+use prism_ecs_constitutional::canonical::identity::HardwareProfileId;
 
 /// Compatibility suite — target hardware profiles and release gates.
 /// Plan Section 16: "Release gate passes on supported Apple Silicon profiles."

@@ -15,7 +15,7 @@ pub use catalogue::*;
 pub use compiler::*;
 pub use toolchain::*;
 
-use crate::ecs::canonical::kernel_abi::{
+use prism_ecs_constitutional::canonical::kernel_abi::{
     CompiledKernelArtifact, KernelAbi, KernelGroup, KernelSemanticId,
 };
 
