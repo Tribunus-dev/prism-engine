@@ -1,30 +1,36 @@
-//! Tribunus multi-level compiler IR and backend-lowering foundation.
+//! `prism_ecs_compile::pipeline` — multi-level compiler IR foundation.
 //!
-//! # Layers
+//! This module owns the canonical authority for the engine's compile
+//! pipeline, which was previously the engine's `ecs::compiler` surface:
 //!
 //! | Layer | Module | Responsibility |
 //! |---|---|---|
-//! | Semantic | [`semantic::SemanticModule`] | Backend-neutral model meaning: logical shapes, dtypes, tensor lineage, statefulness, tolerance classes |
-//! | Scheduled | [`scheduled::ScheduledModule`] | Physical regions with concrete layouts, placements, transfers, memory plans, evaluation boundaries |
-//! | Passes | [`pass::TransformPass`] | Versioned transformations with receipts |
+//! | Passes | [`pass`] | Versioned transformations with receipts |
+//! | Semantic | [`semantic`] | Backend-neutral model meaning |
+//! | Scheduled | [`scheduled`] | Physical regions, memory plan, transfers |
 //! | Backend | [`BackendLowering`] | Sealed backend artifact with legality receipts |
+//!
+//! Higher-level orchestration (graph optimization, deployment, lifecycle,
+//! events) lives in sibling submodules; the multi-level IR is the
+//! structural authority of this surface.
 
 pub mod ane;
 pub mod backend_assessment;
 pub mod compile_schedule;
 pub mod deployment_compiler;
 pub mod event_emitter;
+pub mod fused_op;
 pub mod graph_optimizer;
 pub mod lifecycle_coordinator;
 pub mod lowering;
 pub mod pass;
+pub mod plan;
 pub mod scheduled;
 pub mod semantic;
 
-#[cfg(test)]
-mod pipeline_tests;
-
-use crate::ecs::backend::routing::{BackendArtifactId, BackendId, EvidenceDigest, OperationId};
+use prism_ecs_backend::routing::{
+    BackendArtifactId, BackendId, EvidenceDigest, OperationId,
+};
 
 /// Receipt produced when lowering a scheduled region to a backend artifact.
 #[derive(Debug, Clone)]
@@ -76,7 +82,10 @@ pub trait BackendLowering {
     type Artifact;
 
     /// Validate a scheduled region against this backend's constraints.
-    fn validate(&self, region: &scheduled::ScheduledRegion) -> Result<LegalityReceipt, String>;
+    fn validate(
+        &self,
+        region: &scheduled::ScheduledRegion,
+    ) -> Result<LegalityReceipt, String>;
 
     /// Lower a validated scheduled region to a backend artifact.
     fn lower(

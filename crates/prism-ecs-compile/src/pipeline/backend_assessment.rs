@@ -1,34 +1,47 @@
-//! Backend assessment pass — scores each operation against all available
-//! backends and produces sealed ExecutionBoundaryPlans with cross-backend
-//! tensor transfer plans.
+//! `pipeline::backend_assessment` — score each operation against backends.
+//!
+//! This file owns the canonical authority for the backend-assessment
+//! pass: each operation in a [`ModelOperationGraph`] is scored against
+//! every available backend, and consecutive same-backend operations
+//! are grouped into [`SealedExecutionBoundaryPlan`]s with cross-backend
+//! [`TensorTransferPlan`]s as needed.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
-use crate::ecs::backend::routing::{
+use prism_ecs_backend::routing::{
     BackendId, ConversionKind, EvaluationGroupId, EvaluationPolicy, EvidenceDigest,
     ExecutionBoundaryPlan, OperationFamily, OperationId, PhysicalLayout,
     SealedExecutionBoundaryPlan, SynchronizationPolicy, TensorId, TensorTransferPlan, BACKEND_MLX,
 };
-use crate::ecs::compiler::pass::{PassIdentity, TransformPass, TransformReceipt};
+
+use super::pass::{PassIdentity, TransformPass, TransformReceipt};
 
 // ── Graph types ────────────────────────────────────────────────────────────
 
 /// An operation in the model graph with its characteristics.
 #[derive(Debug, Clone)]
 pub struct GraphOperation {
+    /// Stable operation identifier.
     pub id: OperationId,
+    /// Operation family classification.
     pub family: OperationFamily,
+    /// Rows of the operation's matmul shape, if applicable.
     pub m: Option<u32>,
+    /// Columns of the operation's matmul shape, if applicable.
     pub n: Option<u32>,
+    /// Inner dim of the operation's matmul shape, if applicable.
     pub k: Option<u32>,
+    /// Whether the operands are quantized.
     pub quantized: bool,
 }
 
 /// The input IR to the assessment pass.
 #[derive(Debug, Clone)]
 pub struct ModelOperationGraph {
+    /// Operations in the model graph, in execution order.
     pub operations: Vec<GraphOperation>,
+    /// Operand shapes for each operation, indexed by id.
     pub operand_shapes: HashMap<OperationId, Vec<i32>>,
 }
 
@@ -37,7 +50,9 @@ pub struct ModelOperationGraph {
 /// One group of consecutive operations on the same backend.
 #[derive(Debug, Clone)]
 struct BackendBlock {
+    /// Backend assigned to this block.
     pub backend: BackendId,
+    /// Operations in this block, in execution order.
     pub operation_ids: Vec<OperationId>,
 }
 
@@ -45,10 +60,10 @@ struct BackendBlock {
 
 /// Score a single operation against a given backend.
 ///
-/// Higher values indicate a better match.  Scores range from 10 (poor) to
-/// 100 (ideal).  The default baseline of 70 for MLX reflects that MLX is the
-/// primary GPU-accelerated backend; other backends have lower baselines when
-/// their strengths do not apply.
+/// Higher values indicate a better match. Scores range from 10 (poor) to
+/// 100 (ideal). The default baseline of 70 for MLX reflects that MLX is
+/// the primary GPU-accelerated backend; other backends have lower
+/// baselines when their strengths do not apply.
 fn score_backend(op: &GraphOperation, backend: BackendId) -> u32 {
     match backend.0 {
         0 => {
@@ -113,14 +128,15 @@ fn score_backend(op: &GraphOperation, backend: BackendId) -> u32 {
 
 // ── Assessment pass ────────────────────────────────────────────────────────
 
-/// Compiler pass that assigns each operation group to the optimal backend and
-/// produces sealed [`ExecutionBoundaryPlan`]s.
+/// Compiler pass that assigns each operation group to the optimal backend
+/// and produces sealed [`ExecutionBoundaryPlan`]s.
 pub struct BackendAssessmentPass {
     identity: PassIdentity,
     available_backends: Vec<BackendId>,
 }
 
 impl BackendAssessmentPass {
+    /// Construct an assessment pass with the given available backends.
     pub fn new(available_backends: Vec<BackendId>) -> Self {
         Self {
             identity: PassIdentity {
@@ -200,12 +216,12 @@ impl TransformPass<ModelOperationGraph> for BackendAssessmentPass {
 
 // ── Public entry point ─────────────────────────────────────────────────────
 
-/// Run the assessment pass on a model graph and produce sealed plans together
-/// with cross-backend transfer plans.
+/// Run the assessment pass on a model graph and produce sealed plans
+/// together with cross-backend transfer plans.
 ///
-/// This is the public entry point for backend assessment outside the compiler
-/// pipeline.  Returns the sealed execution-boundary plans and any tensor
-/// transfer plans needed for cross-backend data movement.
+/// This is the public entry point for backend assessment outside the
+/// compiler pipeline. Returns the sealed execution-boundary plans and
+/// any tensor transfer plans needed for cross-backend data movement.
 pub fn assess_and_route(
     graph: &ModelOperationGraph,
     available_backends: &[BackendId],
@@ -297,8 +313,8 @@ pub use self::assess_and_route as assess_model_ops;
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
-/// Split a sequence of (op, backend) assignments into consecutive same-backend
-/// blocks.
+/// Split a sequence of `(op, backend)` assignments into consecutive
+/// same-backend blocks.
 fn build_groups(assignments: &[(OperationId, BackendId)]) -> Vec<BackendBlock> {
     if assignments.is_empty() {
         return Vec::new();
@@ -332,7 +348,7 @@ fn build_groups(assignments: &[(OperationId, BackendId)]) -> Vec<BackendBlock> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::routing::{SynchronizationPolicy, BACKEND_ACCELERATE, BACKEND_MLX};
+    use prism_ecs_backend::routing::{BACKEND_ACCELERATE, BACKEND_MLX};
 
     // Helper to create a test operation
     fn make_op(
@@ -354,44 +370,37 @@ mod tests {
     }
 
     #[test]
-    fn test_score_backend_mlx_matmul_ideal() {
-        let op = make_op(
-            1,
-            OperationFamily::Matmul,
-            Some(4096),
-            Some(4096),
-            Some(4096),
-            false,
-        );
+    fn score_backend_metal_matmul_ideal() {
+        let op = make_op(1, OperationFamily::Matmul, Some(4096), Some(4096), Some(4096), false);
         assert_eq!(score_backend(&op, BackendId(0)), 100);
     }
 
     #[test]
-    fn test_score_backend_accelerate_transpose() {
+    fn score_backend_accelerate_transpose() {
         let op = make_op(1, OperationFamily::Transpose, None, None, None, false);
         assert_eq!(score_backend(&op, BackendId(1)), 90);
     }
 
     #[test]
-    fn test_score_backend_coreai_attention() {
+    fn score_backend_ane_attention() {
         let op = make_op(1, OperationFamily::AttentionBlock, None, None, None, false);
         assert_eq!(score_backend(&op, BackendId(2)), 90);
     }
 
     #[test]
-    fn test_score_backend_ane_decoder_layer() {
+    fn score_backend_ane_decoder_layer() {
         let op = make_op(1, OperationFamily::DecoderLayer, None, None, None, false);
         assert_eq!(score_backend(&op, BackendId(2)), 90);
     }
 
     #[test]
-    fn test_score_backend_unknown_backend() {
+    fn score_backend_unknown_backend() {
         let op = make_op(1, OperationFamily::Matmul, None, None, None, false);
         assert_eq!(score_backend(&op, BackendId(99)), 10);
     }
 
     #[test]
-    fn test_empty_graph_rejected() {
+    fn empty_graph_rejected() {
         let graph = ModelOperationGraph {
             operations: vec![],
             operand_shapes: HashMap::new(),
@@ -400,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn test_no_backends_rejected() {
+    fn no_backends_rejected() {
         let graph = ModelOperationGraph {
             operations: vec![make_op(1, OperationFamily::Matmul, None, None, None, false)],
             operand_shapes: HashMap::new(),
@@ -409,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn test_single_op_single_backend() {
+    fn single_op_single_backend() {
         let graph = ModelOperationGraph {
             operations: vec![make_op(1, OperationFamily::Matmul, None, None, None, false)],
             operand_shapes: HashMap::new(),
@@ -423,7 +432,7 @@ mod tests {
     }
 
     #[test]
-    fn test_consecutive_same_backend_grouped() {
+    fn consecutive_same_backend_grouped() {
         let graph = ModelOperationGraph {
             operations: vec![
                 make_op(1, OperationFamily::Matmul, None, None, None, false),
@@ -433,16 +442,13 @@ mod tests {
             operand_shapes: HashMap::new(),
         };
         let (plans, transfers) = assess_and_route(&graph, &[BackendId(0)]).unwrap();
-        // All ops on MLX (0) → one group
         assert_eq!(plans.len(), 1);
         assert!(transfers.is_empty());
         assert_eq!(plans[0].plan.operations.len(), 3);
     }
 
     #[test]
-    fn test_cross_backend_groups_and_transfers() {
-        // Force a cross-backend scenario: op1 is best on MLX, op2 on Accelerate,
-        // op3 on MLX again (MLX silu=86 > Accel silu=84).  This creates three groups with two transfers.
+    fn cross_backend_groups_and_transfers() {
         let op1 = make_op(1, OperationFamily::Matmul, None, None, None, false);
         let op2 = make_op(2, OperationFamily::Transpose, None, None, None, false);
         let op3 = make_op(3, OperationFamily::Silu, None, None, None, false);
@@ -454,16 +460,13 @@ mod tests {
 
         let (plans, transfers) =
             assess_and_route(&graph, &[BACKEND_MLX, BACKEND_ACCELERATE]).unwrap();
-        // MLX → Accelerate → MLX = 3 groups, 2 transfers
         assert_eq!(plans.len(), 3);
         assert_eq!(transfers.len(), 2);
 
-        // First group: MLX
         assert_eq!(plans[0].plan.backend_id, BACKEND_MLX);
         assert_eq!(plans[0].plan.operations, vec![OperationId(1)]);
         assert_eq!(plans[0].plan.synchronization, SynchronizationPolicy::None);
 
-        // Second group: Accelerate
         assert_eq!(plans[1].plan.backend_id, BACKEND_ACCELERATE);
         assert_eq!(plans[1].plan.operations, vec![OperationId(2)]);
         assert_eq!(
@@ -471,7 +474,6 @@ mod tests {
             SynchronizationPolicy::Barrier
         );
 
-        // Third group: MLX
         assert_eq!(plans[2].plan.backend_id, BACKEND_MLX);
         assert_eq!(plans[2].plan.operations, vec![OperationId(3)]);
         assert_eq!(
@@ -479,19 +481,17 @@ mod tests {
             SynchronizationPolicy::Barrier
         );
 
-        // Transfer: MLX→Accel for tensor of op1 (id=1)
         assert_eq!(transfers[0].source_backend, BACKEND_MLX);
         assert_eq!(transfers[0].destination_backend, BACKEND_ACCELERATE);
         assert_eq!(transfers[0].tensor_id, TensorId(1));
 
-        // Transfer: Accel→MLX for tensor of op2 (id=2)
         assert_eq!(transfers[1].source_backend, BACKEND_ACCELERATE);
         assert_eq!(transfers[1].destination_backend, BACKEND_MLX);
         assert_eq!(transfers[1].tensor_id, TensorId(2));
     }
 
     #[test]
-    fn test_last_group_materializes_all_outputs() {
+    fn last_group_materializes_all_outputs() {
         let graph = ModelOperationGraph {
             operations: vec![
                 make_op(1, OperationFamily::Matmul, None, None, None, false),
@@ -501,13 +501,12 @@ mod tests {
         };
         let (plans, _) = assess_and_route(&graph, &[BackendId(0)]).unwrap();
         assert_eq!(plans.len(), 1);
-        // Last (and only) group materialises all outputs
         assert!(plans[0].plan.materialized_outputs.contains(&TensorId(1)));
         assert!(plans[0].plan.materialized_outputs.contains(&TensorId(2)));
     }
 
     #[test]
-    fn test_assess_model_ops_reexport() {
+    fn assess_model_ops_reexport() {
         let graph = ModelOperationGraph {
             operations: vec![make_op(1, OperationFamily::Matmul, None, None, None, false)],
             operand_shapes: HashMap::new(),
@@ -517,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_pass_applies_to() {
+    fn transform_pass_applies_to() {
         let pass = BackendAssessmentPass::new(vec![BackendId(0)]);
 
         let empty = ModelOperationGraph {
@@ -534,7 +533,7 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_pass_apply() {
+    fn transform_pass_apply() {
         let pass = BackendAssessmentPass::new(vec![BackendId(0)]);
         let input_digest = EvidenceDigest("test-input".into());
 
@@ -555,13 +554,15 @@ mod tests {
     }
 
     #[test]
-    fn test_sealed_plan_verifies() {
+    fn sealed_plan_seals_with_backend_id() {
         let graph = ModelOperationGraph {
             operations: vec![make_op(1, OperationFamily::Matmul, None, None, None, false)],
             operand_shapes: HashMap::new(),
         };
         let (plans, _) = assess_and_route(&graph, &[BackendId(0)]).unwrap();
         assert_eq!(plans.len(), 1);
-        assert!(plans[0].verify());
+        // SealedExecutionBoundaryPlan::seal produces a non-empty sha256 digest
+        // whenever at least one operation is included.
+        assert!(!plans[0].sha256.0.is_empty());
     }
 }

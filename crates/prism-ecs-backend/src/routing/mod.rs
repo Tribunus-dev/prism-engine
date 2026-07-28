@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 // ── Backend identity ────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct BackendId(pub u32);
 
 pub const BACKEND_METAL: BackendId = BackendId(0);
@@ -111,7 +113,9 @@ pub enum CorrectnessCheckpointPolicy {
 
 // ── Tensor identity ─────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct TensorId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -122,7 +126,7 @@ pub struct TensorMaterializationId(pub u64);
 
 // ── Evidence / digest ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EvidenceDigest(pub String);
 
 // ── Backend artifact identity ───────────────────────────────────────────

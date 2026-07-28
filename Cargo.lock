@@ -3926,6 +3926,7 @@ dependencies = [
 name = "prism-ecs-compile"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "blake3",
  "chrono",
  "half",
@@ -3935,6 +3936,7 @@ dependencies = [
  "prism-amd-npu-runtime",
  "prism-ane",
  "prism-ane-runtime",
+ "prism-ecs-backend",
  "prism-ecs-codec",
  "prism-ecs-constitutional",
  "prism-ecs-core",

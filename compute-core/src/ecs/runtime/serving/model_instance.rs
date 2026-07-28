@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
-use crate::ecs::compiler::deployment_compiler::ServingProfile;
+use prism_ecs_compile::pipeline::deployment_compiler::ServingProfile;
 use prism_ecs_runtime::scheduling::systems::unified_scheduler::{SchedulerConfig, SchedulerRunner};
 use serde::{Deserialize, Serialize};
 

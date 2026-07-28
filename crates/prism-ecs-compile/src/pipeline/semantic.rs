@@ -1,21 +1,18 @@
-//! Semantic module — backend-neutral representation of model meaning.
+//! `pipeline::semantic` — backend-neutral model meaning.
 //!
 //! The [`SemanticModule`] captures every tensor and operation with logical
 //! shape, dtype, quantization contract, mutability, producer/consumer
 //! lineage, statefulness, aliasing restrictions, and numerical tolerance
 //! class. No hardware layout, placement, or materialization decisions
 //! appear here. Those belong in [`super::scheduled::ScheduledModule`].
-//!
-//! Stateful operations such as KV-cache updates are represented explicitly
-//! rather than disguised as ordinary tensors.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use crate::ecs::backend::routing::{
+use prism_ecs_backend::routing::{
     EvidenceDigest, LogicalShape, OperationFamily, OperationId, Phase, QuantizationContract,
     TensorId,
 };
-use crate::ecs::backend::DType;
+use prism_ecs_backend::DType;
 
 // ── Semantic tensor ────────────────────────────────────────────────────────
 
@@ -80,9 +77,17 @@ pub enum ToleranceClass {
     /// fp32-level tolerance (~1e-6 relative).
     Fp32,
     /// Quantized tolerance (model-specific).
-    Quantized { bits: u8 },
+    Quantized {
+        /// Number of bits of precision.
+        bits: u8,
+    },
     /// Custom tolerance contract.
-    Custom { epsilon: f64, relative: bool },
+    Custom {
+        /// Allowed epsilon deviation.
+        epsilon: f64,
+        /// Whether the tolerance is relative.
+        relative: bool,
+    },
 }
 
 // ── Semantic operation ─────────────────────────────────────────────────────
@@ -129,7 +134,7 @@ pub struct SemanticModule {
     /// Module identity — content-addressed digest of the semantic graph.
     pub digest: EvidenceDigest,
     /// All tensors in the model graph, keyed by stable ID.
-    pub tensors: HashMap<TensorId, SemanticTensor>,
+    pub tensors: BTreeMap<TensorId, SemanticTensor>,
     /// All operations in the model graph, in topological execution order.
     pub operations: Vec<SemanticOp>,
     /// Named model inputs.
@@ -160,7 +165,7 @@ impl SemanticModule {
     pub fn new(architecture: &str, version: &str) -> Self {
         Self {
             digest: EvidenceDigest(String::new()),
-            tensors: HashMap::new(),
+            tensors: BTreeMap::new(),
             operations: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -313,7 +318,6 @@ impl SemanticModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::routing::{OperationFamily, Phase};
 
     #[test]
     fn build_semantic_matmul() {

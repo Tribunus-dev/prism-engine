@@ -1,7 +1,12 @@
-//! Core ML lowering parameter types — opcode, shape policy, target,
-//! precision, parameter schema, storage encoding.
+//! `pipeline::lowering::params` — Core ML lowering parameter types.
+//!
+//! This file owns the canonical authority for the Core ML lowering
+//! surface: opcodes, scheduled ops, precision and shape policies,
+//! targets, parameter schemas, and structured diagnostics. The
+//! `coreml_proto`-specific [`MilValueRef`] and [`TensorMeta`] live in
+//! the engine; the constitutional surface provides the typed contract.
 
-use crate::ecs::backend::routing::{OperationId, TensorId};
+use prism_ecs_backend::routing::{OperationId, TensorId};
 
 // ── Opcode ─────────────────────────────────────────────────────────────────
 
@@ -9,14 +14,23 @@ use crate::ecs::backend::routing::{OperationId, TensorId};
 /// No data-bearing attributes — those belong on the `ScheduledOp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Opcode {
+    /// Constant value (weights, biases).
     Constant,
+    /// Identity copy.
     Identity,
+    /// Element-wise add.
     Add,
+    /// Element-wise multiply.
     Multiply,
+    /// Matrix multiply.
     Matmul,
+    /// Reshape to a new shape.
     Reshape,
+    /// Permute axes.
     Transpose,
+    /// Softmax.
     Softmax,
+    /// SiLU activation.
     Silu,
 }
 
@@ -59,47 +73,58 @@ pub struct ScheduledOp {
 /// Per-op attributes for the 9-op envelope.
 #[derive(Debug, Clone)]
 pub enum OpAttrs {
+    /// Constant tensor with row-major F32 data.
     Constant {
         /// Row-major F32 data.
         data: Vec<f32>,
         /// Shape of the constant tensor.
         shape: Vec<u32>,
     },
+    /// Identity (no attributes).
     Identity,
+    /// Add (no attributes).
     Add,
+    /// Multiply (no attributes).
     Multiply,
+    /// Matmul.
     Matmul {
+        /// Transpose left operand.
         transpose_x: bool,
+        /// Transpose right operand.
         transpose_y: bool,
     },
+    /// Reshape.
     Reshape {
-        /// Target shape. One dimension may be -1 (inferred).
+        /// Target shape; one dimension may be -1 (inferred).
         target_shape: Vec<i64>,
     },
+    /// Transpose.
     Transpose {
-        /// Full permutation (e.g. [1, 0] for 2D transpose).
+        /// Full permutation (e.g. `[1, 0]` for 2D transpose).
         permutation: Vec<u32>,
     },
+    /// Softmax.
     Softmax {
         /// Normalized axis.
         axis: i64,
     },
+    /// SiLU (no attributes).
     Silu,
 }
 
 // ── Precision policy ──────────────────────────────────────────────────────
 
 /// Three distinct precision concerns in one policy.
-/// This gate only supports F32 for all three.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrecisionPolicy {
     /// Compute F32, weights F32, interface F32.
     F32,
-    /// Refused in this gate.
+    /// Fp16 (refused in the legacy gate; accepted in production).
     Fp16,
 }
 
 impl PrecisionPolicy {
+    /// Human-readable name.
     pub fn name(&self) -> &'static str {
         match self {
             PrecisionPolicy::F32 => "fp32",
@@ -107,7 +132,7 @@ impl PrecisionPolicy {
         }
     }
 
-    /// Returns Ok if this precision is supported by this gate.
+    /// Returns Ok if this precision is supported by the legacy gate.
     pub fn validate(&self) -> Result<(), &'static str> {
         match self {
             PrecisionPolicy::F32 => Ok(()),
@@ -119,25 +144,35 @@ impl PrecisionPolicy {
 // ── Shape policy ──────────────────────────────────────────────────────────
 
 /// How a tensor shape is constrained.
-/// Only `Fixed` is accepted in this gate.
 #[derive(Debug, Clone)]
 pub enum ShapePolicy {
+    /// Fixed shape; the only policy accepted in the legacy gate.
     Fixed(Vec<u32>),
+    /// Bounded shape with default/min/max.
     Bounded {
+        /// Default shape.
         default: Vec<u32>,
+        /// Minimum shape.
         min: Vec<u32>,
+        /// Maximum shape.
         max: Vec<u32>,
     },
+    /// Enumerated set of alternative shapes.
     Enumerated {
+        /// Default shape.
         default: Vec<u32>,
+        /// Alternative shapes.
         alternatives: Vec<Vec<u32>>,
     },
+    /// Symbolic shape with named dimensions.
     Symbolic {
+        /// Named symbolic dimensions.
         named_dims: Vec<NamedDim>,
     },
 }
 
 impl ShapePolicy {
+    /// Human-readable name.
     pub fn name(&self) -> &'static str {
         match self {
             ShapePolicy::Fixed(_) => "fixed",
@@ -147,7 +182,7 @@ impl ShapePolicy {
         }
     }
 
-    /// Returns Ok only for Fixed. Others return a structured refusal.
+    /// Returns Ok only for `Fixed`. Others return a structured refusal.
     pub fn validate(&self) -> Result<(), String> {
         match self {
             ShapePolicy::Fixed(_) => Ok(()),
@@ -165,7 +200,9 @@ impl ShapePolicy {
 /// A named symbolic dimension (for future use).
 #[derive(Debug, Clone)]
 pub struct NamedDim {
+    /// Dimension name.
     pub name: String,
+    /// Dimension size.
     pub size: u32,
 }
 
@@ -174,13 +211,18 @@ pub struct NamedDim {
 /// How weight data is stored in a constant.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StorageEncoding {
+    /// F32 little-endian.
     F32LittleEndian,
+    /// Fp16 little-endian.
     Fp16LittleEndian,
+    /// Unsigned 8-bit.
     U8,
+    /// Signed 32-bit.
     I32,
 }
 
 impl StorageEncoding {
+    /// Short name.
     pub fn name(&self) -> &'static str {
         match self {
             StorageEncoding::F32LittleEndian => "fp32le",
@@ -196,19 +238,21 @@ impl StorageEncoding {
 /// Validated target profile — indivisible compatibility row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreAiTarget {
-    /// macOS 13 / iOS 16 / Core ML 6 — spec 7, opset CoreML6.
+    /// macOS 13 / iOS 16 / Core ML 6.
     MacOS13,
-    /// macOS 14 / iOS 17 / Core ML 7 — spec 8, opset CoreML7.
+    /// macOS 14 / iOS 17 / Core ML 7.
     MacOS14,
-    /// macOS 15 / iOS 18 / Core ML 8 — spec 9, opset CoreML8.
+    /// macOS 15 / iOS 18 / Core ML 8.
     MacOS15,
 }
 
 impl CoreAiTarget {
+    /// Default gate target.
     pub fn default_gate_target() -> Self {
         CoreAiTarget::MacOS13
     }
 
+    /// MIL spec version.
     pub fn spec_version(&self) -> u32 {
         match self {
             CoreAiTarget::MacOS13 => 7,
@@ -217,6 +261,7 @@ impl CoreAiTarget {
         }
     }
 
+    /// Deployment-target string.
     pub fn deployment_target(&self) -> &'static str {
         match self {
             CoreAiTarget::MacOS13 => "macOS13",
@@ -225,6 +270,7 @@ impl CoreAiTarget {
         }
     }
 
+    /// Opset identifier.
     pub fn opset_identifier(&self) -> &'static str {
         match self {
             CoreAiTarget::MacOS13 => "CoreML6",
@@ -236,62 +282,86 @@ impl CoreAiTarget {
 
 // ── OpParamSchema ─────────────────────────────────────────────────────────
 
-/// Typed parameter schema mapping scheduled attributes to MIL input bindings.
+/// Typed parameter schema mapping scheduled attributes to MIL input
+/// bindings. The `coreml_proto::mil_spec::Value` reference is
+/// preserved as a string for the constitutional surface; the engine's
+/// full schema is hardware-gated.
 #[derive(Debug, Clone)]
 pub struct OpParamSchema {
     /// Constant-value inputs emitted alongside tensor inputs.
-    pub constant_inputs: Vec<(String, mil_spec_value)>,
-    /// Tensor inputs resolved from value_bindings.
+    pub constant_inputs: Vec<(String, String)>,
+    /// Tensor inputs resolved from value bindings.
     pub tensor_inputs: Vec<(String, TensorId)>,
 }
-
-// Re-export mil_spec::Value as mil_spec_value for the schema.
-use coreml_proto::proto::mil_spec;
-#[allow(non_camel_case_types)]
-type mil_spec_value = mil_spec::Value;
 
 // ── LoweringDiagnostic ─────────────────────────────────────────────────────
 
 /// Structured diagnostic from the lowering pass.
 #[derive(Debug, Clone)]
 pub enum LoweringDiagnostic {
+    /// An operation is not supported by this lowering target.
     UnsupportedOp {
+        /// Operation identifier.
         op_id: OperationId,
+        /// Operation opcode.
         opcode: Opcode,
+        /// Reason for non-support.
         reason: String,
+        /// Optional remediation suggestion.
         suggestion: Option<String>,
     },
+    /// A shape policy is not supported by this target.
     ShapePolicyUnsupported {
+        /// Operation identifier.
         op_id: OperationId,
+        /// Policy name.
         policy: String,
     },
+    /// An op's tensor shape does not match the expected shape.
     ShapeMismatch {
+        /// Operation identifier.
         op_id: OperationId,
+        /// Tensor identifier.
         tensor: TensorId,
+        /// Expected shape.
         expected: String,
+        /// Found shape.
         found: String,
     },
+    /// A requested precision is not supported.
     PrecisionUnsupported {
+        /// Operation identifier.
         op_id: OperationId,
+        /// Requested precision name.
         requested: String,
+        /// Supported precision names.
         supported: Vec<String>,
     },
+    /// A hard constraint was violated.
     ConstraintViolation {
+        /// Operation identifier.
         op_id: OperationId,
+        /// Constraint name.
         constraint: String,
+        /// Detail message.
         detail: String,
     },
+    /// A non-fatal warning.
     Warning {
+        /// Operation identifier.
         op_id: OperationId,
+        /// Warning message.
         message: String,
     },
 }
 
 impl LoweringDiagnostic {
+    /// Whether this diagnostic is fatal (not a warning).
     pub fn is_fatal(&self) -> bool {
         !matches!(self, LoweringDiagnostic::Warning { .. })
     }
 
+    /// Human-readable message.
     pub fn message(&self) -> String {
         match self {
             LoweringDiagnostic::UnsupportedOp {
@@ -300,10 +370,10 @@ impl LoweringDiagnostic {
                 reason,
                 ..
             } => {
-                format!("op {:?} ({}): {}", op_id, opcode.name(), reason)
+                format!("op {op_id:?} ({}): {reason}", opcode.name())
             }
             LoweringDiagnostic::ShapePolicyUnsupported { op_id, policy } => {
-                format!("op {:?}: shape policy '{}' not supported", op_id, policy)
+                format!("op {op_id:?}: shape policy '{policy}' not supported")
             }
             LoweringDiagnostic::ShapeMismatch {
                 op_id,
@@ -312,8 +382,7 @@ impl LoweringDiagnostic {
                 found,
             } => {
                 format!(
-                    "op {:?}: tensor {:?} expected {}, found {}",
-                    op_id, tensor, expected, found
+                    "op {op_id:?}: tensor {tensor:?} expected {expected}, found {found}"
                 )
             }
             LoweringDiagnostic::PrecisionUnsupported {
@@ -322,8 +391,7 @@ impl LoweringDiagnostic {
                 supported,
             } => {
                 format!(
-                    "op {:?}: precision '{}' not supported (supported: {:?})",
-                    op_id, requested, supported
+                    "op {op_id:?}: precision '{requested}' not supported (supported: {supported:?})"
                 )
             }
             LoweringDiagnostic::ConstraintViolation {
@@ -331,30 +399,32 @@ impl LoweringDiagnostic {
                 constraint,
                 detail,
             } => {
-                format!(
-                    "op {:?}: constraint '{}' violated: {}",
-                    op_id, constraint, detail
-                )
+                format!("op {op_id:?}: constraint '{constraint}' violated: {detail}")
             }
             LoweringDiagnostic::Warning { op_id, message } => {
-                format!("op {:?}: {}", op_id, message)
+                format!("op {op_id:?}: {message}")
             }
         }
     }
 }
 
-// ── LoweringDiagnostic ─────────────────────────────────────────────────────
+// ── CoreAiLoweringError ─────────────────────────────────────────────────────
 
 /// Structured error from the Core ML lowering pass.
 #[derive(Debug, Clone)]
 pub struct CoreAiLoweringError {
+    /// Region identity this error belongs to.
     pub region_identity: String,
+    /// Fatal diagnostics.
     pub fatal: Vec<LoweringDiagnostic>,
+    /// Non-fatal warnings.
     pub warnings: Vec<LoweringDiagnostic>,
+    /// Optional source location.
     pub source: Option<String>,
 }
 
 impl CoreAiLoweringError {
+    /// Create a new error for the given region.
     pub fn new(region_identity: &str) -> Self {
         Self {
             region_identity: region_identity.to_string(),
@@ -364,16 +434,19 @@ impl CoreAiLoweringError {
         }
     }
 
+    /// Append a fatal diagnostic.
     pub fn with_fatal(mut self, d: LoweringDiagnostic) -> Self {
         self.fatal.push(d);
         self
     }
 
+    /// Append a warning.
     pub fn with_warning(mut self, d: LoweringDiagnostic) -> Self {
         self.warnings.push(d);
         self
     }
 
+    /// Set the source location.
     pub fn with_source(mut self, s: String) -> Self {
         self.source = Some(s);
         self
@@ -390,46 +463,59 @@ impl std::fmt::Display for CoreAiLoweringError {
             write!(f, "\n  warning: {}", d.message())?;
         }
         if let Some(ref s) = self.source {
-            write!(f, "\n  source: {}", s)?;
+            write!(f, "\n  source: {s}")?;
         }
         Ok(())
     }
 }
 
-// ── MilValueRef ───────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// Reference to an SSA value in the MIL program being built.
-#[derive(Debug, Clone)]
-pub struct MilValueRef {
-    /// SSA name in the MIL program.
-    pub ssa_name: String,
-    /// MIL type of the value.
-    pub value_type: mil_spec::ValueType,
-    /// MIL op type that produced this value.
-    pub producing_op: String,
-    /// Output index (for multi-output ops).
-    pub output_index: u32,
-}
-
-impl MilValueRef {
-    pub fn new(ssa_name: String, value_type: mil_spec::ValueType, producing_op: &str) -> Self {
-        Self {
-            ssa_name,
-            value_type,
-            producing_op: producing_op.to_string(),
-            output_index: 0,
-        }
+    #[test]
+    fn opcode_names_are_stable() {
+        assert_eq!(Opcode::Matmul.name(), "matmul");
+        assert_eq!(Opcode::Softmax.name(), "softmax");
     }
-}
 
-// ── TensorMeta ─────────────────────────────────────────────────────────────
+    #[test]
+    fn precision_policy_validates_f32() {
+        assert!(PrecisionPolicy::F32.validate().is_ok());
+        assert!(PrecisionPolicy::Fp16.validate().is_err());
+    }
 
-/// Per-tensor metadata tracked during lowering.
-#[derive(Debug, Clone)]
-pub struct TensorMeta {
-    pub dtype: mil_spec::DataType,
-    pub shape_policy: ShapePolicy,
-    pub is_input: bool,
-    pub is_output: bool,
-    pub is_constant: bool,
+    #[test]
+    fn shape_policy_validates_only_fixed() {
+        assert!(ShapePolicy::Fixed(vec![1, 4]).validate().is_ok());
+        assert!(ShapePolicy::Bounded {
+            default: vec![1, 4],
+            min: vec![1, 1],
+            max: vec![1, 8],
+        }
+        .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn coreai_target_spec_versions() {
+        assert_eq!(CoreAiTarget::MacOS13.spec_version(), 7);
+        assert_eq!(CoreAiTarget::MacOS14.spec_version(), 8);
+        assert_eq!(CoreAiTarget::MacOS15.spec_version(), 9);
+    }
+
+    #[test]
+    fn lowering_diagnostic_is_fatal() {
+        let warn = LoweringDiagnostic::Warning {
+            op_id: OperationId(1),
+            message: "hi".into(),
+        };
+        assert!(!warn.is_fatal());
+
+        let fatal = LoweringDiagnostic::ShapePolicyUnsupported {
+            op_id: OperationId(1),
+            policy: "bounded".into(),
+        };
+        assert!(fatal.is_fatal());
+    }
 }

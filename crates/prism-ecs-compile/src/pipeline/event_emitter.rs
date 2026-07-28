@@ -1,16 +1,17 @@
-//! Compiler event stream — live evidence of compiler pipeline execution.
+//! `pipeline::event_emitter` — live evidence of compiler pipeline execution.
 //!
-//! [`CompilerEvent`] captures each stage boundary of the compiler pipeline
-//! (parse, canonicalize, schedule, lower, compile, validate, package).
-//! Events are stored in order in a [`CompilerEventStream`] and can be
-//! verified as a contiguous chain via [`verify_event_chain`].
+//! This file owns the canonical authority for the [`CompilerEvent`] enum
+//! (one variant per stage boundary of the compile pipeline) and the
+//! [`CompilerEventStream`] that stores them in order with a verifiable
+//! chain digest. The stream digest is included in runtime receipts to
+//! prove which compiler pipeline produced each artifact.
 //!
 //! # Chain invariants
 //!
 //! 1. Each event has a non-decreasing timestamp (monotonic wall clock).
 //! 2. The chain always starts with `ParseStarted`.
-//! 3. Variants must alternate *Started / *Complete in the correct stage
-//!    order. No stage may be skipped.
+//! 3. Variants must alternate `*Started / *Complete` in the correct
+//!    stage order. No stage may be skipped.
 //! 4. The stream digest (SHA-256 of the serialized event list) provides
 //!    a content-addressed identity that runtime receipts reference.
 
@@ -21,91 +22,143 @@ use sha2::{Digest, Sha256};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum CompilerEvent {
     // ── Parse ──────────────────────────────────────────────────────────────
+    /// Source parsing has started.
     ParseStarted {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
+    /// Source parsing has completed.
     ParseComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Content digest of the parsed source.
         source_digest: String,
     },
     // ── Canonicalize ───────────────────────────────────────────────────────
+    /// Canonicalization has started.
     CanonicalizeStarted {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
+    /// Canonicalization has completed.
     CanonicalizeComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
     // ── Schedule ───────────────────────────────────────────────────────────
+    /// Region scheduling has started.
     ScheduleStarted {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Schedule identifier or label.
         schedule: String,
     },
+    /// Region scheduling has completed.
     ScheduleComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
     // ── Lower ──────────────────────────────────────────────────────────────
+    /// Backend lowering has started.
     LowerStarted {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Lowering target (e.g. "metal", "ane", "mlx").
         target: String,
     },
+    /// Backend lowering has completed.
     LowerComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// MLIR digest of the lowered program.
         mlir_digest: String,
     },
     // ── Compile ────────────────────────────────────────────────────────────
+    /// Per-region compilation has started.
     CompileStarted {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Identifier of the implementation being compiled.
         implementation_id: String,
     },
+    /// Per-region compilation has completed.
     CompileComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Content digest of the produced artifact.
         artifact_digest: String,
     },
     // ── Validate ───────────────────────────────────────────────────────────
+    /// Validation has started.
     ValidateStarted {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
+    /// Validation has completed.
     ValidateComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Whether validation passed.
         passed: bool,
     },
     // ── Package ────────────────────────────────────────────────────────────
+    /// Artifact packaging has started.
     PackageStarted {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
+    /// Artifact packaging has completed.
     PackageComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Identifier of the generation that was packaged.
         generation_id: String,
     },
-    // ── Lifecycle: Bind ────────────────────────────────────────────────────
+    // ── Lifecycle: Bind / Evaluation / Admission / Promotion / Cancel ──────
+    /// All tensor payloads have been resolved and bound.
     BindComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
-        num_payloads_resolved: usize,
+        /// Number of payloads that were resolved.
+        num_payloads_resolved: u64,
     },
-    // ── Lifecycle: Evaluate ───────────────────────────────────────────────
+    /// Backend evaluation of the artifact has completed.
     EvaluationComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Whether backend evaluation passed.
         passed: bool,
     },
-    // ── Lifecycle: Admission ──────────────────────────────────────────────
+    /// Admission gate passed.
     AdmissionPassed {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
+    /// Admission gate rejected the artifact.
     AdmissionRejected {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Reason for rejection.
         reason: String,
     },
-    // ── Lifecycle: Promotion ─────────────────────────────────────────────
+    /// Artifact was promoted to the next lifecycle stage.
     PromotionComplete {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Identifier of the generation that was promoted.
         generation_id: String,
     },
+    /// Promotion failed.
     PromotionFailed {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
+        /// Reason for failure.
         reason: String,
     },
-    // ── Lifecycle: Cancellation ──────────────────────────────────────────
+    // ── Lifecycle: Cancellation ────────────────────────────────────────────
+    /// The compile was cancelled by the user or upper layer.
     Cancelled {
+        /// Wall-clock timestamp in microseconds since UNIX epoch.
         timestamp: u64,
     },
 }
@@ -274,13 +327,15 @@ impl PartialEq for CompilerEvent {
 
 /// Ordered stream of compiler events with a session identity.
 ///
-/// Events are appended in the order they occur.  The [`digest`](Self::digest)
-/// method produces a SHA-256 hash of the full event list, suitable for
-/// inclusion in runtime receipts to prove which compiler pipeline produced
-/// the artifact.
+/// Events are appended in the order they occur. The
+/// [`digest`](Self::digest) method produces a SHA-256 hash of the full
+/// event list, suitable for inclusion in runtime receipts to prove
+/// which compiler pipeline produced the artifact.
 #[derive(Debug, Clone, Serialize)]
 pub struct CompilerEventStream {
+    /// Events in insertion order.
     events: Vec<CompilerEvent>,
+    /// Session identifier for this compile.
     session_id: String,
 }
 
@@ -317,10 +372,11 @@ impl CompilerEventStream {
 
     /// Compute a SHA-256 digest over the whole event list.
     ///
-    /// Uses `bincode` to produce a canonical encoding of the event sequence
-    /// so the digest is reproducible across identical compiler pipelines.
-    /// Falls back to debug-format concatenation when bincode fails (should
-    /// never happen for structurally valid events).
+    /// Uses `bincode` to produce a canonical encoding of the event
+    /// sequence so the digest is reproducible across identical
+    /// compiler pipelines. Falls back to debug-format concatenation
+    /// when bincode fails (should never happen for structurally valid
+    /// events).
     pub fn digest(&self) -> String {
         let mut hasher = Sha256::new();
         // Include session_id to bind the digest to a specific compile.
@@ -358,27 +414,42 @@ pub enum ChainVerificationResult {
     DoesNotStartWithParse,
     /// A `*Started` event has no matching `*Complete` (or vice versa).
     Unpaired {
+        /// Index of the offending event.
         index: usize,
+        /// Event variant name.
         kind: &'static str,
+        /// Human-readable detail of the violation.
         detail: String,
     },
-    /// Two events have non-contiguous timestamps (later event is before
-    /// an earlier one).
+    /// Two events have non-contiguous timestamps (later event is
+    /// before an earlier one).
     NonContiguousTimestamp {
+        /// Index of the earlier event.
         earlier_index: usize,
+        /// Index of the later event.
         later_index: usize,
+        /// Earlier event timestamp.
         earlier_ts: u64,
+        /// Later event timestamp.
         later_ts: u64,
     },
     /// A stage appears out of the required order (e.g. `CompileStarted`
     /// before `ScheduleComplete`).
     OutOfOrder {
+        /// Index of the offending event.
         index: usize,
+        /// Expected variant name at this position.
         expected: &'static str,
+        /// Actual variant name.
         actual: &'static str,
     },
     /// Duplicate event variant at this position.
-    Duplicate { index: usize, kind: &'static str },
+    Duplicate {
+        /// Index of the duplicate event.
+        index: usize,
+        /// Variant name.
+        kind: &'static str,
+    },
 }
 
 /// The canonical stage ordering required by the compiler pipeline.
@@ -464,7 +535,8 @@ fn event_timestamp(event: &CompilerEvent) -> u64 {
 /// 1. Chain is non-empty.
 /// 2. First event is `ParseStarted`.
 /// 3. Timestamps are non-decreasing.
-/// 4. Events appear in the required stage order (no missing/reordered stages).
+/// 4. Events appear in the required stage order (no missing/reordered
+///    stages).
 /// 5. No duplicate events within the sequence.
 pub fn verify_event_chain(events: &[CompilerEvent]) -> ChainVerificationResult {
     if events.is_empty() {
@@ -502,8 +574,6 @@ pub fn verify_event_chain(events: &[CompilerEvent]) -> ChainVerificationResult {
             .expect("event kind not in STAGE_ORDER — this is a bug in event_kind");
 
         // 4. Check that we haven't skipped a stage
-        //    Every event must be either the first, the next in order,
-        //    or (if it's a duplicate we reject below) the same position.
         if let Some(last_pos) = last_kind_idx {
             if pos < last_pos {
                 return ChainVerificationResult::OutOfOrder {
@@ -619,7 +689,7 @@ mod tests {
     }
 
     #[test]
-    fn test_valid_chain_verifies() {
+    fn valid_chain_verifies() {
         let stream = valid_stream();
         assert_eq!(
             verify_event_chain(stream.events()),
@@ -628,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_chain() {
+    fn empty_chain() {
         let stream = CompilerEventStream::new("empty");
         assert_eq!(
             verify_event_chain(stream.events()),
@@ -637,7 +707,7 @@ mod tests {
     }
 
     #[test]
-    fn test_does_not_start_with_parse() {
+    fn does_not_start_with_parse() {
         let mut stream = CompilerEventStream::new("no-parse");
         stream.emit(CompilerEvent::CanonicalizeStarted {
             timestamp: now_micros(),
@@ -649,7 +719,7 @@ mod tests {
     }
 
     #[test]
-    fn test_non_contiguous_timestamp() {
+    fn non_contiguous_timestamp() {
         let mut stream = CompilerEventStream::new("bad-ts");
         stream.emit(CompilerEvent::ParseStarted { timestamp: 200 });
         stream.emit(CompilerEvent::ParseComplete {
@@ -667,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn test_out_of_order() {
+    fn out_of_order_skipped_stage() {
         let mut stream = CompilerEventStream::new("ooo");
         stream.emit(CompilerEvent::ParseStarted {
             timestamp: now_micros(),
@@ -689,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn test_duplicate_event() {
+    fn duplicate_event() {
         let mut stream = CompilerEventStream::new("dup");
         stream.emit(CompilerEvent::ParseStarted {
             timestamp: now_micros(),
@@ -706,14 +776,14 @@ mod tests {
     }
 
     #[test]
-    fn test_digest_is_deterministic() {
+    fn digest_is_deterministic() {
         let s1 = valid_stream();
         let s2 = valid_stream();
         assert_eq!(s1.digest(), s2.digest());
     }
 
     #[test]
-    fn test_digest_differs_with_different_events() {
+    fn digest_differs_with_different_events() {
         let mut s1 = CompilerEventStream::new("s1");
         let mut s2 = CompilerEventStream::new("s2");
         let t = || now_micros();
@@ -728,7 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn test_partial_eq_structural() {
+    fn partial_eq_structural() {
         let a = CompilerEvent::ParseStarted { timestamp: 42 };
         let b = CompilerEvent::ParseStarted { timestamp: 42 };
         let c = CompilerEvent::ParseStarted { timestamp: 99 };
@@ -747,7 +817,7 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_final_package_complete_detected() {
+    fn missing_final_package_complete_detected() {
         let mut stream = CompilerEventStream::new("unfinished");
         let t = || now_micros();
         stream.emit(CompilerEvent::ParseStarted { timestamp: t() });
@@ -771,7 +841,7 @@ mod tests {
     }
 
     #[test]
-    fn test_events_are_serializable() {
+    fn events_are_serializable() {
         let e = CompilerEvent::CompileComplete {
             timestamp: 12345,
             artifact_digest: "deadbeef".into(),

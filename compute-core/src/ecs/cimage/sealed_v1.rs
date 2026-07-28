@@ -32,7 +32,7 @@ use sha2::{Digest, Sha256};
 
 use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::canonical::kernel_abi::{CompiledKernelArtifact, KernelAbi};
-use crate::ecs::compiler::deployment_compiler::ServingProfile;
+use prism_ecs_compile::pipeline::deployment_compiler::ServingProfile;
 use crate::ecs::plan::CodecFamily;
 // ---------------------------------------------------------------------------
 // Constants
