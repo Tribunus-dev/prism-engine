@@ -55,7 +55,6 @@ pub use crate::ecs::autopsy;
 pub use crate::ecs::backend;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub use crate::ecs::benchmark;
-pub use crate::ecs::bitnet;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
