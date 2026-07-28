@@ -10,6 +10,7 @@ pub mod entity;
 pub mod plan;
 pub mod receipt_bus;
 pub mod system;
+pub mod system_adapters;
 #[cfg(test)]
 mod tests;
 
