@@ -14,7 +14,7 @@ use crate::ecs::compilation::distill_core::{
 use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
 use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
 pub use crate::ecs::compute_image::compile::ternary::ModelConfig;
-use crate::ecs::evolution::foundation::{NumericalReceipt, PerformanceReceipt};
+use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::runtime::ecs_components::{
     CodesData, CompilationPhase, CompilationStatus, ReconstructedWeights, RefinementOutcome,
     SourceWeights, TensorBinding, TensorShape,

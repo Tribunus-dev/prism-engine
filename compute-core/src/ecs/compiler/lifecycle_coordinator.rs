@@ -24,7 +24,7 @@ use crate::ecs::cimage::generation_api::{GenerationApi, PromotionEvidence};
 use crate::ecs::cimage::generation_store::ContentStore;
 use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
 use crate::ecs::compiler::event_emitter::{now_micros, CompilerEvent, CompilerEventStream};
-use crate::ecs::evolution::foundation::{NumericalReceipt, PerformanceReceipt};
+use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 use crate::ecs::plan::CodecFamily;
 use prism_ecs_runtime::scheduling::systems::unified_scheduler::{SchedulerConfig as SchedConfig, SchedulerRunner};
@@ -380,7 +380,10 @@ impl LifecycleCoordinator {
                 f64::MAX
             },
             threshold: 0.01,
-            provenance: provenance_map.into_values().collect(),
+            provenance: provenance_map
+                .into_values()
+                .map(|p| p.compiled_byte_digest)
+                .collect(),
         };
         self.dispatch_count = total_dispatch as usize;
         self.measured_latency_ns = measured_latency_ns;

@@ -12,7 +12,7 @@ use crate::ecs::canonical::identity::{
     CandidateId, GenerationId, LogicalTensorId, PhysicalSegmentId, ReceiptId,
 };
 use crate::ecs::canonical::kernel_abi::{ArtifactProvenance, KernelAbi, KernelSemanticId};
-use crate::ecs::evolution::foundation::{NumericalReceipt, PerformanceReceipt};
+use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 
 /// Aggregate of all evidence produced during one compilation lifecycle.
 ///
