@@ -12,7 +12,7 @@
 //! the configured threshold), the manager activates fallback, releasing
 //! poisoned IOSurface arena slots for reuse.
 
-use crate::ecs::compilation::tri_lane::{AppleFallbackPlan, FallbackStatus};
+use crate::ecs::legacy_compilation::tri_lane::{AppleFallbackPlan, FallbackStatus};
 use crate::ecs::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
 
 /// Trait for injecting controlled Core ML failures in production tests.
@@ -225,7 +225,7 @@ impl FallbackPlanManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compilation::tri_lane::AppleFallbackPlan;
+    use crate::ecs::legacy_compilation::tri_lane::AppleFallbackPlan;
     use crate::ecs::compute_image::apple_shared_arena::{
         AppleSharedArena, ExecutionLane, IOSurfaceSlotManifest, LiveIOSurfaceSlot,
         SlotFailureReason, SlotReuseClass,

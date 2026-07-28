@@ -18,6 +18,7 @@ prism-ecs-quantization = { path = "../prism-ecs-quantization" }
 prism-spatial-ir = { path = "../prism-spatial-ir" }
 prism-rocm-runtime = { path = "../prism-rocm-runtime" }
 prism-amd-npu-runtime = { path = "../prism-amd-npu-runtime" }
+tokio = { version = "1", features = ["sync"] }
 prism-ane = { path = "../prism-ane", optional = true }
 prism-ane-runtime = { path = "../prism-ane-runtime", optional = true, features = ["coreml"] }
 prism-ecs-backend = { path = "../prism-ecs-backend" }
@@ -39,12 +40,23 @@ serde_json_canonicalizer = "0.3"
 [features]
 phase4_evaluation = []
 metal-dispatch = ["prism-ecs-kernel/metal-dispatch"]
+# Engine-feature passthroughs. The `compilation/` surface absorbed
+# the engine's `ecs/compilation/` directory, which is gated on the
+# engine's `prism-backend` and `mlx-backend` features. Engine
+# callers that turn those on should also enable them here so the
+# constitutional surface mirrors the engine's intent.
+prism-backend = []
+mlx-backend = []
 ane = [
     "dep:prism-ane",
     "prism-ane/ane",
     "dep:prism-ane-runtime",
     "prism-ane-runtime/coreml",
 ]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
 
 [[test]]
 name = "verification_tests"

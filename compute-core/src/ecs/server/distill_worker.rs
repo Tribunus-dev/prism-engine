@@ -9,26 +9,26 @@
 //!   5. BlockReceipt with metrics + execution provenance
 //!   6. Repeat for each block
 
-use crate::ecs::compilation::level1::checkpoint::validate_teacher_checkpoint_against_ternary;
-use crate::ecs::compilation::level1::gates::check_numerical;
-use crate::ecs::compilation::level1::kd_gate::{
+use crate::ecs::legacy_compilation::level1::checkpoint::validate_teacher_checkpoint_against_ternary;
+use crate::ecs::legacy_compilation::level1::gates::check_numerical;
+use prism_ecs_compile::compilation::level1::kd_gate::{
     compute_calibration_logits, kd_available, kd_gate, load_calibration_stream,
     score_student_logits, CalibrationStream, KdGateConfig, KdGateResult, KdReport, ParityRun,
     ParityThresholds,
 };
-use crate::ecs::compilation::level1::scheduler::{Level1Config, Level1Scheduler};
-use crate::ecs::compilation::level2::bridge::CoreMLTeacher;
-use crate::ecs::compilation::level2::compiler::ensure_teacher_bundles;
-use crate::ecs::compilation::level2::gates::{
+use crate::ecs::legacy_compilation::level1::scheduler::{Level1Config, Level1Scheduler};
+use crate::ecs::legacy_compilation::level2::bridge::CoreMLTeacher;
+use crate::ecs::legacy_compilation::level2::compiler::ensure_teacher_bundles;
+use crate::ecs::legacy_compilation::level2::gates::{
     check_joint_acceptance_rate, AcceptanceThresholds, JointAcceptanceResult,
 };
-use crate::ecs::compilation::level2::scheduler::Level2Scheduler;
-use crate::ecs::compilation::level3::gates::run_all_gates as run_level3_gates;
-use crate::ecs::compilation::level3::routing::Level3Router;
-use crate::ecs::compilation::phase_types::{
+use crate::ecs::legacy_compilation::level2::scheduler::Level2Scheduler;
+use prism_ecs_compile::compilation::level3::gates::run_all_gates as run_level3_gates;
+use prism_ecs_compile::compilation::level3::routing::Level3Router;
+use prism_ecs_compile::compilation::phase_types::{
     ElementType, PhysicalLayout, ProviderKind, ResidencyClass, TensorDescriptor,
 };
-use crate::ecs::compilation::receipt::{BlockReceipt, EngineExecutionLog, OperationalReceipt};
+use prism_ecs_compile::compilation::receipt::{BlockReceipt, EngineExecutionLog, OperationalReceipt};
 use crate::ecs::server::state::{MemoryAllocationBroker, ServerOperationalMode};
 use crate::ecs::system_adapters::planning_core::MemoryBudget;
 use std::collections::HashMap;
@@ -603,7 +603,7 @@ fn run_parity_stage(
     request: &DistillationRequest,
     total_blocks: usize,
 ) -> Result<Option<(ParityRun, String, PathBuf, CalibrationStream)>, String> {
-    use crate::ecs::compilation::level1::kd_gate::validate_token_taps;
+    use prism_ecs_compile::compilation::level1::kd_gate::validate_token_taps;
     use crate::ecs::compute_image::orchestrator::Orchestrator;
     use std::sync::atomic::{AtomicBool, Ordering};
 

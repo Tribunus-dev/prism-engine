@@ -12,11 +12,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::compilation::phase_ir::{CompilePhaseDescriptor, ShapeClass};
-use crate::ecs::compilation::region_catalogue::{
+use crate::ecs::legacy_compilation::phase_ir::{CompilePhaseDescriptor, ShapeClass};
+use crate::ecs::legacy_compilation::region_catalogue::{
     LayoutContract, RegionCatalogue, RegionCatalogueEntry,
 };
-use crate::ecs::compilation::tri_lane::AneRejectionReason;
+use crate::ecs::legacy_compilation::tri_lane::AneRejectionReason;
 
 // ── Eligibility result ────────────────────────────────────────────────────
 
@@ -250,7 +250,7 @@ fn build_qualified_buckets(
 
 /// Build evidence requirements from a matched catalogue entry.
 fn build_evidence_requirements(entry: &RegionCatalogueEntry) -> Vec<AneEvidenceRequirement> {
-    use crate::ecs::compilation::region_catalogue::EvidenceRequirement as CatReq;
+    use crate::ecs::legacy_compilation::region_catalogue::EvidenceRequirement as CatReq;
 
     let mut reqs = Vec::new();
 
@@ -513,7 +513,7 @@ pub fn analyze_ane_eligibility(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compilation::phase_ir::{
+    use crate::ecs::legacy_compilation::phase_ir::{
         ArithmeticIntensity, CompileDeterminism, CompilePlacement, MaterializationContract,
         MutationClass, PhaseId, TensorContract,
     };

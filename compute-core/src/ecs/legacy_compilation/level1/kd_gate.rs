@@ -37,9 +37,9 @@
 //! starts, and the worker checks that bound against the declared memory
 //! ceiling (Lane B preconditions, PRODUCTION_CONTRACT.md).
 //!
-//! [`teacher_forced_flat`]: crate::ecs::compilation::level1::teacher::Gemma4Teacher::teacher_forced_flat
+//! [`teacher_forced_flat`]: crate::ecs::legacy_compilation::level1::teacher::Gemma4Teacher::teacher_forced_flat
 
-use crate::ecs::compilation::distill_core::{kd_divergence_batch, top1_agreement};
+use crate::ecs::legacy_compilation::distill_core::{kd_divergence_batch, top1_agreement};
 
 /// Gate thresholds. Defaults are **initial** values chosen to be forgiving —
 /// calibrate them after the first real teacher-vs-student run on hardware
@@ -335,7 +335,7 @@ pub fn compute_calibration_logits(
     cimage: &std::path::Path,
     tokens: &[u32],
 ) -> Result<CalibrationLogits, String> {
-    use crate::ecs::compilation::level1::teacher::Gemma4Teacher;
+    use crate::ecs::legacy_compilation::level1::teacher::Gemma4Teacher;
 
     if tokens.is_empty() {
         return Err("empty calibration token stream".into());

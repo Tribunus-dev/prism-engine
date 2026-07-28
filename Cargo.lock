@@ -3951,7 +3951,9 @@ dependencies = [
  "serde_json",
  "serde_json_canonicalizer",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "uuid",
 ]

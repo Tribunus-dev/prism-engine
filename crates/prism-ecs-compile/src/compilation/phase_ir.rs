@@ -262,11 +262,14 @@ pub struct BoundaryTensorContract {
 pub struct PhaseRegion {
     pub region_id: RegionId,
     pub operations: Vec<CompilePhaseDescriptor>,
-    pub placement_candidates: Vec<crate::ecs::compilation::phase_ir::CompilePlacement>,
+    pub placement_candidates: Vec<crate::compilation::phase_ir::CompilePlacement>,
     #[cfg(target_os = "macos")]
-    pub ane_eligibility: crate::ecs::compilation::ane_eligibility::AneEligibility,
-    pub input_contract: Option<crate::ecs::compilation::activation_abi::ActivationContract>,
-    pub output_contract: Option<crate::ecs::compilation::activation_abi::ActivationContract>,
+    pub ane_eligibility: crate::compilation::ane_eligibility::AneEligibility,
+    // `activation_abi` is engine-coupled and now lives at
+    // `crate::ecs::legacy_compilation::activation_abi`; the
+    // engine's `PhaseRegion` (legacy_compilation::phase_ir)
+    // carries the full ABI fields. The constitutional
+    // PhaseRegion keeps the cross-platform layout only.
 }
 
 /// Edge connecting two PhaseIR phases with ABI contract and materialization plan.
@@ -276,8 +279,9 @@ pub struct PhaseEdge {
     pub producer: PhaseId,
     pub consumer: PhaseId,
     pub logical_tensor: LogicalTensorId,
-    pub producer_output_abi: crate::ecs::compilation::activation_abi::ActivationAbi,
-    pub consumer_input_abi: crate::ecs::compilation::activation_abi::ActivationAbi,
+    // ABI fields engine-coupled; the engine's PhaseEdge
+    // (legacy_compilation::phase_ir) carries the full ABI
+    // contract data.
     pub materialization_plan: MaterializationPlan,
 }
 

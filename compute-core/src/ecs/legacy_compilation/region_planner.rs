@@ -10,9 +10,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::compilation::ane_eligibility::AneEligibility;
-use crate::ecs::compilation::phase_ir::{PhaseRegion, RegionId};
-use crate::ecs::compilation::region_catalogue::RegionAdmission;
+use crate::ecs::legacy_compilation::ane_eligibility::AneEligibility;
+use crate::ecs::legacy_compilation::phase_ir::{PhaseRegion, RegionId};
+use crate::ecs::legacy_compilation::region_catalogue::RegionAdmission;
 #[cfg(feature = "legacy_mutations")]
 use crate::model_adapter::CanonicalModel;
 
@@ -329,18 +329,18 @@ pub fn build_phase_regions(plan: &RegionExecutionPlan) -> Vec<PhaseRegion> {
     for island in &plan.coreai_islands {
         // Map CoreAiIsland to PhaseRegion
         let region_id = island.island_id as RegionId;
-        let ops: Vec<crate::ecs::compilation::phase_ir::CompilePhaseDescriptor> = Vec::new(); // stub
+        let ops: Vec<crate::ecs::legacy_compilation::phase_ir::CompilePhaseDescriptor> = Vec::new(); // stub
         let eligibility = AneEligibility {
-            status: crate::ecs::compilation::ane_eligibility::AneEligibilityStatus::Deferred,
-            shape_class: crate::ecs::compilation::ane_eligibility::AneShapeClass::MetalOnly,
+            status: crate::ecs::legacy_compilation::ane_eligibility::AneEligibilityStatus::Deferred,
+            shape_class: crate::ecs::legacy_compilation::ane_eligibility::AneShapeClass::MetalOnly,
             rejection_reason: None,
             qualified_buckets: vec![],
-            input_layout_contract: crate::ecs::compilation::region_catalogue::LayoutContract {
+            input_layout_contract: crate::ecs::legacy_compilation::region_catalogue::LayoutContract {
                 layout: String::new(),
                 preferred: false,
                 stride_constraints: vec![],
             },
-            output_layout_contract: crate::ecs::compilation::region_catalogue::LayoutContract {
+            output_layout_contract: crate::ecs::legacy_compilation::region_catalogue::LayoutContract {
                 layout: String::new(),
                 preferred: false,
                 stride_constraints: vec![],

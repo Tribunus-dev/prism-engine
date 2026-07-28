@@ -490,9 +490,9 @@ mod tests {
             slot_id: 0,
             arena_id: 0,
             activation_abi: ActivationAbi::MetalOnly(
-                crate::ecs::compilation::activation_abi::MetalOnlyParams {
+                prism_ecs_compile::compilation::activation_abi::MetalOnlyParams {
                     name: "metal_buffer".into(),
-                    dtype: crate::ecs::compilation::phase_ir::TensorDtype::Float16,
+                    dtype: prism_ecs_compile::compilation::phase_ir::TensorDtype::Float16,
                     byte_count: 4096,
                 },
             ),

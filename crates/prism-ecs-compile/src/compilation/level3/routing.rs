@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use super::super::bridge_provider::{
     BridgeCapability, BridgePlan, BridgeProvider, BridgeReceipt, BridgeVerification,
 };
-use super::super::phase_types::TensorDescriptor;
+use crate::compilation::phase_types::TensorDescriptor;
 use super::providers::{
     detected_coreai_version, CapabilityFingerprint, MaterializationProvider, SharedRouteProvider,
     StitchedProvider,
@@ -291,7 +291,7 @@ impl Default for Level3Router {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
+    use crate::compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
 
     fn dummy_descriptor() -> TensorDescriptor {
         TensorDescriptor {

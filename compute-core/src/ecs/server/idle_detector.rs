@@ -3,7 +3,7 @@
 //! Tracks time since the last incoming request and coordinates cancellation
 //! of background work when a new request arrives during an idle pass.
 
-use crate::ecs::compilation::cancel::{AbortReason, AbortToken, CancelToken};
+use prism_ecs_compile::compilation::cancel::{AbortReason, AbortToken, CancelToken};
 use std::time::{Duration, Instant};
 
 /// Tracks server idle state and manages cancellation of idle-time background work.

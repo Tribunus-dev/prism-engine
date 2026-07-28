@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 pub use prism_ecs_kernel::backend::placement::ExecutionLane;
-pub use crate::ecs::compilation::tri_lane::{
+pub use crate::ecs::legacy_compilation::tri_lane::{
     ExecutionEpoch, LaneDependency, NumericalPolicy, ShapeClass,
 };
 
@@ -256,8 +256,8 @@ pub struct AppleTriLaneArtifactManifest {
     pub cpu_artifacts: Vec<CpuArtifactManifest>,
     #[serde(default)]
     pub shared_events: Vec<SharedEventContractManifest>,
-    pub epochs: Vec<crate::ecs::compilation::tri_lane::ExecutionEpoch>,
-    pub dependencies: Vec<crate::ecs::compilation::tri_lane::LaneDependency>,
+    pub epochs: Vec<crate::ecs::legacy_compilation::tri_lane::ExecutionEpoch>,
+    pub dependencies: Vec<crate::ecs::legacy_compilation::tri_lane::LaneDependency>,
     pub fallback: AppleFallbackManifest,
     pub numerical_policy: AppleNumericalPolicy,
     pub admission: AppleTriLaneAdmissionManifest,

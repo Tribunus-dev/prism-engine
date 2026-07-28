@@ -509,7 +509,7 @@ mod tests {
     fn test_coreai_iosurface_warmup_with_arena() {
         use crate::ecs::backend::coreai_lane::{CoreAiLane, CoreAiSubgraph, CoreAiSubgraphStatus};
         use crate::ecs::backend::placement::ExecutionLane;
-        use crate::ecs::compilation::tri_lane::{AneLaneLifecycle, CoreAiWarmupContract};
+        use crate::ecs::legacy_compilation::tri_lane::{AneLaneLifecycle, CoreAiWarmupContract};
         use crate::ecs::compute_image::apple_shared_arena::{
             AppleSharedArena, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
