@@ -37,7 +37,12 @@ pub use agent_exec::*;
 pub use agent_plan::*;
 pub use agent_reflection::*;
 pub use artifact::*;
-pub use canonical::*;
+// Note: `pub mod canonical;` is declared above; the canonical
+// surface is NOT glob-re-exported at the crate root because the
+// canonical `ReceiptId` / `Timestamp` types would otherwise be
+// ambiguous with the `types::ReceiptId` / `types::Timestamp`
+// already at the crate root. Callers should write
+// `prism_ecs_constitutional::canonical::*` to disambiguate.
 pub use command::*;
 pub use compilation::*;
 pub use device::*;

@@ -11,8 +11,8 @@ use super::{
     BackendCompileError, BackendCompiler, BackendKernelIr, BackendTarget, LoweringContext,
     ToolchainContext,
 };
-use crate::ecs::canonical::identity::{TargetIdentity, ToolchainIdentity};
-use crate::ecs::canonical::kernel_abi::{
+use prism_ecs_constitutional::canonical::identity::{TargetIdentity, ToolchainIdentity};
+use prism_ecs_constitutional::canonical::kernel_abi::{
     compute_abi_digest, ArtifactProvenance, CompiledKernelArtifact, KernelAbi, KernelGroup,
     KernelImplementationId, KernelSemanticId,
 };
@@ -309,8 +309,8 @@ impl std::fmt::Debug for MetalBackendCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::canonical::execution_graph::{ExecutionLane, RegionId};
-    use crate::ecs::canonical::kernel_abi::{
+    use prism_ecs_constitutional::canonical::execution_graph::{ExecutionLane, RegionId};
+    use prism_ecs_constitutional::canonical::kernel_abi::{
         DispatchGeometryPolicy, KernelImplementationClass, MetalImplementationRegistration,
         SpecializationParameters,
     };

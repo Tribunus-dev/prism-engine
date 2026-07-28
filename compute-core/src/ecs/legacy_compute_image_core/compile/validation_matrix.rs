@@ -14,7 +14,7 @@ use std::ffi::c_void;
 
 use super::kernel_types::{KernelReceipt, PageSidecarHeader, ProjectionParams};
 use super::ternary_pipeline::{self, QuantConfig, QuantizedTensor};
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::metal_backend::catalogue_source_for;
 
 // ── Public types ──────────────────────────────────────────────────────────

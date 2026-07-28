@@ -7,11 +7,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::canonical::identity::{
+use prism_ecs_constitutional::canonical::generation::CimageGeneration;
+use prism_ecs_constitutional::canonical::identity::{
     CandidateId, GenerationId, LogicalTensorId, PhysicalSegmentId, ReceiptId,
 };
-use crate::ecs::canonical::kernel_abi::{ArtifactProvenance, KernelAbi, KernelSemanticId};
+use prism_ecs_constitutional::canonical::kernel_abi::{ArtifactProvenance, KernelAbi, KernelSemanticId};
 use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 
 /// Aggregate of all evidence produced during one compilation lifecycle.

@@ -12,8 +12,8 @@
 
 use std::collections::HashMap;
 
-use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::canonical::identity::*;
+use prism_ecs_constitutional::canonical::generation::CimageGeneration;
+use prism_ecs_constitutional::canonical::identity::*;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -424,8 +424,8 @@ impl<'a> PromotionTransaction<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::canonical::generation::*;
-    use crate::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
+    use prism_ecs_constitutional::canonical::generation::*;
+    use prism_ecs_constitutional::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
     use crate::ecs::execution_profile::PhysicalTileLayout;
     use crate::ecs::plan::CodecFamily;
     use std::collections::BTreeMap;

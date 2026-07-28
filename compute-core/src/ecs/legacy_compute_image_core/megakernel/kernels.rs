@@ -10,7 +10,7 @@
 
 use metal::*;
 
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::metal_backend::catalogue_source_for;
 use std::sync::LazyLock;
 

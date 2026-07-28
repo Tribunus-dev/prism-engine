@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use metal::{ComputePipelineState, Device, Library};
 
-use tribunus_compute_core::ecs::canonical::kernel_abi::{
+use prism_ecs_constitutional::canonical::kernel_abi::{
     ArtifactProvenance, CompiledKernelArtifact,
 };
 use tribunus_compute_core::execution_plan::pso_cache::{PsoCache as PsoCacheTrait, PsoError};

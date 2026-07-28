@@ -6,9 +6,9 @@
 //! vs g128, INT8 g32 vs g128, and gate-up vs down-residual patterns produce
 //! distinct cache entries.
 
-use crate::ecs::canonical::execution_graph::ExecutionLane;
-use crate::ecs::canonical::execution_graph::RegionId;
-use crate::ecs::canonical::kernel_abi::{
+use prism_ecs_constitutional::canonical::execution_graph::ExecutionLane;
+use prism_ecs_constitutional::canonical::execution_graph::RegionId;
+use prism_ecs_constitutional::canonical::kernel_abi::{
     DispatchGeometryPolicy, KernelAbi, KernelGroup, KernelImplementationClass, KernelSemanticId,
     SpecializationParameters,
 };

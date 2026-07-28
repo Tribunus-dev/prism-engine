@@ -1,4 +1,4 @@
-use crate::ecs::canonical::identity::GenerationId;
+use prism_ecs_constitutional::canonical::identity::GenerationId;
 
 /// Crash recovery — ensure content-store integrity after interruption.
 /// Plan Section 2: "Immutable history: Existing generations are never

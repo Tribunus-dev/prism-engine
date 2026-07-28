@@ -26,9 +26,9 @@ use metal::*;
 use std::sync::mpsc;
 /// Logits per slot: 1 main head + N MTP heads, each VOCAB_SIZE half values.
 pub const LOGITS_PER_SLOT: u64 = (1 + NUM_MTP_HEADS as u64) * VOCAB_SIZE as u64 * 2;
-use crate::ecs::canonical::execution_graph::ExecutionLane;
-use crate::ecs::canonical::identity::RegionId;
-use crate::ecs::canonical::kernel_abi::{
+use prism_ecs_constitutional::canonical::execution_graph::ExecutionLane;
+use prism_ecs_constitutional::canonical::identity::RegionId;
+use prism_ecs_constitutional::canonical::kernel_abi::{
     BufferBinding, DispatchGeometryPolicy, KernelAbi, KernelGroup, KernelImplementationClass,
     KernelSemanticId, SpecializationParameters,
 };

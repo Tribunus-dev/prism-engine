@@ -8,8 +8,8 @@
 //! a concurrency hint. The graph is guaranteed acyclic at emission time
 //! (see [`EmittedPhaseGraph::validate`]).
 
-use crate::ecs::canonical::KernelSemanticId;
-use crate::ecs::canonical::LogicalTensorId;
+use prism_ecs_constitutional::canonical::KernelSemanticId;
+use prism_ecs_constitutional::canonical::LogicalTensorId;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fmt;

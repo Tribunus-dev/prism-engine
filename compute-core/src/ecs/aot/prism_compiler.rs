@@ -7,14 +7,14 @@
 //! PR F — Collapse entry points. Old overlapping entry points are
 //! deleted once their callers route through PrismCompiler.
 
-use crate::ecs::canonical::compile_plan::{
+use prism_ecs_constitutional::canonical::compile_plan::{
     compile_timestamp, CimageBuildInput, CompileEvent, CompileEventStream, CompileOutcome,
     CompilePlan, CompileRequest, CompilerStage, InspectRequest, ModelInspection,
 };
-use crate::ecs::canonical::execution_graph::ExecutionGraph;
-use crate::ecs::canonical::kernel_abi::KernelPlan;
-use crate::ecs::canonical::model_ir::ModelIr;
-use crate::ecs::canonical::representation::RepresentationPlan;
+use prism_ecs_constitutional::canonical::execution_graph::ExecutionGraph;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelPlan;
+use prism_ecs_constitutional::canonical::model_ir::ModelIr;
+use prism_ecs_constitutional::canonical::representation::RepresentationPlan;
 
 /// Frontend trait — accepts a model source and produces canonical ModelIr.
 pub trait ModelFrontend: Send + Sync {
@@ -416,8 +416,8 @@ impl PrismCompiler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::canonical::compile_plan::{CompileRequest, InspectRequest};
-    use crate::ecs::canonical::model_ir::*;
+    use prism_ecs_constitutional::canonical::compile_plan::{CompileRequest, InspectRequest};
+    use prism_ecs_constitutional::canonical::model_ir::*;
     use std::collections::HashMap;
 
     const _GGUF_FRONTEND_ENABLED: bool = cfg!(feature = "prism-backend");
@@ -652,7 +652,7 @@ fn build_outcome_from_image(
     output_dir: &str,
     request: &CompileRequest,
 ) -> CompileOutcome {
-    use crate::ecs::canonical::kernel_abi::{
+    use prism_ecs_constitutional::canonical::kernel_abi::{
         CompiledKernelArtifact, DispatchGeometryPolicy, KernelAbi, KernelImplementationId,
         KernelSemanticId,
     };

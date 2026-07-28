@@ -4,7 +4,7 @@
 //! admission → binding → refinement compilation pipeline.  Components are
 //! attached to entities representing individual weight matrices.
 
-use crate::ecs::canonical::generation::CimageGeneration;
+use prism_ecs_constitutional::canonical::generation::CimageGeneration;
 use crate::ecs::legacy_cimage::generation_store::ContentStore;
 use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
 use prism_ecs_compile::compilation::distill_core::OnPolicyRefinementResult;

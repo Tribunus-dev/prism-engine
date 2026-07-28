@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use metal::{ComputePipelineState, Device, Library};
 
-use crate::ecs::canonical::kernel_abi::{ArtifactProvenance, CompiledKernelArtifact};
+use prism_ecs_constitutional::canonical::kernel_abi::{ArtifactProvenance, CompiledKernelArtifact};
 use crate::execution_plan::pso_cache::{PsoCache as PsoCacheTrait, PsoError};
 use crate::execution_plan::{FunctionConstantSet, KernelSpecializationKey};
 

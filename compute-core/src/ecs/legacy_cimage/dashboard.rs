@@ -54,9 +54,9 @@ mod tests {
 
     #[test]
     fn test_evidence_summary_after_promote() {
-        use crate::ecs::canonical::generation::{CimageGeneration, RepresentationBinding};
-        use crate::ecs::canonical::identity::*;
-        use crate::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
+        use prism_ecs_constitutional::canonical::generation::{CimageGeneration, RepresentationBinding};
+        use prism_ecs_constitutional::canonical::identity::*;
+        use prism_ecs_constitutional::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
         use crate::ecs::execution_profile::PhysicalTileLayout;
         use crate::ecs::plan::CodecFamily;
         use std::collections::BTreeMap;

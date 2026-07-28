@@ -8,7 +8,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
-use crate::ecs::canonical::identity::ReceiptId;
+use prism_ecs_constitutional::canonical::identity::ReceiptId;
 
 /// Content-addressed store for immutable receipt records.
 ///

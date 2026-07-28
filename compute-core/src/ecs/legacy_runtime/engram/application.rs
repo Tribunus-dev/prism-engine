@@ -8,7 +8,7 @@ use crate::ecs::training_target::spec::EngramApplication;
 use sha2::{Digest, Sha256};
 
 #[cfg(feature = "metal-dispatch")]
-use crate::ecs::canonical::kernel_abi::{DispatchGeometryPolicy, KernelAbi};
+use prism_ecs_constitutional::canonical::kernel_abi::{DispatchGeometryPolicy, KernelAbi};
 #[cfg(feature = "metal-dispatch")]
 use crate::ecs::metal_backend::compiler::MetalBackendCompiler;
 

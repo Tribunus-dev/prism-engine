@@ -38,7 +38,7 @@ use crate::ecs::cimage_runtime::CimageRuntimeContext;
 use crate::execution_plan::backend_capability::BackendLoweringTarget;
 use crate::execution_plan::HardwareProfileId;
 
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::legacy_cimage::CImagePayloadRef;
 use crate::ecs::cimage_runtime::bitnet_layer_resolver::BitNetLayerTensorResolver;
 use prism_ecs_quantization::bitnet::reference::bitnet_decoder_layer_reference;

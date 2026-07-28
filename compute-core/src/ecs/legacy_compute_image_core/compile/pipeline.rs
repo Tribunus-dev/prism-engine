@@ -5,7 +5,7 @@ use super::emit::{
     build_source_identity, compile_audio_encoder_tensors, compile_vision_encoder_tensors,
     compute_manifest_hash, emit_binding_set,
 };
-use crate::ecs::canonical::kernel_abi::KernelSemanticId;
+use prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId;
 <<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/pipeline.rs
 use crate::ecs::compute_image::cimage_packer::pack_cimage_from_dir;
 use crate::ecs::compute_image::compatibility::CompatibilityMatrix;
@@ -2316,12 +2316,12 @@ fn build_canonical_outcome(
     rep_plan: crate::ecs::canonical::RepresentationPlan,
     output_dir: &str,
 ) -> crate::Result<(CompiledImage, crate::ecs::canonical::CompileOutcome)> {
-    use crate::ecs::canonical::compile_plan::CompilerStage;
-    use crate::ecs::canonical::kernel_abi::{
+    use prism_ecs_constitutional::canonical::compile_plan::CompilerStage;
+    use prism_ecs_constitutional::canonical::kernel_abi::{
         CompiledKernelArtifact, DispatchGeometryPolicy, KernelAbi, KernelImplementationId,
         KernelSemanticId,
     };
-    use crate::ecs::canonical::{
+    use prism_ecs_constitutional::canonical::{
         CimageBuildInput, CompileEventStream, CompileOutcome, CompilePlan, CompiledKernelEntry,
         CompilerReceipt, CompilerReceiptSet, ExecutionGraph, KernelPlan, MemoryPlan,
         RuntimeStatePlan,
@@ -2467,7 +2467,7 @@ fn build_canonical_model_ir_from_manifest(
     compiled: &CompiledImage,
     output_dir: &str,
 ) -> crate::ecs::canonical::ModelIr {
-    use crate::ecs::canonical::{
+    use prism_ecs_constitutional::canonical::{
         ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
         SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
     };
@@ -2543,7 +2543,7 @@ fn build_model_ir_from_config(
     manifest: &crate::ecs::legacy_compute_image_core::manifest::Manifest,
     source_dir: &str,
 ) -> crate::Result<crate::ecs::canonical::ModelIr> {
-    use crate::ecs::canonical::{
+    use prism_ecs_constitutional::canonical::{
         ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
         SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
     };
@@ -2626,7 +2626,7 @@ fn build_model_ir_from_config(
 fn build_canonical_representation_plan(
     compiled: &CompiledImage,
 ) -> crate::ecs::canonical::RepresentationPlan {
-    use crate::ecs::canonical::{
+    use prism_ecs_constitutional::canonical::{
         RepresentationPlan, TensorId, TensorRepresentation, TensorRepresentationEntry,
     };
 

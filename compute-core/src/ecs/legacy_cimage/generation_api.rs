@@ -7,10 +7,10 @@
 //! including listing generations, promoting new generations atomically,
 //! rolling back to a parent generation, and storing content-addressed payloads.
 
-use crate::ecs::canonical::generation::CimageGeneration;
-use crate::ecs::canonical::generation::EngramBinding;
-use crate::ecs::canonical::identity::*;
-use crate::ecs::canonical::provenance::{LifecycleReceiptBundle, PromotionRequest};
+use prism_ecs_constitutional::canonical::generation::CimageGeneration;
+use prism_ecs_constitutional::canonical::generation::EngramBinding;
+use prism_ecs_constitutional::canonical::identity::*;
+use prism_ecs_constitutional::canonical::provenance::{LifecycleReceiptBundle, PromotionRequest};
 use crate::ecs::legacy_cimage::generation_store::{ContentStore, GenerationStore, PromotionTransaction};
 use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::training_target::engram::trainer::TrainedEngram;
@@ -251,8 +251,8 @@ impl GenerationApi {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::canonical::generation::RepresentationBinding;
-    use crate::ecs::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
+    use prism_ecs_constitutional::canonical::generation::RepresentationBinding;
+    use prism_ecs_constitutional::canonical::{ExecutionGraph, MemoryPlan, RuntimeStatePlan};
     use crate::ecs::execution_profile::PhysicalTileLayout;
     use crate::ecs::plan::CodecFamily;
     use std::collections::BTreeMap;
@@ -313,7 +313,7 @@ mod tests {
             created_at: Timestamp("t".into()),
         };
 
-        use crate::ecs::canonical::identity::{EngramArtifactId, EngramId, RegionId, TensorShape};
+        use prism_ecs_constitutional::canonical::identity::{EngramArtifactId, EngramId, RegionId, TensorShape};
         use crate::ecs::training_target::spec::{
             EngramApplication, EngramArtifact, EngramCodec, EngramInsertionContract,
             EngramMemoryKind, EngramOperation, EngramParameterSchema, EngramRoutingPolicy,

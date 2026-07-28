@@ -3,12 +3,12 @@
 //! Each implementation (megakernel, per-layer, fused, primitive) registers
 //! against a semantic contract with its ABI and supported configurations.
 
-use crate::ecs::canonical::kernel_abi::{
+use prism_ecs_constitutional::canonical::kernel_abi::{
     BufferBinding, ConstantBinding, DispatchGeometryPolicy, KernelAbi, KernelImplementationId,
     KernelSemanticId, MetalImplementationRegistration,
 };
-use crate::ecs::canonical::model_ir::ArchitectureId;
-use crate::ecs::canonical::representation::TensorRepresentation;
+use prism_ecs_constitutional::canonical::model_ir::ArchitectureId;
+use prism_ecs_constitutional::canonical::representation::TensorRepresentation;
 use std::sync::LazyLock;
 // ── Gemma 4 kernel semantic IDs ─────────────────────────────────────────────
 /// Kernel semantic IDs and expected source paths for all Gemma 4 decomposed
