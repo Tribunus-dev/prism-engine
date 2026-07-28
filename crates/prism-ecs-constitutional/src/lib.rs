@@ -9,6 +9,7 @@ pub mod agent_state;
 pub mod artifact;
 pub mod command;
 pub mod compilation;
+pub mod config;
 pub mod device;
 pub mod distributed;
 pub mod driver;

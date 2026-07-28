@@ -25,3 +25,10 @@ strum = { workspace = true }
 parking_lot = { workspace = true }
 prism-ecs-quantization = { path = "../prism-ecs-quantization", optional = true }
 prism-ecs-ir = { path = "../prism-ecs-ir", optional = true }
+# Configuration surface (`config::parser` and `config::network`):
+# - `sha2` is the SHA-256 hash used to derive the config provenance
+#   digest on the `ModelManifest`.
+# - `toml` parses the optional `config.toml` server config file.
+# Both are pure-Rust crates; they add no engine-internal coupling.
+sha2 = "0.10"
+toml = "0.8"
