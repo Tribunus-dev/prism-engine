@@ -17,7 +17,7 @@ use crate::ecs::compute_image::megakernel::kernels::{
     SHADER_SRC, TTS_FFN_INTERMEDIATE, TTS_HIDDEN, TTS_LAYERS, TTS_MAX_CONTEXT, TTS_NUM_KV_HEADS,
     TTS_TILES, TTS_TILES_FFN, TTS_VOCAB,
 };
-use crate::nf4tile640::Nf4Weights;
+use prism_ecs_quantization::nf4tile640::Nf4Weights;
 use metal::*;
 
 /// Megakernel variant for the Qwen3-TTS Talker (28-layer AR decoder).

@@ -15,7 +15,7 @@ use crate::ecs::tts::code_predictor::TtsCodePredictor;
 use crate::ecs::tts::codec::MimiCodec;
 use crate::ecs::tts::talker::TtsMegakernel;
 use crate::ecs::tts::talker::TtsWeightBindings;
-use crate::nf4tile640::{self, Nf4Weights};
+use prism_ecs_quantization::nf4tile640::{self, Nf4Weights};
 use metal::Device;
 
 /// TTS pipeline: text tokens → PCM waveform via Talker AR decode,

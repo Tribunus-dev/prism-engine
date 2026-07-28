@@ -8,7 +8,7 @@
 //! reference implementation. Metal dispatch via MPSGraph is reserved for a
 //! follow-up.
 
-use crate::nf4tile640::{self, Nf4Weights};
+use prism_ecs_quantization::nf4tile640::{self, Nf4Weights};
 use bytemuck;
 
 // ════════════════════════════════════════════════════════════════════════════

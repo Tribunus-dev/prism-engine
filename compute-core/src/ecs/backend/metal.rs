@@ -1335,7 +1335,7 @@ impl TensorBackend for MetalBackend {
         }
 
         // Validate sizes for the compiler's nf4tile640 format.
-        use crate::nf4tile640;
+        use prism_ecs_quantization::nf4tile640;
         let tiles_per_col = n.div_ceil(nf4tile640::TILE_ELEMENTS);
         let total_tiles = k * tiles_per_col;
         let expected_codes_size = total_tiles * nf4tile640::PACKED_BYTES_PER_TILE; // 320

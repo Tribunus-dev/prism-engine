@@ -33,7 +33,7 @@ use sha2::{Digest, Sha256};
 use crate::ecs::cimage::*;
 use crate::ecs::quantization::contract::TernaryCandidateRecipe;
 use crate::execution_plan::{CodecFamily, DType, HardwareProfileId};
-use crate::nf4tile640::{
+use prism_ecs_quantization::nf4tile640::{
     pack_int8_weights, pack_nf4_weights, GROUPS_PER_TILE, GROUP_SIZE, PACKED_BYTES_PER_TILE,
     SCALES_F32_PER_TILE, TILE_ELEMENTS,
 };
@@ -1741,5 +1741,5 @@ mod tests {
         assert_eq!(shard.payloads.len(), 27);
     }
 
-    use crate::nf4tile640::{unpack_int8_weights, unpack_nf4_weights};
+    use prism_ecs_quantization::nf4tile640::{unpack_int8_weights, unpack_nf4_weights};
 }
