@@ -11,6 +11,7 @@ half = { workspace = true }
 hex = { workspace = true }
 libc = { version = "0.2", optional = true }
 parking_lot = { version = "0.12", optional = true }
+prism-ecs-backend = { path = "../prism-ecs-backend" }
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-ir = { path = "../prism-ecs-ir" }
 serde = { workspace = true }
