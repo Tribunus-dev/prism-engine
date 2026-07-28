@@ -17,6 +17,11 @@ pub mod mailbox;
 pub mod ntb_dma;
 pub mod workgroup;
 
+/// Runtime-facing tool surface (port of the engine's
+/// `compute-core/src/ecs/tools/`; constitutional home — see
+/// `changelogs/2026-07-27-engine-subsystem-deletion-tools.md`).
+pub mod tools;
+
 /// CImage binary format types (ported from compute-core).
 pub mod cimage_types;
 
