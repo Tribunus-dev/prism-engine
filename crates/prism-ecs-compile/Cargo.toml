@@ -45,6 +45,10 @@ ane = [
     "prism-ane-runtime/coreml",
 ]
 
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+
 [[test]]
 name = "verification_tests"
 path = "tests/verification_tests.rs"

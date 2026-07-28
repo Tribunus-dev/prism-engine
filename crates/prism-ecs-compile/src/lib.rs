@@ -214,6 +214,13 @@ pub use compilation_entity::{CompilationEntity, CompilationStatus};
 pub mod compilation_systems;
 pub use compilation_systems::*;
 
+// `compilation/` — constitutional surface for the engine's legacy
+// `compute-core/src/ecs/compilation/` directory (37 files, 17,165 LOC),
+// absorbed on 2026-07-27. Houses phase IR, activation ABI, distill
+// compiler Levels 1–3, bench metrics, ANE calibration lane, region
+// catalogue, and tri-lane (Apple three-lane execution).
+pub mod compilation;
+
 pub mod runtime;
 pub use runtime::{CImageXdnaRouteDispatcher, ExecutionMode, RuntimeError, RuntimeModel};
 pub mod observability;
