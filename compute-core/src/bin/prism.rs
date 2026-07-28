@@ -438,12 +438,12 @@ fn pull(repo: &str) {
     eprintln!("ok");
 
     let cfg =
-        tribunus_compute_core::lut::graph::UnifiedConfig::from_file(&out_dir.join("config.json"))
+        prism_ecs_codec::lut::graph::UnifiedConfig::from_file(&out_dir.join("config.json"))
             .unwrap_or_else(|e| {
                 eprintln!("config: {e}");
                 std::process::exit(1);
             });
-    let graph = tribunus_compute_core::lut::graph::ModelGraph::build(&cfg);
+    let graph = prism_ecs_codec::lut::graph::ModelGraph::build(&cfg);
     eprintln!(
         "  Graph: {} layers, {} nodes",
         graph.num_layers,
@@ -528,7 +528,7 @@ fn pull(repo: &str) {
     // 5. Compile to .cimage.
     eprintln!("  [4/4] compiling... ");
     let out_cimage = cimage_path(&name);
-    if let Err(e) = tribunus_compute_core::lut::compiler::compile_to_cimage(
+    if let Err(e) = tribunus_compute_core::lut_compile::compile_to_cimage(
         &graph,
         &safetensors_dir,
         &out_cimage,
@@ -590,17 +590,17 @@ fn compile_model(name: &str) {
         "[prism:compile] Building graph from {}... ",
         dir.join("config.json").display()
     );
-    let cfg = tribunus_compute_core::lut::graph::UnifiedConfig::from_file(&dir.join("config.json"))
+    let cfg = prism_ecs_codec::lut::graph::UnifiedConfig::from_file(&dir.join("config.json"))
         .unwrap_or_else(|e| {
             eprintln!("config error: {e}");
             std::process::exit(1);
         });
-    let graph = tribunus_compute_core::lut::graph::ModelGraph::build(&cfg);
+    let graph = prism_ecs_codec::lut::graph::ModelGraph::build(&cfg);
     eprintln!("{} layers, {} nodes", graph.num_layers, graph.nodes.len());
 
     let out = cimage_path(name);
     eprintln!("[prism:compile] Compiling to {}...", out.display());
-    match tribunus_compute_core::lut::compiler::compile_to_cimage(
+    match tribunus_compute_core::lut_compile::compile_to_cimage(
         &graph,
         &safetensors_dir,
         &out,
@@ -702,7 +702,7 @@ fn compile_gguf(
     if legacy_lut {
         #[cfg(feature = "prism-backend")]
         {
-            match tribunus_compute_core::lut::compiler::compile_gguf_to_cimage(
+            match tribunus_compute_core::lut_compile::compile_gguf_to_cimage(
                 gguf_path,
                 output_path,
             ) {
