@@ -19,7 +19,7 @@ use tribunus_compute_core::compute_image;
 use tribunus_compute_core::config::CompileQuantMode;
 use tribunus_compute_core::config::HardwareTarget;
 use tribunus_compute_core::kv_cache::KvCache;
-use tribunus_compute_core::nf4tile640::{
+use prism_ecs_quantization::nf4tile640::{
     nf4_dequantize, pack_int8_weights, pack_nf4_tile_with_group_size, pack_nf4_weights,
     pack_nf4_weights_awls, pack_symmetric_int4_tile, unpack_int8_weights, unpack_nf4_weights,
 };
@@ -2613,14 +2613,14 @@ fn cmd_quant_sweep(args: &[String]) -> Result<(), String> {
                     "SymmetricNormalFloat" => Nf4CodebookId::SymmetricNormalFloat,
                     _ => Nf4CodebookId::PrismCurrent,
                 };
-                let cb = tribunus_compute_core::nf4tile640::nf4_codebook(cb_id);
+                let cb = prism_ecs_quantization::nf4tile640::nf4_codebook(cb_id);
                 let gs = params
                     .get("group_size")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(64) as usize;
                 let (c, s, b) = tribunus_compute_core::quantization::sweep::ane_validation::pack_nf4_weights_with_codebook(
                     &loaded, in_f as u32, out_f as u32, cb, gs);
-                let recon = tribunus_compute_core::nf4tile640::unpack_nf4_weights_with_group_size_and_codebook(
+                let recon = prism_ecs_quantization::nf4tile640::unpack_nf4_weights_with_group_size_and_codebook(
                     &c, &s, &b, in_f, out_f, gs, cb);
                 recon
             } else if matches!(

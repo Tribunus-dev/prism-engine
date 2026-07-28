@@ -19,7 +19,7 @@ use tribunus_compute_core::arena::Arena;
 use tribunus_compute_core::backend::ane_backend::AneBackend;
 use tribunus_compute_core::backend::metal::MetalBackend;
 use tribunus_compute_core::backend::{DType, QuantizedMatmulOp, TensorBackend};
-use tribunus_compute_core::nf4tile640::{
+use prism_ecs_quantization::nf4tile640::{
     dequant_matmul_reference, pack_nf4_weights, validate_matmul, GROUP_SIZE, TILE_ELEMENTS,
 };
 
@@ -148,7 +148,7 @@ fn test_cpu_nf4_dequant_reference() {
     .expect("CPU dequant_matmul_reference should succeed");
 
     // Naive reference: unpack weights, then matmul.
-    let unpacked = tribunus_compute_core::nf4tile640::unpack_nf4_weights(
+    let unpacked = prism_ecs_quantization::nf4tile640::unpack_nf4_weights(
         &packed_codes,
         &scales,
         &biases,

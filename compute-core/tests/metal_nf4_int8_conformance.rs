@@ -26,7 +26,7 @@ use tribunus_compute_core::compute_image::compile::kernel_registry::KernelRegist
 use tribunus_compute_core::compute_image::compile::kernel_types::{
     KernelReceipt, ProjectionParams,
 };
-use tribunus_compute_core::nf4tile640::{
+use prism_ecs_quantization::nf4tile640::{
     pack_int8_weights, pack_nf4_weights, unpack_int8_weights, unpack_nf4_weights, TILE_ELEMENTS,
 };
 

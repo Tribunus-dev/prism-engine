@@ -9,7 +9,7 @@ use hf_hub::api::sync::Api;
 use memmap2::Mmap;
 use safetensors::SafeTensors;
 
-use tribunus_compute_core::nf4tile640::{
+use prism_ecs_quantization::nf4tile640::{
     pack_nf4_weights, pack_nf4_weights_awls, unpack_nf4_weights, GROUPS_PER_TILE, GROUP_SIZE,
     TILE_ELEMENTS,
 };
