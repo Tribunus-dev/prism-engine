@@ -23,8 +23,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
 
-use crate::ecs::decode_attribution::backend_adapters::conformance::ConformanceMetrics;
-use crate::ecs::decode_attribution::backend_adapters::BackendKind;
+use crate::ecs::legacy_decode_attribution::backend_adapters::conformance::ConformanceMetrics;
+use crate::ecs::legacy_decode_attribution::backend_adapters::BackendKind;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Dim
@@ -1009,7 +1009,7 @@ pub fn kv_phase_support_for(
         PipelinePhase::KvAppend,
         PipelinePhase::KvView,
     ];
-    use crate::ecs::decode_attribution::backend_adapters::BackendKind::*;
+    use crate::ecs::legacy_decode_attribution::backend_adapters::BackendKind::*;
     let status = match backend {
         CoreAi => Unsupported {
             code: StatefulBoundary,
@@ -1034,14 +1034,14 @@ pub fn kv_phase_support_for(
     any(feature = "mlx-backend", feature = "prism-backend")
 ))]
 pub fn kv_contracts_for_backend(
-    binding: &crate::ecs::decode_attribution::decode_microphase_shape_map::DecodeShapeBinding,
+    binding: &crate::ecs::legacy_decode_attribution::decode_microphase_shape_map::DecodeShapeBinding,
     backend: BackendKind,
 ) -> Vec<KvCachePhaseContract> {
     #[cfg(all(
         target_os = "macos",
         any(feature = "mlx-backend", feature = "prism-backend")
     ))]
-    use crate::ecs::decode_attribution::decode_microphase_shape_map::CACHE_LENGTHS;
+    use crate::ecs::legacy_decode_attribution::decode_microphase_shape_map::CACHE_LENGTHS;
     let support = kv_phase_support_for(backend);
     let kv_phases = [
         PipelinePhase::KvRead,
@@ -1257,7 +1257,7 @@ pub struct PhaseComparisonRow {
 /// Groups with fewer than 2 rows are returned to document partial coverage,
 /// but their `rows` array may contain one entry.
 pub fn group_for_comparison(
-    receipts: &[crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt],
+    receipts: &[crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt],
 ) -> Vec<PhaseComparisonGroup> {
     use std::collections::BTreeMap;
 
@@ -1636,7 +1636,7 @@ mod tests {
 
     #[test]
     fn comparison_grouping_filters_empty_phase() {
-        use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
+        use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
         let mut r = DecodeAttributionReceipt::default();
         r.pipeline_phase = None;
         r.shape_profile = "small".to_string();
@@ -1654,7 +1654,7 @@ mod tests {
 
     #[test]
     fn comparison_grouping_requires_same_phase() {
-        use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
+        use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
         let mut r1 = DecodeAttributionReceipt::default();
         r1.pipeline_phase = Some("qkv_projection".to_string());
         r1.phase_variant = "generic_projection".to_string();
@@ -1692,7 +1692,7 @@ mod tests {
 
     #[test]
     fn comparison_grouping_requires_same_semantic_contract() {
-        use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
+        use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
         let mut r1 = DecodeAttributionReceipt::default();
         r1.pipeline_phase = Some("activation".to_string());
         r1.phase_variant = "silu".to_string();
@@ -1729,7 +1729,7 @@ mod tests {
 
     #[test]
     fn comparison_grouping_requires_same_shape() {
-        use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
+        use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
         let mut r1 = DecodeAttributionReceipt::default();
         r1.pipeline_phase = Some("qkv_projection".to_string());
         r1.phase_variant = "generic_projection".to_string();
@@ -1766,7 +1766,7 @@ mod tests {
 
     #[test]
     fn receipt_default_legacy_empty_phase() {
-        use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
+        use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
         let r = DecodeAttributionReceipt::default();
         // Legacy default: pipeline_phase is None for backward compatibility.
         assert!(
@@ -1850,7 +1850,7 @@ mod tests {
     ))]
     #[test]
     fn kv_contracts_for_small_v1_yields_eight_entries() {
-        use crate::ecs::decode_attribution::decode_microphase_shape_map::DECODE_SMALL_V1;
+        use crate::ecs::legacy_decode_attribution::decode_microphase_shape_map::DECODE_SMALL_V1;
         let contracts = kv_contracts_for_backend(&DECODE_SMALL_V1, BackendKind::Mlx);
         // 4 phases × 2 cache lengths = 8 entries
         assert_eq!(

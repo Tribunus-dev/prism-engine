@@ -82,7 +82,7 @@ pub fn compile_mlpackage(
 
     let inner = find_model_dir(&dest).ok_or_else(|| format!("no metadata.json in {:?}", dest))?;
     let compiled_hash =
-        match crate::ecs::decode_attribution::artifact_hash::hash_directory_deterministic(
+        match crate::ecs::legacy_decode_attribution::artifact_hash::hash_directory_deterministic(
             &inner,
             &[],
         ) {

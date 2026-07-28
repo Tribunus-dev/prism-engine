@@ -15,10 +15,10 @@ use std::time::Instant;
 
 use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::coreai_pipeline;
-use crate::ecs::decode_attribution::environment::capture_host_environment;
-use crate::ecs::decode_attribution::graph_catalog;
-use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
-use crate::ecs::decode_attribution::shape_profiles;
+use crate::ecs::legacy_decode_attribution::environment::capture_host_environment;
+use crate::ecs::legacy_decode_attribution::graph_catalog;
+use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
+use crate::ecs::legacy_decode_attribution::shape_profiles;
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 
@@ -29,7 +29,7 @@ use crate::mlpackage::{self, ModelMeta};
 /// 3. Return a receipt with status="load_error" and the error captured.
 pub fn run_negative_evidence(run_id: &str, _output_dir: &Path) -> DecodeAttributionReceipt {
     let env = capture_host_environment().unwrap_or_else(|_| {
-        crate::ecs::decode_attribution::environment::HostEnvironment {
+        crate::ecs::legacy_decode_attribution::environment::HostEnvironment {
             host_chip: std::env::consts::ARCH.to_string(),
             macos_version: "unknown".into(),
             xcode_build_version: "unknown".into(),

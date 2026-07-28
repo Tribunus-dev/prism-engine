@@ -21,8 +21,8 @@ use std::time::Instant;
 use mlx_rs::ops;
 
 use super::{BackendSupportTier, BackendTiming};
-use crate::ecs::decode_attribution::graph_catalog::is_identity_family;
-use crate::ecs::decode_attribution::shape_profiles::ShapeProfile;
+use crate::ecs::legacy_decode_attribution::graph_catalog::is_identity_family;
+use crate::ecs::legacy_decode_attribution::shape_profiles::ShapeProfile;
 
 // ── Support classification ─────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ pub fn run_graph(
         .to_vec();
 
     let duration_ns = start.elapsed().as_nanos() as u64;
-    let hash = crate::ecs::decode_attribution::backend_adapters::conformance::hash_output(&output);
+    let hash = crate::ecs::legacy_decode_attribution::backend_adapters::conformance::hash_output(&output);
 
     Ok(BackendTiming {
         duration_ns,

@@ -70,7 +70,7 @@ pub mod cpu_benchmarks;
 pub mod cpu_runtime;
 pub mod cpu_worker_pool;
 pub mod crash_breadcrumb;
-pub mod decode_attribution;
+pub mod legacy_decode_attribution;
 pub mod device;
 pub mod diffusion;
 pub mod diffusion_provider;

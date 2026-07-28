@@ -1,12 +1,12 @@
 use std::path::Path;
 
-use crate::ecs::decode_attribution::graph_catalog::{all_families, NORMAL_FAMILIES};
-use crate::ecs::decode_attribution::harness::run_backend;
-use crate::ecs::decode_attribution::harness::run_one;
-use crate::ecs::decode_attribution::lattice::lattice_cell_id;
-use crate::ecs::decode_attribution::negative_evidence::run_negative_evidence;
-use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
-use crate::ecs::decode_attribution::shape_profiles::{LARGE, MEDIUM, SMALL};
+use crate::ecs::legacy_decode_attribution::graph_catalog::{all_families, NORMAL_FAMILIES};
+use crate::ecs::legacy_decode_attribution::harness::run_backend;
+use crate::ecs::legacy_decode_attribution::harness::run_one;
+use crate::ecs::legacy_decode_attribution::lattice::lattice_cell_id;
+use crate::ecs::legacy_decode_attribution::negative_evidence::run_negative_evidence;
+use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
+use crate::ecs::legacy_decode_attribution::shape_profiles::{LARGE, MEDIUM, SMALL};
 
 /// Configuration for a decode attribution run.
 pub struct RunConfig {

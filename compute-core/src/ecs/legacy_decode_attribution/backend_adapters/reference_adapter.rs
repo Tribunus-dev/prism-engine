@@ -11,9 +11,9 @@
 //! Only the topologies defined in [`graph_catalog`] are supported.
 //! This is not a general compute graph evaluator.
 
-use crate::ecs::decode_attribution::decode_microphase_shape_map::DecodeShapeBinding;
-use crate::ecs::decode_attribution::graph_catalog::is_identity_family;
-use crate::ecs::decode_attribution::shape_profiles::ShapeProfile;
+use crate::ecs::legacy_decode_attribution::decode_microphase_shape_map::DecodeShapeBinding;
+use crate::ecs::legacy_decode_attribution::graph_catalog::is_identity_family;
+use crate::ecs::legacy_decode_attribution::shape_profiles::ShapeProfile;
 use crate::pipeline_parity::{KvCachePhaseContract, KvMutationMode};
 
 // ── Primitive operations ──────────────────────────────────────────────────

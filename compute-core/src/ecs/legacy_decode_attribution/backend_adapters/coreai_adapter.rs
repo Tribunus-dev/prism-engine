@@ -12,7 +12,7 @@ use std::time::Instant;
 use crate::arena_info::ArenaInfo;
 use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::coreai_pipeline;
-use crate::ecs::decode_attribution::graph_catalog::{self, is_identity_family};
+use crate::ecs::legacy_decode_attribution::graph_catalog::{self, is_identity_family};
 use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 use coreml_proto::proto::mil_spec;
@@ -182,7 +182,7 @@ pub fn cold_predict(
     let model = prepared.coreai_model.as_ref().ok_or("no model loaded")?;
 
     // Breadcrumb 1: input feature construction
-    crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("input_feature_construction");
+    crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("input_feature_construction");
 
     let mut input_arena: ArenaInfo = unsafe { std::mem::zeroed() };
     input_arena.logical_dim0 = 1;
@@ -193,7 +193,7 @@ pub fn cold_predict(
     input_arena.base_address = input_buf.as_mut_ptr() as *mut std::ffi::c_void;
 
     // Breadcrumb 2: output arena construction
-    crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("output_arena_construction");
+    crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("output_arena_construction");
 
     let mut output_buffer = vec![0.0f32; output_len];
     let mut output_arena: ArenaInfo = unsafe { std::mem::zeroed() };
@@ -204,13 +204,13 @@ pub fn cold_predict(
     output_arena.base_address = output_buffer.as_mut_ptr() as *mut std::ffi::c_void;
 
     // Breadcrumb 3: model predict call
-    crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("model_predict_call");
+    crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("model_predict_call");
 
     let start = Instant::now();
     model.predict(input_name, &input_arena, output_name, &output_arena)?;
 
     // Breadcrumb 4: output extracted
-    crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("output_extracted");
+    crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("output_extracted");
 
     Ok(start.elapsed().as_nanos() as u64)
 }

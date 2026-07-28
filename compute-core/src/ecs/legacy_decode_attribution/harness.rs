@@ -34,13 +34,13 @@ use crate::mil_builder::MilBuilder;
 use crate::mlpackage::{self, ModelMeta};
 use crate::worker_memory;
 
-use crate::ecs::decode_attribution::compute_plan::inspect_compute_plan;
-use crate::ecs::decode_attribution::environment::{self, capture_host_environment};
-use crate::ecs::decode_attribution::graph_catalog::{
+use crate::ecs::legacy_decode_attribution::compute_plan::inspect_compute_plan;
+use crate::ecs::legacy_decode_attribution::environment::{self, capture_host_environment};
+use crate::ecs::legacy_decode_attribution::graph_catalog::{
     canonical_family_name, graph_output_names, GraphFamily,
 };
-use crate::ecs::decode_attribution::receipt::DecodeAttributionReceipt;
-use crate::ecs::decode_attribution::shape_profiles::ShapeProfile;
+use crate::ecs::legacy_decode_attribution::receipt::DecodeAttributionReceipt;
+use crate::ecs::legacy_decode_attribution::shape_profiles::ShapeProfile;
 use crate::pipeline_parity::{
     graph_family_phase_variant, graph_family_semantic_contract_id, graph_family_to_phase,
 };
@@ -48,12 +48,12 @@ use std::ffi::c_void;
 
 use crate::arena_info::ArenaInfo;
 
-use crate::ecs::decode_attribution::backend_adapters::{
+use crate::ecs::legacy_decode_attribution::backend_adapters::{
     conformance, coreai_adapter, predict_loop, reference_adapter as ref_eval, BackendSupportTier,
 };
 
 #[cfg(feature = "mlx-backend")]
-use crate::ecs::decode_attribution::backend_adapters::mlx_adapter;
+use crate::ecs::legacy_decode_attribution::backend_adapters::mlx_adapter;
 
 /// Run one decode-attribution measurement.
 ///
@@ -484,7 +484,7 @@ pub fn run_backend(
 
     // ── Phase 5a: Execution provenance (fill in if backend runner didn't set it) ──
     if r.execution_proof.engine.is_empty() {
-        r.execution_proof = crate::ecs::decode_attribution::receipt::ExecutionProof {
+        r.execution_proof = crate::ecs::legacy_decode_attribution::receipt::ExecutionProof {
             engine: backend.to_string(),
             accelerated_ops: family_ops(family.name),
             cpu_ops: vec![],
@@ -603,7 +603,7 @@ fn run_backend_coreml(
     r.compile_cache_hit = prepared.compile_cache_hit;
     r.source_package_sha256 = prepared.source_package_sha256;
     r.compiled_artifact_sha256 = prepared.compiled_artifact_sha256;
-    r.execution_proof = crate::ecs::decode_attribution::receipt::ExecutionProof {
+    r.execution_proof = crate::ecs::legacy_decode_attribution::receipt::ExecutionProof {
         engine: "coreai".into(),
         accelerated_ops: family_ops(family.name),
         cpu_ops: vec![],
@@ -652,7 +652,7 @@ fn run_backend_coreml(
         let input_bytes = (input_data.len() * 4) as i32;
         let output_bytes = (output_len * 4) as i32;
 
-        crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("predict_input_arena");
+        crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("predict_input_arena");
         let mut in_arena: ArenaInfo = unsafe { std::mem::zeroed() };
         in_arena.logical_dim0 = 1;
         in_arena.logical_dim1 = input_data.len() as i32;
@@ -660,7 +660,7 @@ fn run_backend_coreml(
         in_arena.bytes_per_row = input_bytes;
         in_arena.base_address = input_data.as_ptr() as *mut c_void;
 
-        crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("predict_output_arena");
+        crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("predict_output_arena");
         let mut out_arena: ArenaInfo = unsafe { std::mem::zeroed() };
         out_arena.logical_dim0 = 1;
         out_arena.logical_dim1 = output_len as i32;
@@ -669,11 +669,11 @@ fn run_backend_coreml(
         out_arena.base_address = output_buffer.as_mut_ptr() as *mut c_void;
 
         let start = Instant::now();
-        crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("predict_call");
+        crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("predict_call");
         model
             .predict("x", &in_arena, &output_name, &out_arena)
             .map_err(|e| format!("coreai predict: {e}"))?;
-        crate::ecs::decode_attribution::breadcrumb::write_breadcrumb("predict_done");
+        crate::ecs::legacy_decode_attribution::breadcrumb::write_breadcrumb("predict_done");
         let dur = start.elapsed().as_nanos() as u64;
         let hash = conformance::hash_output(&output_buffer);
         Ok((dur, vec![hash], vec![output_buffer]))
@@ -787,7 +787,7 @@ fn run_backend_accelerate(
     r.compile_status = "not_applicable".to_string();
     r.load_status = "not_applicable".to_string();
 
-    let tier = crate::ecs::decode_attribution::backend_adapters::accelerate_adapter::support_tier(
+    let tier = crate::ecs::legacy_decode_attribution::backend_adapters::accelerate_adapter::support_tier(
         family.name,
     );
     r.backend_support_status = coarse_backend_support_status(tier).to_string();
@@ -798,7 +798,7 @@ fn run_backend_accelerate(
         BackendSupportTier::UnsupportedGraph | BackendSupportTier::NotImplemented
     ) {
         r.mark_skipped_by_support("Accelerate does not support this family".to_string());
-        r.execution_proof = crate::ecs::decode_attribution::receipt::ExecutionProof {
+        r.execution_proof = crate::ecs::legacy_decode_attribution::receipt::ExecutionProof {
             engine: "reference_evaluator".into(),
             accelerated_ops: vec![],
             cpu_ops: vec![],
@@ -834,7 +834,7 @@ fn run_backend_accelerate(
         r.cold_output_hashes = vec![conformance::hash_output(&input_data)];
         r.mark_passed();
         r.reference_status = "ok".to_string();
-        r.execution_proof = crate::ecs::decode_attribution::receipt::ExecutionProof {
+        r.execution_proof = crate::ecs::legacy_decode_attribution::receipt::ExecutionProof {
             engine: "accelerate".into(),
             accelerated_ops: vec!["identity:memcpy".into()],
             cpu_ops: vec![],
@@ -852,7 +852,7 @@ fn run_backend_accelerate(
     // ── Domain adapter ─────────────────────────────────────────────────────
     r.backend_prepare_duration_ns = 0;
     let domain_result =
-        match crate::ecs::decode_attribution::backend_adapters::accelerate_adapter::run_family(
+        match crate::ecs::legacy_decode_attribution::backend_adapters::accelerate_adapter::run_family(
             family.name,
             &input_data,
             &weights,
@@ -869,7 +869,7 @@ fn run_backend_accelerate(
             }
         };
     r.execution_kind = format!("{:?}", domain_result.execution_kind);
-    r.execution_proof = crate::ecs::decode_attribution::receipt::ExecutionProof {
+    r.execution_proof = crate::ecs::legacy_decode_attribution::receipt::ExecutionProof {
         engine: "accelerate".into(),
         cpu_glue_ops: vec![],
         bridge_path: None,
@@ -884,7 +884,7 @@ fn run_backend_accelerate(
     // ── Steady (amortized loop) ────────────────────────────────────────────
     let steady_start = Instant::now();
     for _ in 0..steady_iters {
-        let _ = crate::ecs::decode_attribution::backend_adapters::accelerate_adapter::run_family(
+        let _ = crate::ecs::legacy_decode_attribution::backend_adapters::accelerate_adapter::run_family(
             family.name,
             &input_data,
             &weights,

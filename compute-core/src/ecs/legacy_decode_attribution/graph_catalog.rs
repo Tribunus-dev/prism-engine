@@ -670,8 +670,8 @@ pub fn identity_baseline_family_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::decode_attribution::shape_profiles::{MEDIUM, SMALL};
-    use crate::ecs::decode_attribution::suite_manifest::{tier0_manifest, tier1_manifest};
+    use crate::ecs::legacy_decode_attribution::shape_profiles::{MEDIUM, SMALL};
+    use crate::ecs::legacy_decode_attribution::suite_manifest::{tier0_manifest, tier1_manifest};
     use crate::mil_builder::MilBuilder;
 
     /// Every manifest family must have its graph_output_names() entries

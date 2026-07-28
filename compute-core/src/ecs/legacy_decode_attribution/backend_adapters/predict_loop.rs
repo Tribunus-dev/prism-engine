@@ -5,7 +5,7 @@
 //! handle timing, side-effect suppression via `std::hint::black_box`, and
 //! aggregation — the backend only needs to provide the execution primitive.
 
-use crate::ecs::decode_attribution::statistics::{compute_distribution_stats, DistributionStats};
+use crate::ecs::legacy_decode_attribution::statistics::{compute_distribution_stats, DistributionStats};
 use std::hint::black_box;
 
 /// Run cold prediction: exactly one execution, timed.
@@ -100,7 +100,7 @@ mod tests {
     ) -> impl FnMut() -> Result<(u64, Vec<String>, Vec<Vec<f32>>), String> {
         let output_hashes: Vec<String> = outputs
             .iter()
-            .map(|o| crate::ecs::decode_attribution::backend_adapters::conformance::hash_output(o))
+            .map(|o| crate::ecs::legacy_decode_attribution::backend_adapters::conformance::hash_output(o))
             .collect();
         move || Ok((dur_ns, output_hashes.clone(), outputs.clone()))
     }
@@ -149,7 +149,7 @@ mod tests {
             Ok::<_, String>((
                 dur,
                 vec![
-                    crate::ecs::decode_attribution::backend_adapters::conformance::hash_output(&[
+                    crate::ecs::legacy_decode_attribution::backend_adapters::conformance::hash_output(&[
                         call_count as f32,
                     ]),
                 ],
