@@ -1073,7 +1073,7 @@ mod tests {
             parent_generation: GenerationId("parent".into()),
             payload_digests: vec![],
             artifact_digests: vec![(
-                crate::ecs::canonical::kernel_abi::KernelSemanticId("k1".into()),
+                prism_ecs_constitutional::canonical::kernel_abi::KernelSemanticId("k1".into()),
                 String::new(),
             )],
             policy_id: "policy".into(),

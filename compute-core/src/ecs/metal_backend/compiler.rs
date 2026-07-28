@@ -183,7 +183,7 @@ impl MetalBackendCompiler {
     /// Return an iterator over all registered implementations.
     pub fn implementations(
         &self,
-    ) -> impl Iterator<Item = &crate::ecs::canonical::kernel_abi::MetalImplementationRegistration>
+    ) -> impl Iterator<Item = &prism_ecs_constitutional::canonical::kernel_abi::MetalImplementationRegistration>
     {
         self.catalogue.iter()
     }

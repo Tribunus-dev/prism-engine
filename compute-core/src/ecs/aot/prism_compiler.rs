@@ -118,12 +118,12 @@ impl PrismCompiler {
         let exec_graph = ExecutionGraph {
             regions: vec![],
             edges: vec![],
-            state: crate::ecs::canonical::execution_graph::RuntimeStatePlan {
+            state: prism_ecs_constitutional::canonical::execution_graph::RuntimeStatePlan {
                 max_context_tokens: model_ir.configuration.max_position_embeddings,
                 kv_cache_bytes_per_token: 0,
                 total_kv_cache_bytes: 0,
             },
-            memory: crate::ecs::canonical::execution_graph::MemoryPlan {
+            memory: prism_ecs_constitutional::canonical::execution_graph::MemoryPlan {
                 total_activation_bytes: 0,
                 total_weight_bytes: 0,
                 arena_region_count: 0,
@@ -253,12 +253,12 @@ impl PrismCompiler {
                 execution_graph: ExecutionGraph {
                     regions: vec![],
                     edges: vec![],
-                    state: crate::ecs::canonical::execution_graph::RuntimeStatePlan {
+                    state: prism_ecs_constitutional::canonical::execution_graph::RuntimeStatePlan {
                         max_context_tokens: 0,
                         kv_cache_bytes_per_token: 0,
                         total_kv_cache_bytes: 0,
                     },
-                    memory: crate::ecs::canonical::execution_graph::MemoryPlan {
+                    memory: prism_ecs_constitutional::canonical::execution_graph::MemoryPlan {
                         total_activation_bytes: 0,
                         total_weight_bytes: 0,
                         arena_region_count: 0,
@@ -675,12 +675,12 @@ fn build_outcome_from_image(
     let execution_graph = ExecutionGraph {
         regions: Vec::new(),
         edges: Vec::new(),
-        state: crate::ecs::canonical::execution_graph::RuntimeStatePlan {
+        state: prism_ecs_constitutional::canonical::execution_graph::RuntimeStatePlan {
             max_context_tokens: 0,
             kv_cache_bytes_per_token: 0,
             total_kv_cache_bytes: 0,
         },
-        memory: crate::ecs::canonical::execution_graph::MemoryPlan {
+        memory: prism_ecs_constitutional::canonical::execution_graph::MemoryPlan {
             total_activation_bytes: 0,
             total_weight_bytes,
             arena_region_count: compiled_image.manifest.segments.len(),
@@ -688,14 +688,14 @@ fn build_outcome_from_image(
     };
 
     // Compiled kernel entries from metal kernel artifacts
-    let compiled_kernels: Vec<crate::ecs::canonical::compile_plan::CompiledKernelEntry> =
+    let compiled_kernels: Vec<prism_ecs_constitutional::canonical::compile_plan::CompiledKernelEntry> =
         compiled_image
             .manifest
             .metal_kernel_artifacts
             .iter()
             .map(|art| {
                 let semi_id = KernelSemanticId(format!("{}:{:?}", art.logical_operation, art.kind));
-                crate::ecs::canonical::compile_plan::CompiledKernelEntry {
+                prism_ecs_constitutional::canonical::compile_plan::CompiledKernelEntry {
                     artifact: CompiledKernelArtifact {
                         implementation_id: KernelImplementationId(format!(
                             "{}|{}",
@@ -729,13 +729,13 @@ fn build_outcome_from_image(
     // Receipts from compile receipt
     let cr = &compiled_image.receipt;
     let receipts = vec![
-        crate::ecs::canonical::compile_plan::CompilerReceipt {
+        prism_ecs_constitutional::canonical::compile_plan::CompilerReceipt {
             stage: CompilerStage::SourceResolution,
             success: true,
             duration_ms: 0.0,
             message: Some(format!("Source config hash: {}", cr.source_config_hash)),
         },
-        crate::ecs::canonical::compile_plan::CompilerReceipt {
+        prism_ecs_constitutional::canonical::compile_plan::CompilerReceipt {
             stage: CompilerStage::PayloadPacking,
             success: true,
             duration_ms: 0.0,
@@ -745,14 +745,14 @@ fn build_outcome_from_image(
                 cr.segment_hashes.len()
             )),
         },
-        crate::ecs::canonical::compile_plan::CompilerReceipt {
+        prism_ecs_constitutional::canonical::compile_plan::CompilerReceipt {
             stage: CompilerStage::CimageAssembly,
             success: true,
             duration_ms: 0.0,
             message: Some(format!("Complete image hash: {}", cr.complete_image_hash)),
         },
     ];
-    let receipt_set = crate::ecs::canonical::compile_plan::CompilerReceiptSet { receipts };
+    let receipt_set = prism_ecs_constitutional::canonical::compile_plan::CompilerReceiptSet { receipts };
 
     // Model name from request, or fall back to manifest
     let model_name = if !request.source_path.is_empty() {
@@ -767,14 +767,14 @@ fn build_outcome_from_image(
     // Build a minimal plan with the model identity populated
     let plan = CompilePlan {
         model_ir: ModelIr {
-            identity: crate::ecs::canonical::model_ir::ModelIdentity {
+            identity: prism_ecs_constitutional::canonical::model_ir::ModelIdentity {
                 name: model_name,
                 revision: None,
             },
-            architecture: crate::ecs::canonical::model_ir::ArchitectureId(
+            architecture: prism_ecs_constitutional::canonical::model_ir::ArchitectureId(
                 compiled_image.manifest.source.model_type.clone(),
             ),
-            configuration: crate::ecs::canonical::model_ir::ModelConfiguration {
+            configuration: prism_ecs_constitutional::canonical::model_ir::ModelConfiguration {
                 hidden_size: 0,
                 intermediate_size: 0,
                 num_attention_heads: 0,
@@ -794,24 +794,24 @@ fn build_outcome_from_image(
                 mtp_hidden_size: None,
                 mtp_intermediate_size: None,
             },
-            tensors: crate::ecs::canonical::model_ir::TensorCatalogue {
+            tensors: prism_ecs_constitutional::canonical::model_ir::TensorCatalogue {
                 by_id: vec![],
                 by_name: std::collections::HashMap::new(),
             },
-            graph: crate::ecs::canonical::model_ir::LogicalGraph {
+            graph: prism_ecs_constitutional::canonical::model_ir::LogicalGraph {
                 ops: vec![],
                 inputs: vec![],
                 outputs: vec![],
             },
-            tokenizer: crate::ecs::canonical::model_ir::TokenizerDescriptor {
+            tokenizer: prism_ecs_constitutional::canonical::model_ir::TokenizerDescriptor {
                 tokenizer_type: "unknown".into(),
                 vocab_size: 0,
                 bos_token_id: None,
                 eos_token_id: None,
                 pad_token_id: None,
             },
-            source_provenance: crate::ecs::canonical::model_ir::SourceProvenance {
-                source_type: crate::ecs::canonical::model_ir::SourceType::Gguf,
+            source_provenance: prism_ecs_constitutional::canonical::model_ir::SourceProvenance {
+                source_type: prism_ecs_constitutional::canonical::model_ir::SourceType::Gguf,
                 source_path: request.source_path.clone(),
                 file_digests: vec![],
             },

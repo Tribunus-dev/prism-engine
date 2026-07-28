@@ -109,8 +109,8 @@ mod tests {
             EngramInsertionContract {
                 region: RegionId("region".into()),
                 operation: EngramOperation::Adapter,
-                input_shape: crate::ecs::canonical::identity::TensorShape { dims: vec![] },
-                output_shape: crate::ecs::canonical::identity::TensorShape { dims: vec![] },
+                input_shape: prism_ecs_constitutional::canonical::identity::TensorShape { dims: vec![] },
+                output_shape: prism_ecs_constitutional::canonical::identity::TensorShape { dims: vec![] },
                 application: EngramApplication::AdditiveResidual,
                 routing: EngramRoutingPolicy::ThresholdedSimilarity(threshold),
                 maximum_latency_ns: None,

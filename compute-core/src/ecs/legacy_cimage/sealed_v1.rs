@@ -472,7 +472,7 @@ impl SealedCimageBuilder {
         let required_capabilities = capabilities.clone();
         let optional_capabilities: Vec<String> = Vec::new();
 
-        let now = crate::ecs::canonical::compile_plan::compile_timestamp();
+        let now = prism_ecs_constitutional::canonical::compile_plan::compile_timestamp();
 
         Ok(SealedCimageV1 {
             generation,

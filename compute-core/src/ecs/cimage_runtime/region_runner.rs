@@ -403,13 +403,13 @@ impl CImageMetalRegionRunner {
                 &shader_source,
                 "cimage_main",
                 "prism.cimage.combined.v1",
-                crate::ecs::canonical::kernel_abi::KernelAbi {
+                prism_ecs_constitutional::canonical::kernel_abi::KernelAbi {
                     version: 1,
                     buffers: Vec::new(),
                     constants: Vec::new(),
                     threadgroup_memory: Vec::new(),
                     dispatch_geometry:
-                        crate::ecs::canonical::kernel_abi::DispatchGeometryPolicy::FromOutputBuffer,
+                        prism_ecs_constitutional::canonical::kernel_abi::DispatchGeometryPolicy::FromOutputBuffer,
                     threads_per_threadgroup: (1, 1, 1),
                 },
             )
