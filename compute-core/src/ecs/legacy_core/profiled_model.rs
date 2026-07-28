@@ -11,12 +11,12 @@
 //! - [`load_tensor_from_mapped_segment`] — mmap-backed tensor loading
 
 use crate::ecs::arena::Arena;
-use crate::ecs::compute_image::cimage_loader::CimageDeployment;
+use crate::ecs::legacy_compute_image_core::cimage_loader::CimageDeployment;
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
     MultimodalArtifactSummary, ProjectionTensorRecord, SealedMultimodalBindings,
 };
-use crate::ecs::compute_image::phase_dag::EmittedPhaseGraph;
-use crate::ecs::compute_image::{CompiledImageReader, CopyClassification, TensorEntry};
+use crate::ecs::legacy_compute_image_core::phase_dag::EmittedPhaseGraph;
+use crate::ecs::legacy_compute_image_core::{CompiledImageReader, CopyClassification, TensorEntry};
 use crate::ecs::config::{ModelExecutionPlan, TextArchitecture, VisionArchitecture};
 use crate::ecs::coreai_bridge::CoreAiModel;
 use crate::ecs::external_array::BorrowedStorage;

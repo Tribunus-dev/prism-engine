@@ -2,13 +2,7 @@
 
 #![allow(dead_code)]
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/multimodal/adapter.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{InputModality, ModalityError};
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/multimodal/adapter.rs
-use crate::ecs::compute_image::multimodal::{InputModality, ModalityError};
-========
-use crate::ecs::legacy_compute_image_core::multimodal::{InputModality, ModalityError};
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/multimodal/adapter.rs
 
 /// Result of modality preparation — raw tensors ready for projection.
 pub struct PreparedModality {

@@ -3,13 +3,7 @@
 //! Assembles text token embeddings and projected image/audio embeddings
 //! into a single decoder-width input sequence.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile_orchestrator/multimodal_assembly.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::InputModality;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/orchestrator/multimodal_assembly.rs
-use crate::ecs::compute_image::multimodal::InputModality;
-========
-use crate::ecs::legacy_compute_image_core::multimodal::InputModality;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/orchestrator/multimodal_assembly.rs
 
 /// One part of a multimodal prompt.
 #[allow(dead_code)]

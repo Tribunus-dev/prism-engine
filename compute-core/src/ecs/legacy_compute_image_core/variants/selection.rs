@@ -11,16 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/variants/selection.rs
-use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SerializedPhaseProgram;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/variants/selection.rs
-use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-use crate::ecs::compute_image::program::phase_program::SerializedPhaseProgram;
-========
 use crate::ecs::legacy_compute_image_core::execution_shape::ExecutionShapeClass;
-use crate::ecs::legacy_compute_image_core::program::phase_program::SerializedPhaseProgram;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/variants/selection.rs
+use crate::ecs::compute_image::legacy_compute_image_runtime::program::phase_program::SerializedPhaseProgram;
 
 /// Error returned when [`select_program_variant`] cannot find a precompiled
 /// program to satisfy the request.

@@ -6,9 +6,9 @@
 //! boundaries, ensuring deterministic ordering and an authoritative mutation
 //! seam for the future append-only receipt ledger.
 
-use crate::ecs::runtime::scheduling::error::CommandError;
-use crate::ecs::runtime::scheduling::metadata::{Stage, SystemId};
-use crate::ecs::runtime::world::{Component, Entity};
+use crate::ecs::legacy_runtime::scheduling::error::CommandError;
+use crate::ecs::legacy_runtime::scheduling::metadata::{Stage, SystemId};
+use crate::ecs::legacy_runtime::world::{Component, Entity};
 use serde::Serialize;
 
 // ---------------------------------------------------------------------------

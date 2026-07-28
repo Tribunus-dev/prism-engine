@@ -6,15 +6,15 @@
 //! lack a `WorkerAssignment`, spawns the worker binary via
 //! [`WorkerProcessManager`], and transitions the lifecycle to `Dispatching`.
 
-use crate::ecs::runtime::components::{WorkerAssignment, WorkerLifecycle, WorkerRequestPhase};
-use crate::ecs::runtime::resources::worker_process_manager::{WorkerId, WorkerProcessManager};
-use crate::ecs::runtime::resources::WorkerDiagnosticsResource;
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::components::{WorkerAssignment, WorkerLifecycle, WorkerRequestPhase};
+use crate::ecs::legacy_runtime::resources::worker_process_manager::{WorkerId, WorkerProcessManager};
+use crate::ecs::legacy_runtime::resources::WorkerDiagnosticsResource;
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
-use crate::ecs::runtime::world::{Entity, World};
+use crate::ecs::legacy_runtime::world::{Entity, World};
 
 // ---------------------------------------------------------------------------
 // Default paths (overridable via environment)

@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use super::agent_slot::{MultiplexerState, STATE_IDLE, STATE_PREFETCHING, STATE_READY};
-use crate::ecs::runtime::components::AgentSlot;
-use crate::ecs::runtime::world::Entity;
+use crate::ecs::legacy_runtime::components::AgentSlot;
+use crate::ecs::legacy_runtime::world::Entity;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]

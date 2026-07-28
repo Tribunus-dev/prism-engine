@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::ecs::runtime::resources::NpuCompletionPort;
+use crate::ecs::legacy_runtime::resources::NpuCompletionPort;
 
 /// Spawn a background thread that continuously submits to and waits for
 /// the NPU, writing completion notifications into the shared atomic port.

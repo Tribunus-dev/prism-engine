@@ -4,9 +4,9 @@
 //! serializable manifests, and O(1) overlap checks.  Capacity is bounded at
 //! 256 IDs each — deliberate and checked at registration time.
 
-use crate::ecs::runtime::scheduling::error::MaskError;
-use crate::ecs::runtime::scheduling::error::RegistryError;
-use crate::ecs::runtime::world::Component;
+use crate::ecs::legacy_runtime::scheduling::error::MaskError;
+use crate::ecs::legacy_runtime::scheduling::error::RegistryError;
+use crate::ecs::legacy_runtime::world::Component;
 
 // ---------------------------------------------------------------------------
 // ID types
@@ -289,7 +289,7 @@ impl Default for ResourceRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::runtime::scheduling::error::{MaskError, RegistryError};
+    use crate::ecs::legacy_runtime::scheduling::error::{MaskError, RegistryError};
 
     struct DummyComponent;
     impl SchedulableComponent for DummyComponent {

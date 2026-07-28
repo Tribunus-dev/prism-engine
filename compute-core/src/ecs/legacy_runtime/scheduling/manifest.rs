@@ -5,8 +5,8 @@
 //! by `Schedule::compile` and can be serialized for correlation with
 //! inference receipts.
 
-use crate::ecs::runtime::scheduling::graph::EdgeKind;
-use crate::ecs::runtime::scheduling::metadata::SystemId;
+use crate::ecs::legacy_runtime::scheduling::graph::EdgeKind;
+use crate::ecs::legacy_runtime::scheduling::metadata::SystemId;
 
 /// Schema version of the manifest format.
 ///

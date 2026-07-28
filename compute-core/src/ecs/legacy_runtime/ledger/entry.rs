@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::runtime::components::worker_health::{TerminalStatus, WorkerErrorCategory};
-use crate::ecs::runtime::components::worker_lifecycle::WorkerRequestPhase;
-use crate::ecs::runtime::scheduling::metadata::{Stage, SystemId};
-use crate::ecs::runtime::world::Entity;
+use crate::ecs::legacy_runtime::components::worker_health::{TerminalStatus, WorkerErrorCategory};
+use crate::ecs::legacy_runtime::components::worker_lifecycle::WorkerRequestPhase;
+use crate::ecs::legacy_runtime::scheduling::metadata::{Stage, SystemId};
+use crate::ecs::legacy_runtime::world::Entity;
 
 use super::digest::ReceiptDigest;
 

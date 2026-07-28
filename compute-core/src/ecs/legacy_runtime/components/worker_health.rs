@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::time::Instant;
 
-use crate::ecs::runtime::components::{WORKER_HEARTBEAT_COMPONENT, WORKER_OUTCOME_COMPONENT};
-use crate::ecs::runtime::scheduling::component_id::SchedulableComponent;
+use crate::ecs::legacy_runtime::components::{WORKER_HEARTBEAT_COMPONENT, WORKER_OUTCOME_COMPONENT};
+use crate::ecs::legacy_runtime::scheduling::component_id::SchedulableComponent;
 
 // ---------------------------------------------------------------------------
 // Terminal status

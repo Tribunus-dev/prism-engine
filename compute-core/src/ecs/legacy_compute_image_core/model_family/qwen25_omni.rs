@@ -7,13 +7,7 @@
 //! + Talker LM. This differs fundamentally from Gemma 4's encoder-free
 //! direct projection. The ViT encoder path is served by `ViTVisionEncoderAdapter`.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/model_family/qwen25_omni.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{AudioProcessorContractV1, ImageProcessorContractV1};
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/model_family/qwen25_omni.rs
-use crate::ecs::compute_image::multimodal::{AudioProcessorContractV1, ImageProcessorContractV1};
-========
-use crate::ecs::legacy_compute_image_core::multimodal::{AudioProcessorContractV1, ImageProcessorContractV1};
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/model_family/qwen25_omni.rs
 
 // ── Qwen2.5-Omni 7B architecture constants ──────────────────────
 // Based on config.json for Qwen/Qwen2.5-Omni-7B

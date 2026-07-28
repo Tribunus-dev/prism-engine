@@ -6,8 +6,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::ecs::runtime::scheduling::error::ScheduleError;
-use crate::ecs::runtime::scheduling::metadata::{SystemId, SystemMetadata};
+use crate::ecs::legacy_runtime::scheduling::error::ScheduleError;
+use crate::ecs::legacy_runtime::scheduling::metadata::{SystemId, SystemMetadata};
 
 // ---------------------------------------------------------------------------
 // EdgeKind

@@ -12,7 +12,7 @@
 
 use std::sync::mpsc::Sender;
 
-use crate::ecs::runtime::resources::worker_supervision_config::EcsWorkerSupervisionMode;
+use crate::ecs::legacy_runtime::resources::worker_supervision_config::EcsWorkerSupervisionMode;
 
 // ---------------------------------------------------------------------------
 // IngressEntry — splitter-level request snapshot

@@ -2,11 +2,11 @@
 //!
 //! Each command variant maps to a typed semantic payload for the ledger.
 
-use crate::ecs::runtime::ledger::entry::SemanticCommandPayload;
-use crate::ecs::runtime::ledger::entry::SemanticStampedCommand;
-use crate::ecs::runtime::ledger::error::LedgerProjectionError;
-use crate::ecs::runtime::ledger::registry::ComponentTypeRegistry;
-use crate::ecs::runtime::scheduling::command::{Command, StampedCommand};
+use crate::ecs::legacy_runtime::ledger::entry::SemanticCommandPayload;
+use crate::ecs::legacy_runtime::ledger::entry::SemanticStampedCommand;
+use crate::ecs::legacy_runtime::ledger::error::LedgerProjectionError;
+use crate::ecs::legacy_runtime::ledger::registry::ComponentTypeRegistry;
+use crate::ecs::legacy_runtime::scheduling::command::{Command, StampedCommand};
 
 /// Project a scheduler-stamped command into a semantic receipt entry.
 ///
@@ -55,10 +55,10 @@ impl SemanticReceipt for StampedCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::runtime::ledger::registry::ComponentTypeRegistry;
-    use crate::ecs::runtime::scheduling::command::CommandWriter;
-    use crate::ecs::runtime::scheduling::metadata::{Stage, SystemId};
-    use crate::ecs::runtime::world::World;
+    use crate::ecs::legacy_runtime::ledger::registry::ComponentTypeRegistry;
+    use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+    use crate::ecs::legacy_runtime::scheduling::metadata::{Stage, SystemId};
+    use crate::ecs::legacy_runtime::world::World;
 
     #[test]
     fn spawn_projects_entity_spawned() {
@@ -84,7 +84,7 @@ mod tests {
 
     #[test]
     fn despawn_projects_entity_despawned() {
-        use crate::ecs::runtime::world_txn::WorldTxn;
+        use crate::ecs::legacy_runtime::world_txn::WorldTxn;
         let mut world = World::default();
         let mut buffer = Vec::new();
         let stage = Stage::Maintenance;

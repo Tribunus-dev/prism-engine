@@ -5,8 +5,8 @@
 
 use std::time::Instant;
 
-use crate::ecs::runtime::components::{WORKER_HARDWARE_STREAM_COMPONENT, WORKER_STREAM_COMPONENT};
-use crate::ecs::runtime::scheduling::component_id::SchedulableComponent;
+use crate::ecs::legacy_runtime::components::{WORKER_HARDWARE_STREAM_COMPONENT, WORKER_STREAM_COMPONENT};
+use crate::ecs::legacy_runtime::scheduling::component_id::SchedulableComponent;
 
 /// Rolling window of recently produced token IDs for duplicate detection.
 ///

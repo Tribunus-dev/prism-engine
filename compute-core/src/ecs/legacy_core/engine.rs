@@ -45,7 +45,7 @@ use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
     CimageHeader, SegmentKind, CIMAGE_HEADER_WIRE_SIZE,
 };
 #[cfg(feature = "mlx-backend")]
-use crate::ecs::compute_image::{
+use crate::ecs::legacy_compute_image_core::{
     clear_mlx_cache, mlx_active_memory_bytes, mlx_cache_memory_bytes, mlx_get_memory_limit,
 };
 use crate::ecs::engine_error::{EngineError, EngineErrorCode};
@@ -53,7 +53,7 @@ use crate::ecs::engine_error::{EngineError, EngineErrorCode};
 use crate::ecs::hybrid_profile::{HybridExecutor, HybridProfile};
 use crate::ecs::model_store::{InstalledModel, ModelStore};
 
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::world::World;
 #[cfg(feature = "mlx-backend")]
 use prism_ecs_runtime::scheduling::state::token_budget::{
     PhaseKind, TokenBudgetConfig, TokenBudgetScheduler, TokenWorkUnit,
@@ -859,13 +859,13 @@ impl ComputeEngine {
         input_ids: &[u32],
         _max_tokens: u32,
     ) -> Result<GenerationHandle, EngineError> {
-        use crate::ecs::runtime::components::worker_request::RequestClass;
-        use crate::ecs::runtime::components::{
+        use crate::ecs::legacy_runtime::components::worker_request::RequestClass;
+        use crate::ecs::legacy_runtime::components::{
             WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
             WorkerStream,
         };
-        use crate::ecs::runtime::resources::WorkerResponseRegistry;
-        use crate::ecs::runtime::resources::{IngressEntry, WorkerIngressQueue};
+        use crate::ecs::legacy_runtime::resources::WorkerResponseRegistry;
+        use crate::ecs::legacy_runtime::resources::{IngressEntry, WorkerIngressQueue};
         use crate::ecs::streaming::{generation_channel, GenerationEvent};
 
         let world = self.ecs_world.as_mut().ok_or_else(|| {

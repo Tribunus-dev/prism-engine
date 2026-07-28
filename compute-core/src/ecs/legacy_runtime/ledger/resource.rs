@@ -5,8 +5,8 @@
 
 use std::sync::Mutex;
 
-use crate::ecs::runtime::ledger::entry::TransitionReceipt;
-use crate::ecs::runtime::ledger::ledger::TransitionLedger;
+use crate::ecs::legacy_runtime::ledger::entry::TransitionReceipt;
+use crate::ecs::legacy_runtime::ledger::ledger::TransitionLedger;
 
 /// Resource wrapper for the rolling transition ledger.
 ///
@@ -52,7 +52,7 @@ impl TransitionLedgerResource {
     pub fn export_jsonl(
         &self,
     ) -> Result<String, crate::ecs::runtime::ledger::error::LedgerExportError> {
-        use crate::ecs::runtime::ledger::error::LedgerExportError;
+        use crate::ecs::legacy_runtime::ledger::error::LedgerExportError;
         let ledger = self.inner.lock().unwrap();
         let mut output = Vec::new();
         for receipt in ledger.iter() {

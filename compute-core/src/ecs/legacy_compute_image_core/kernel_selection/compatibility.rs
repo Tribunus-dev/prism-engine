@@ -7,19 +7,9 @@
 //! Multiple profile seals can be assembled into a
 //! [`ProfileProofSealBundle`] for batch verification.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/kernel_selection/compatibility.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::kernel_selection::selection::PreselectedKernelVariant;
 use crate::ecs::compute_image::legacy_compute_image_runtime::verification::numerical::NumericalVerificationReceipt;
 use crate::ecs::compute_image::legacy_compute_image_runtime::verification::resource_fit::ResourceFitReceipt;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/kernel_selection/compatibility.rs
-use crate::ecs::compute_image::kernel_selection::selection::PreselectedKernelVariant;
-use crate::ecs::compute_image::verification::numerical::NumericalVerificationReceipt;
-use crate::ecs::compute_image::verification::resource_fit::ResourceFitReceipt;
-========
-use crate::ecs::legacy_compute_image_core::kernel_selection::selection::PreselectedKernelVariant;
-use crate::ecs::legacy_compute_image_core::verification::numerical::NumericalVerificationReceipt;
-use crate::ecs::legacy_compute_image_core::verification::resource_fit::ResourceFitReceipt;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/kernel_selection/compatibility.rs
 use serde::{Deserialize, Serialize};
 
 /// Compile-time proof seal for a single target profile.

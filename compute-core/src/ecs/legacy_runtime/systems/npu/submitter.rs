@@ -19,15 +19,15 @@
 use lazy_static::lazy_static;
 
 use prism_ecs_kernel::backend::npu::ffi::{NpuBuffer, TargetNpu};
-use crate::ecs::runtime::components::{WorkerLifecycle, WorkerRequestPhase};
-use crate::ecs::runtime::scheduling::access::{ComponentSet, ResourceSet};
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::component_id::{ComponentId, SchedulableComponent};
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::components::{WorkerLifecycle, WorkerRequestPhase};
+use crate::ecs::legacy_runtime::scheduling::access::{ComponentSet, ResourceSet};
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::component_id::{ComponentId, SchedulableComponent};
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::world::World;
 
 // ---------------------------------------------------------------------------
 // Component — NpuExecutionState

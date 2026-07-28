@@ -23,7 +23,7 @@ use prism_ecs_compile::compute_image_core::phase_dag::PhaseCompletionStatus;
 use prism_ecs_compile::compute_image_core::manifest::CompiledImageReader;
 use crate::ecs::config::ModelExecutionPlan;
 use crate::ecs::kv_cache::{KvCache, PageMigrationService};
-use crate::ecs::runtime::executable_session::RuntimeBackends;
+use crate::ecs::legacy_runtime::executable_session::RuntimeBackends;
 use prism_ecs_runtime::scheduling::evidence::scheduling_receipts::PhaseReceipt;
 use prism_ecs_runtime::scheduling::state::execution_context::ExecutionContext;
 use prism_ecs_runtime::scheduling::systems::phase_engine::PhaseEngine;

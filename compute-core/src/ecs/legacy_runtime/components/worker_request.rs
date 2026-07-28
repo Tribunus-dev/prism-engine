@@ -6,8 +6,8 @@
 
 use std::time::Instant;
 
-use crate::ecs::runtime::components::WORKER_REQUEST_COMPONENT;
-use crate::ecs::runtime::scheduling::component_id::SchedulableComponent;
+use crate::ecs::legacy_runtime::components::WORKER_REQUEST_COMPONENT;
+use crate::ecs::legacy_runtime::scheduling::component_id::SchedulableComponent;
 
 /// A submitted inference request awaiting or undergoing worker execution.
 ///

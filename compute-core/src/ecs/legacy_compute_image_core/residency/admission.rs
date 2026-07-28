@@ -7,13 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/admission.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::{CompiledResidencyPlan, ResidencyClass};
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/admission.rs
-use crate::ecs::compute_image::residency::plan::{CompiledResidencyPlan, ResidencyClass};
-========
-use crate::ecs::legacy_compute_image_core::residency::plan::{CompiledResidencyPlan, ResidencyClass};
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/admission.rs
 
 /// Runtime residency admission controller.
 ///
@@ -157,16 +151,8 @@ impl Default for ResidencyAdmission {
 #[cfg(test)]
 mod tests {
     use super::*;
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/admission.rs
-    use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-    use crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::{
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/admission.rs
-    use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-    use crate::ecs::compute_image::residency::plan::{
-========
     use crate::ecs::legacy_compute_image_core::execution_shape::ExecutionShapeClass;
-    use crate::ecs::legacy_compute_image_core::residency::plan::{
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/admission.rs
+    use crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::{
         ActivationArenaRequirements, CompiledResidencyPlan, KvCacheRequirements,
         PeakMemoryEstimate, RequiredWeightObject, ResidencyClass,
     };
@@ -225,13 +211,7 @@ mod tests {
                 overhead_bytes: 0,
             },
             memory_admission_contract:
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/residency/admission.rs
                 crate::ecs::compute_image::legacy_compute_image_runtime::residency::plan::MemoryAdmissionContract {
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/residency/admission.rs
-                crate::ecs::compute_image::residency::plan::MemoryAdmissionContract {
-========
-                crate::ecs::legacy_compute_image_core::residency::plan::MemoryAdmissionContract {
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/residency/admission.rs
                     minimum_required_bytes: 0,
                     recommended_bytes: 0,
                     graceful_degradation: false,

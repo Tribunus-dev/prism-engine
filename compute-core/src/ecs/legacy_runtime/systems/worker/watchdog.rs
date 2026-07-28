@@ -12,20 +12,20 @@
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use crate::ecs::runtime::components::{
+use crate::ecs::legacy_runtime::components::{
     worker_health::{TerminalStatus, WorkerErrorCategory},
     WorkerAssignment, WorkerHeartbeat, WorkerLifecycle, WorkerOutcome, WorkerRequest,
     WorkerRequestPhase, WORKER_EVENT_DRAIN_SYSTEM, WORKER_WATCHDOG_SYSTEM,
 };
-use crate::ecs::runtime::resources::{
+use crate::ecs::legacy_runtime::resources::{
     MonotonicClockResource, WorkerDiagnosticsResource, WorkerPoolResource, WorkerResponseRegistry,
 };
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::world::World;
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -255,8 +255,8 @@ fn compute_idle_time(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::runtime::components::WorkerAssignment;
-    use crate::ecs::runtime::world::World;
+    use crate::ecs::legacy_runtime::components::WorkerAssignment;
+    use crate::ecs::legacy_runtime::world::World;
 
     fn setup_world() -> World {
         let mut world = World::with_capacity(64);
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn system_without_active_entities_is_ok() {
-        use crate::ecs::runtime::world_txn::WorldTxn;
+        use crate::ecs::legacy_runtime::world_txn::WorldTxn;
         let mut world = setup_world();
         // Spawn an entity but leave it in Queued (which is not an active phase
         // monitored by the watchdog). Use the engine-local `WorldTxn` to

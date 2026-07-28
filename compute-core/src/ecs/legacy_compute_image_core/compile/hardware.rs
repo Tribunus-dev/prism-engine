@@ -735,22 +735,10 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp_dir).ok();
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/hardware.rs
         let candidates = crate::ecs::compute_image::legacy_compute_image_compile::coreai::candidate_subgraphs();
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/hardware.rs
-        let candidates = crate::ecs::compute_image::compile::coreai::candidate_subgraphs();
-========
-        let candidates = crate::ecs::legacy_compute_image_core::compile::coreai::candidate_subgraphs();
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/hardware.rs
         let mut decompositions = Vec::new();
         for (name, ops) in &candidates {
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/hardware.rs
             let decomp = crate::ecs::compute_image::legacy_compute_image_compile::coreai::decompose_subgraph(
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/hardware.rs
-            let decomp = crate::ecs::compute_image::compile::coreai::decompose_subgraph(
-========
-            let decomp = crate::ecs::legacy_compute_image_core::compile::coreai::decompose_subgraph(
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/hardware.rs
                 name,
                 ops,
                 &concurrency,
@@ -762,13 +750,7 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
                 decomp.accelerate_ops.len()
             );
             if !decomp.coreai_ops.is_empty() {
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile/hardware.rs
                 match crate::ecs::compute_image::legacy_compute_image_compile::coreai::compile_subgraph(
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/compile/hardware.rs
-                match crate::ecs::compute_image::compile::coreai::compile_subgraph(
-========
-                match crate::ecs::legacy_compute_image_core::compile::coreai::compile_subgraph(
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/compile/hardware.rs
                     name,
                     &decomp.coreai_ops,
                     &std::collections::HashMap::from([

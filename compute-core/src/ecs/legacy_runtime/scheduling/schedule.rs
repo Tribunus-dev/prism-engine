@@ -14,24 +14,24 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use crate::ecs::runtime::ledger::entry::TRANSITION_RECEIPT_SCHEMA_VERSION;
-use crate::ecs::runtime::ledger::error::LedgerProjectionError;
-use crate::ecs::runtime::ledger::{
+use crate::ecs::legacy_runtime::ledger::entry::TRANSITION_RECEIPT_SCHEMA_VERSION;
+use crate::ecs::legacy_runtime::ledger::error::LedgerProjectionError;
+use crate::ecs::legacy_runtime::ledger::{
     ComponentTypeRegistry, DeterministicReceiptPayload, ReceiptHasher, SemanticReceipt,
     SemanticStampedCommand, TransitionLedgerResource, TransitionReceipt,
 };
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::error::ScheduleError;
-use crate::ecs::runtime::scheduling::graph::{EdgeKind, GraphBuilder};
-use crate::ecs::runtime::scheduling::manifest::{
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::error::ScheduleError;
+use crate::ecs::legacy_runtime::scheduling::graph::{EdgeKind, GraphBuilder};
+use crate::ecs::legacy_runtime::scheduling::manifest::{
     ManifestBuilder, ManifestWarningKind, ScheduleManifest,
 };
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult,
 };
-use crate::ecs::runtime::world::World;
-use crate::ecs::runtime::world_txn::WorldTxn;
+use crate::ecs::legacy_runtime::world::World;
+use crate::ecs::legacy_runtime::world_txn::WorldTxn;
 
 // ---------------------------------------------------------------------------
 // PriorityKey — deterministic ready-queue ordering

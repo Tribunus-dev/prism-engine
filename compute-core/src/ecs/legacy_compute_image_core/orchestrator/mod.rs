@@ -59,13 +59,7 @@ pub mod vision_projection;
 ))]
 pub use runner::Orchestrator;
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile_orchestrator/mod.rs
 pub use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/orchestrator/mod.rs
-pub use crate::ecs::compute_image::multimodal::{
-========
-pub use crate::ecs::legacy_compute_image_core::multimodal::{
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/orchestrator/mod.rs
     InputModality, ModalityError, MultimodalArtifactSummary, MultimodalCapabilities,
     ProjectionBackend, ProjectionPrecision,
 };

@@ -1,12 +1,6 @@
 //! Multimodal assembly receipt for reproducibility and evidence.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_compile_orchestrator/multimodal_receipt.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/orchestrator/multimodal_receipt.rs
-use crate::ecs::compute_image::multimodal::{
-========
-use crate::ecs::legacy_compute_image_core::multimodal::{
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/orchestrator/multimodal_receipt.rs
     MultimodalAssemblyReceipt, ProjectionBackend, ProjectionPrecision,
 };
 

@@ -1,7 +1,7 @@
 # Goal: Fix stale cross-legacy imports across all legacy_*/ files
 
 **Date:** 2026-07-28 (Pacific)
-**Status:** Goal declared; agent dispatched (batch 6, agent 1).
+**Status:** Goal achieved (batch 6, agent 1, worktree `migrate/stale-imports`).
 
 ## Source
 
@@ -65,3 +65,11 @@ Create an isolated worktree at
 - `cargo check -p tribunus-compute-core --lib 2>&1 | tail -3` shows error count ≤ 192 (current baseline)
 - One commit with the full rewrite + verification
 - No new errors introduced
+
+## Result (achieved)
+
+- **Stale imports fixed: 0 remaining.** `rg "^use crate::ecs::runtime::" compute-core/src/ecs/legacy_*/` returns 0. `rg "^use crate::ecs::compute_image::(compile|orchestrator|residency|...|verification)::" compute-core/src/ecs/legacy_*/` returns 0.
+- **Build verification:** `cargo check -p tribunus-compute-core --lib 2>&1 | tail -3` reports exactly **192 errors** — unchanged from the pre-batch baseline. No new errors introduced.
+- **Unblocked work:** 29 files in `compute-core/src/ecs/legacy_compute_image_core/` had unmerged three-way conflict markers (`<<<<<<<` / `|||||||` / `=======` / `>>>>>>>`) that were silently committed by a previous batch. Resolving them by keeping the HEAD side unblocked the file bodies and revealed additional stale imports that were also rewritten in this batch.
+- **Patterns rewritten (in addition to the 14 enumerated in the table above):** 9 unlisted top-level subdirs (`cimage_loader`, `cimage_packer`, `phase_dag`, `execution_shape`, `vm_manager`, `tree_attention`, `compatibility`, `compaction`, `manifest`) were rewritten to `crate::ecs::legacy_compute_image_core::*` (the duplicated "core" copy that is the canonical home for these). Two multi-line top-level imports in `legacy_core/{engine,profiled_model}.rs` were rewritten the same way. No WAIVERs were needed — every import had a 1:1 mapping.
+- **Commit:** one commit (`fix(phase-a): rewrite stale cross-legacy imports + resolve 29 unmerged conflict files`) on branch `migrate/stale-imports`.

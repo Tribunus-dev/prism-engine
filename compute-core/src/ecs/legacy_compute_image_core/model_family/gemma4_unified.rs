@@ -3,13 +3,7 @@
 //! Encodes the known architectural constants for Gemma 4 12B Unified
 //! and maps checkpoint tensor names to Prism logical tensor roles.
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/model_family/gemma4_unified.rs
 use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::{AudioProcessorContractV1, ImageProcessorContractV1};
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/model_family/gemma4_unified.rs
-use crate::ecs::compute_image::multimodal::{AudioProcessorContractV1, ImageProcessorContractV1};
-========
-use crate::ecs::legacy_compute_image_core::multimodal::{AudioProcessorContractV1, ImageProcessorContractV1};
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/model_family/gemma4_unified.rs
 
 /// Hard-coded architectural constants for Gemma 4 12B Unified.
 pub const GEMMA4_12B_UNIFIED_HIDDEN_SIZE: u32 = 3840;

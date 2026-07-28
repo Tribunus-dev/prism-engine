@@ -12,17 +12,17 @@
 
 use lazy_static::lazy_static;
 
-use crate::ecs::runtime::components::{
+use crate::ecs::legacy_runtime::components::{
     HardwareStreamHandle, WorkerLifecycle, WorkerStream, WORKER_WATCHDOG_SYSTEM,
 };
-use crate::ecs::runtime::resources::WorkerDiagnosticsResource;
-use crate::ecs::runtime::scheduling::access::{ComponentSet, ResourceSet};
-use crate::ecs::runtime::scheduling::command::CommandWriter;
-use crate::ecs::runtime::scheduling::metadata::{
+use crate::ecs::legacy_runtime::resources::WorkerDiagnosticsResource;
+use crate::ecs::legacy_runtime::scheduling::access::{ComponentSet, ResourceSet};
+use crate::ecs::legacy_runtime::scheduling::command::CommandWriter;
+use crate::ecs::legacy_runtime::scheduling::metadata::{
     ErasedSystem, ExecutionClass, SerializationPolicy, Stage, SystemId, SystemMetadata,
     SystemResult, SystemSpec,
 };
-use crate::ecs::runtime::world::World;
+use crate::ecs::legacy_runtime::world::World;
 
 // ---------------------------------------------------------------------------
 // System

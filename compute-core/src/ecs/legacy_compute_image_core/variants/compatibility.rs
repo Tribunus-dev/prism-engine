@@ -8,16 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
-<<<<<<<< HEAD:compute-core/src/ecs/compute_image/legacy_compute_image_runtime/variants/compatibility.rs
-use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-use crate::ecs::compute_image::legacy_compute_image_runtime::variants::shape_class::ShapeVariantDefinition;
-|||||||| e64c7d94:compute-core/src/ecs/compute_image/variants/compatibility.rs
-use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-use crate::ecs::compute_image::variants::shape_class::ShapeVariantDefinition;
-========
 use crate::ecs::legacy_compute_image_core::execution_shape::ExecutionShapeClass;
-use crate::ecs::legacy_compute_image_core::variants::shape_class::ShapeVariantDefinition;
->>>>>>>> migrate/ci-core:compute-core/src/ecs/legacy_compute_image_core/variants/compatibility.rs
+use crate::ecs::compute_image::legacy_compute_image_runtime::variants::shape_class::ShapeVariantDefinition;
 
 /// Structured report of compatibility between a variant and a request.
 ///

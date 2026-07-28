@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::num::NonZeroUsize;
 
-use crate::ecs::runtime::ledger::entry::{TransitionReceipt, DEFAULT_TRANSITION_LEDGER_CAPACITY};
+use crate::ecs::legacy_runtime::ledger::entry::{TransitionReceipt, DEFAULT_TRANSITION_LEDGER_CAPACITY};
 
 /// Bounded rolling window of semantic transition receipts.
 ///
@@ -79,8 +79,8 @@ impl TransitionLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::runtime::ledger::entry::DeterministicReceiptPayload;
-    use crate::ecs::runtime::scheduling::metadata::Stage;
+    use crate::ecs::legacy_runtime::ledger::entry::DeterministicReceiptPayload;
+    use crate::ecs::legacy_runtime::scheduling::metadata::Stage;
 
     fn dummy_receipt(seq: u64) -> TransitionReceipt {
         let payload = DeterministicReceiptPayload {
