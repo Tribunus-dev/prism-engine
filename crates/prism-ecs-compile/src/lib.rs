@@ -163,6 +163,7 @@ pub mod cimage;
 pub mod cimage_manifest;
 pub mod cimage_packer;
 pub mod cimage_pipeline;
+pub mod cimage_v0;
 pub mod cimage_validation;
 pub mod uop;
 pub use assembly::{assemble, AssemblyModelSource, AssemblyReceipt, AssemblyRequest};
