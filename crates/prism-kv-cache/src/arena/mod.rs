@@ -1,12 +1,14 @@
-//! Paged KV cache arena: physical blocks, COW refcounting, prefix caching,
-//! backend residency mapping, and admission control with eviction.
+//! This module owns the canonical authority for the paged KV-cache arena
+//! facade: sequence identity, admission receipts, logical block tables, the
+//! arena error taxonomy, and the `KvBlockArena` aggregator that wires the
+//! subordinate block / backend / prefix / refcount authorities into a single
+//! allocation-and-eviction surface.
 
 pub mod backend;
 pub mod block;
 pub mod prefix;
 pub mod refcount;
 
-use crate::ecs::compute_image::kv_plan::KvCachePlan;
 use backend::ResidencyTable;
 use block::{tokens_to_blocks, BackendAffinity, PhysicalBlock, PhysicalBlockId};
 use prefix::{PrefixCacheIndex, PrefixHash};
@@ -91,6 +93,10 @@ pub enum ArenaError {
         attempted: usize,
         available: usize,
     },
+    /// Eviction produced a free-list entry that the allocator could not
+    /// consume. Indicates an internal invariant violation in the free
+    /// list / eviction interaction, not a capacity problem.
+    EvictionInvariantBroken,
 }
 
 use std::fmt;
@@ -119,6 +125,13 @@ impl fmt::Display for ArenaError {
                     f,
                     "KV arena out of memory: attempted {attempted} bytes, \
                      {available} available"
+                )
+            }
+            ArenaError::EvictionInvariantBroken => {
+                write!(
+                    f,
+                    "KV arena eviction returned a slot that the free list \
+                     could not produce — internal invariant broken"
                 )
             }
         }
@@ -188,8 +201,11 @@ impl KvBlockArena {
         // Try eviction when at capacity
         if self.blocks.len() >= self.capacity {
             if self.evict_one().is_some() {
-                // evict_one pushed the slot to free_list; pop and reinit
-                let idx = self.free_list.pop().unwrap();
+                // evict_one pushed the slot to free_list; pop and reinit.
+                let idx = self
+                    .free_list
+                    .pop()
+                    .ok_or(ArenaError::EvictionInvariantBroken)?;
                 let id = PhysicalBlockId(idx as u32);
                 self.blocks[idx] = PhysicalBlock::new(id, self.block_size, self.backend);
                 return Ok(id);
@@ -224,23 +240,32 @@ impl KvBlockArena {
     /// Allocate a block, checking the prefix cache first.
     /// If a cached block with matching content hash exists, its refcount
     /// is incremented and it is returned — no new allocation is made.
-    pub fn allocate_prefixed(&mut self, hash: &PrefixHash) -> PhysicalBlockId {
+    /// If neither the cache nor the allocator can produce a block after
+    /// an eviction pass, returns `ArenaError::CapacityExceeded` (or
+    /// `OutOfMemory` once eviction has been attempted).
+    pub fn allocate_prefixed(
+        &mut self,
+        hash: &PrefixHash,
+    ) -> Result<PhysicalBlockId, ArenaError> {
         if let Some(cached_id) = self.prefix_cache.lookup(hash) {
             // Found a cached block — inc refcount so it stays live
             if let Some(block) = self.blocks.iter_mut().find(|b| b.id.0 == cached_id) {
                 block.inc_ref();
             }
-            return PhysicalBlockId(cached_id);
+            return Ok(PhysicalBlockId(cached_id));
         }
-        // Cache miss — allocate new block and register in prefix cache
-        let id = self.try_allocate().unwrap_or_else(|_| {
-            // Fallback: evict and retry
-            self.evict_one();
-            self.try_allocate()
-                .expect("KV arena: out of blocks even with eviction")
-        });
+        // Cache miss — allocate new block, falling back to eviction, then
+        // surface a typed error if even eviction cannot free a slot.
+        let id = match self.try_allocate() {
+            Ok(id) => id,
+            Err(ArenaError::CapacityExceeded { .. }) => {
+                self.evict_one();
+                self.try_allocate()?
+            }
+            Err(other) => return Err(other),
+        };
         self.prefix_cache.insert(*hash, id.0);
-        id
+        Ok(id)
     }
 
     /// Admit a new sequence, allocating enough physical blocks to hold
@@ -331,10 +356,24 @@ impl KvBlockArena {
     }
 }
 
+/// Minimal local replacement for the engine's
+/// `crate::ecs::compute_image::kv_plan::KvCachePlan`. The constitutional
+/// arena only needs the fields it actually reads (`block_tokens`,
+/// `max_blocks`, `eviction_policy`, `cow_policy`); everything else is
+/// ignored. A future migration may substitute a constitutional
+/// `KvCachePlan` type when the engine absorbs its compute-image surface.
+#[derive(Clone, Debug, Default)]
+pub struct KvCachePlan {
+    pub block_tokens: u32,
+    pub max_blocks: u32,
+    pub eviction_policy: String,
+    pub cow_policy: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::kv_arena::block::DEFAULT_BLOCK_SIZE;
+    use block::DEFAULT_BLOCK_SIZE;
 
     #[test]
     fn test_admit_sequence() {
@@ -364,7 +403,7 @@ mod tests {
         let mut arena = KvBlockArena::new(DEFAULT_BLOCK_SIZE, 1, BackendAffinity::HostPinned);
 
         // Fill the only slot
-        let _ = arena.try_allocate().expect("first alloc should succeed");
+        arena.try_allocate().expect("first alloc should succeed");
 
         // Second alloc must fail — no evictable blocks (refcount == 1)
         let err = arena.try_allocate().unwrap_err();
@@ -380,11 +419,15 @@ mod tests {
         let hash = PrefixHash(42);
 
         // First call: cache miss → new block allocated and registered
-        let id1 = arena.allocate_prefixed(&hash);
+        let id1 = arena
+            .allocate_prefixed(&hash)
+            .expect("first allocate_prefixed should succeed");
         assert_ne!(id1, PhysicalBlockId::INVALID);
 
         // Second call with same hash: cache hit → same block returned
-        let id2 = arena.allocate_prefixed(&hash);
+        let id2 = arena
+            .allocate_prefixed(&hash)
+            .expect("second allocate_prefixed should succeed");
         assert_eq!(id1, id2, "prefix cache should reuse the same block id");
     }
 

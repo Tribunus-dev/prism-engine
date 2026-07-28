@@ -255,12 +255,9 @@ pub use crate::ecs::inference;
 // `crate::ecs::inference_profile` (TAIP) was absorbed into the constitutional
 // phase-graph surface; the engine no longer re-exports it. See
 // `changelogs/2026-07-25-compute-core-absorption-phase-0-1.md`.
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub use crate::ecs::kv_arena;
+// `crate::ecs::kv_arena` was absorbed into the constitutional
+// `prism_kv_cache::arena` surface; the engine no longer re-exports it.
+// See `changelogs/2026-07-27-engine-subsystem-deletion-kv-arena.md`.
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
 pub use prism_kv_cache;
 #[cfg(any(

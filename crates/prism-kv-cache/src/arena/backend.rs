@@ -1,19 +1,11 @@
-//! Per-backend block residency mapping.
-//! Each backend (MLX, Candle, Tensix) can store KV blocks in its own
-//! memory domain. The arena tracks which backend owns which block.
+//! This module owns the canonical authority for backend-to-block residency
+//! mapping: which memory domain a block lives in and how much it costs in
+//! bytes, plus the table that records one entry per active block.
 
-/// Memory domain for a block.
-/// Imported from `backend::residency` when `legacy_mutations` is enabled;
-/// otherwise defined locally to avoid the gated dependency.
-#[cfg(feature = "legacy_mutations")]
-use crate::ecs::backend::residency::MemoryDomain;
+use super::block::{BackendAffinity, PhysicalBlockId};
 
-/// Per-backend memory domain.
-///
-/// Mirrors the definition in `crate::ecs::backend::residency` for builds
-/// without the `legacy_mutations` feature.
+/// Per-backend memory domain in which a physical block resides.
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
-#[cfg(not(feature = "legacy_mutations"))]
 pub enum MemoryDomain {
     HostPageable,
     HostPinned,
@@ -21,7 +13,6 @@ pub enum MemoryDomain {
     SharedUnified,
     MappedExternal,
 }
-use crate::ecs::kv_arena::block::{BackendAffinity, PhysicalBlockId};
 
 /// Maps a physical block to its backend residency info.
 #[derive(Clone, Debug)]

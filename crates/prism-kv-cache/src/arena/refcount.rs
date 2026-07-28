@@ -1,6 +1,7 @@
-//! Copy-on-write refcounting and LRU eviction for KV cache blocks.
+//! This module owns the canonical authority for copy-on-write refcounting
+//! semantics and LRU eviction ordering of physical KV-cache blocks.
 
-use crate::ecs::kv_arena::block::PhysicalBlock;
+use super::block::PhysicalBlock;
 use std::collections::VecDeque;
 
 /// Eviction policy selector.

@@ -1,5 +1,7 @@
-//! Physical and logical KV block management.
-//! Each block stores KV data for a fixed number of tokens.
+//! This module owns the canonical authority for physical KV-cache block
+//! identity, capacity, atomic refcount, and last-access timestamp, plus the
+//! per-request logical block table that maps logical indices to physical
+//! block ids.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -52,14 +54,11 @@ impl PhysicalBlock {
     }
 
     pub fn touch(&self) {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        self.last_access_ns.store(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64,
-            Ordering::Relaxed,
-        );
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        self.last_access_ns.store(nanos, Ordering::Relaxed);
     }
 
     pub fn is_full(&self) -> bool {

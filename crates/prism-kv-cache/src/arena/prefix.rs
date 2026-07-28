@@ -1,5 +1,7 @@
-//! Prefix hashing and content-based KV cache block dedup.
-//! Ported concept from vLLM's automatic prefix caching.
+//! This module owns the canonical authority for content-hash based prefix
+//! cache lookup: deterministic hashing of (model, tokenizer version, layer,
+//! token slice) tuples and the index that maps a hash to a physical block id
+//! with hit-rate accounting.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
