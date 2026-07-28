@@ -10,11 +10,17 @@ description = "Prism ECS constitutional commands — session, work, execution, c
 # into the constitutional QuantizationResultComponent. Disabled by
 # default so the constitutional crate stays free of compiler
 # dependencies.
-quantization-bridge = ["dep:prism-ecs-quantization", "dep:prism-ecs-ir"]
+quantization-bridge = ["dep:prism-ecs-quantization"]
 
 [dependencies]
 prism-ecs-core = { path = "../prism-ecs-core" }
 prism-ecs-kernel = { path = "../prism-ecs-kernel" }
+# Canonical IR types — the constitutional surface for compiler
+# pipeline types re-exports the source-of-truth IR primitives
+# (tensor identity, engram identity, region identity, evolution
+# receipts) from the IR crate. The constitutional crate wraps
+# them with its own authority-bearing newtypes when needed.
+prism-ecs-ir = { path = "../prism-ecs-ir" }
 serde_json = "1"
 blake3 = "1"
 serde_json_canonicalizer = "0.3"
@@ -23,5 +29,6 @@ thiserror = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 strum = { workspace = true }
 parking_lot = { workspace = true }
+sha2 = { version = "0.10", features = ["asm"] }
+bincode = { version = "1.3" }
 prism-ecs-quantization = { path = "../prism-ecs-quantization", optional = true }
-prism-ecs-ir = { path = "../prism-ecs-ir", optional = true }
