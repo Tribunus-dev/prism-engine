@@ -1,1 +1,1 @@
-pub use crate::ecs::core::runtime_orchestration::*;
+pub use crate::ecs::legacy_core::runtime_orchestration::*;

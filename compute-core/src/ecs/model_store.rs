@@ -1,1 +1,1 @@
-pub use crate::ecs::core::model_store::*;
+pub use crate::ecs::legacy_core::model_store::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::storage_kernel::*;
+pub use crate::ecs::legacy_core::storage_kernel::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::weight_codec::*;
+pub use crate::ecs::legacy_core::weight_codec::*;

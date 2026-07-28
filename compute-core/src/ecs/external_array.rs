@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::external_array::*;
+pub use crate::ecs::legacy_core::external_array::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::fusion_region::*;
+pub use crate::ecs::legacy_core::fusion_region::*;

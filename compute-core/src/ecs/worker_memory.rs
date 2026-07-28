@@ -1,1 +1,1 @@
-pub use crate::ecs::core::worker_memory::*;
+pub use crate::ecs::legacy_core::worker_memory::*;

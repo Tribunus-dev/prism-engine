@@ -1,1 +1,1 @@
-pub use crate::ecs::core::requalification::*;
+pub use crate::ecs::legacy_core::requalification::*;

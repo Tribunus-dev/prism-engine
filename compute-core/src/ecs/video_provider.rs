@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::video_provider::*;
+pub use crate::ecs::legacy_core::video_provider::*;

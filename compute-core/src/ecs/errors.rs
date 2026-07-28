@@ -1,1 +1,1 @@
-pub use crate::ecs::core::errors::*;
+pub use crate::ecs::legacy_core::errors::*;

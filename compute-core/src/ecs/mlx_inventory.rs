@@ -1,1 +1,1 @@
-pub use crate::ecs::core::mlx_inventory::*;
+pub use crate::ecs::legacy_core::mlx_inventory::*;

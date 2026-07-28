@@ -1,1 +1,1 @@
-pub use crate::ecs::core::plugin::*;
+pub use crate::ecs::legacy_core::plugin::*;

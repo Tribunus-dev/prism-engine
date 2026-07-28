@@ -1,1 +1,1 @@
-pub use crate::ecs::core::worker_protocol::*;
+pub use crate::ecs::legacy_core::worker_protocol::*;

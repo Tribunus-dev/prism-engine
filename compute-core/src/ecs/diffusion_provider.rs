@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::diffusion_provider::*;
+pub use crate::ecs::legacy_core::diffusion_provider::*;

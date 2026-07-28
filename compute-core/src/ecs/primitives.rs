@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::primitives::*;
+pub use crate::ecs::legacy_core::primitives::*;

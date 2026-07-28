@@ -1,1 +1,1 @@
-pub use crate::ecs::core::ring::*;
+pub use crate::ecs::legacy_core::ring::*;

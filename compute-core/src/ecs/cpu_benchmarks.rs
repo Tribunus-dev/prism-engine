@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::cpu_benchmarks::*;
+pub use crate::ecs::legacy_core::cpu_benchmarks::*;

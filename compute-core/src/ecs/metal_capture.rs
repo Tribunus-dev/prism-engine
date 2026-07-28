@@ -1,1 +1,1 @@
-pub use crate::ecs::core::metal_capture::*;
+pub use crate::ecs::legacy_core::metal_capture::*;

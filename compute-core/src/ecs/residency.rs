@@ -1,1 +1,1 @@
-pub use crate::ecs::core::residency::*;
+pub use crate::ecs::legacy_core::residency::*;

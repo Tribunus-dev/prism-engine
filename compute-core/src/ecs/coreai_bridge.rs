@@ -1,1 +1,1 @@
-pub use crate::ecs::core::coreai_bridge::*;
+pub use crate::ecs::legacy_core::coreai_bridge::*;

@@ -1,2 +1,2 @@
 #![cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
-pub use crate::ecs::core::mlpackage::*;
+pub use crate::ecs::legacy_core::mlpackage::*;

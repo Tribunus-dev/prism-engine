@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::research_contracts::*;
+pub use crate::ecs::legacy_core::research_contracts::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::speculative::*;
+pub use crate::ecs::legacy_core::speculative::*;

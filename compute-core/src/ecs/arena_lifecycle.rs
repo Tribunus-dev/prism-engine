@@ -1,1 +1,1 @@
-pub use crate::ecs::core::arena_lifecycle::*;
+pub use crate::ecs::legacy_core::arena_lifecycle::*;

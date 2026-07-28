@@ -11,6 +11,7 @@
 
 pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_bitnet_imports;
+pub mod workspace_legacy_core_imports;
 pub mod workspace_legacy_evaluator_imports;
 pub mod workspace_legacy_evolution_imports;
 pub mod workspace_legacy_imports;

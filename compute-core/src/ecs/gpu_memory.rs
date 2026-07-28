@@ -1,1 +1,1 @@
-pub use crate::ecs::core::gpu_memory::*;
+pub use crate::ecs::legacy_core::gpu_memory::*;

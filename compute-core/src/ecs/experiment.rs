@@ -1,1 +1,1 @@
-pub use crate::ecs::core::experiment::*;
+pub use crate::ecs::legacy_core::experiment::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::supervisor_crash::*;
+pub use crate::ecs::legacy_core::supervisor_crash::*;

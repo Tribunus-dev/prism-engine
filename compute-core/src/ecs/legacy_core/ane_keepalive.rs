@@ -25,7 +25,7 @@ use std::thread;
 
 use crate::ecs::arena::Arena;
 use crate::ecs::arena::DataType;
-use crate::ecs::core::coreai_pipeline::build_matmul_region;
+use crate::ecs::legacy_core::coreai_pipeline::build_matmul_region;
 use crate::ecs::coreai_bridge::CoreAiModel;
 
 /// ANE keepalive
