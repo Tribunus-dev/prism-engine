@@ -10,6 +10,10 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 blake3 = { workspace = true }
+# `half` is used by the LUT math kernels (FP16 bit-pattern ↔ f32
+# conversions for CPU-fallback matrix-vector multiplies, RMS norm,
+# attention, RoPE, and activation functions).
+half = "2"
 
 [dev-dependencies]
 tempfile = { workspace = true }

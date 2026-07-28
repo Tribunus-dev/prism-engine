@@ -3915,6 +3915,7 @@ name = "prism-ecs-codec"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "half",
  "serde",
  "serde_json",
  "tempfile",

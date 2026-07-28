@@ -12,8 +12,14 @@
 //! fixtures, immutable evidence, admission decisions, and the system that
 //! coordinates evaluation lanes. See [`evaluator::HeterogeneousEvaluatorSystem`]
 //! for the entry point.
+//!
+//! The [`lut`] submodule owns the canonical authority for the lookup-table
+//! (LUT) codec: model graph descriptors, palettized matrix format, FP16 math
+//! kernels, and INT8 KV-cache quantization helpers. See [`lut::graph`] for
+//! the entry point.
 
 pub mod evaluator;
+pub mod lut;
 
 use serde::{Deserialize, Serialize};
 use std::{convert::TryFrom, fs, path::Path};
