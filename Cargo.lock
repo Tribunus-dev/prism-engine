@@ -3925,6 +3925,7 @@ dependencies = [
 name = "prism-ecs-compile"
 version = "0.1.0"
 dependencies = [
+ "bincode",
  "blake3",
  "chrono",
  "half",

@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 // ── Backend identity ────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct BackendId(pub u32);
 
 pub const BACKEND_METAL: BackendId = BackendId(0);

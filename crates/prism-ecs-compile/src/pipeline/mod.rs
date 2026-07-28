@@ -24,6 +24,7 @@ pub mod graph_optimizer;
 pub mod lifecycle_coordinator;
 pub mod lowering;
 pub mod pass;
+pub mod plan;
 pub mod scheduled;
 pub mod semantic;
 

@@ -5,7 +5,7 @@
 //! boundaries, residency, synchronization, and backend assignment. The
 //! semantic graph in [`super::semantic::SemanticModule`] remains untouched.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use prism_ecs_backend::routing::{
     BackendId, EvidenceDigest, OperationFamily, OperationId, PhysicalLayout, TensorId, TensorShape,
@@ -198,7 +198,7 @@ pub struct MemoryPlan {
     /// Peak memory at any synchronization point (bytes).
     pub peak_bytes: u64,
     /// Memory per backend.
-    pub per_backend: HashMap<BackendId, u64>,
+    pub per_backend: BTreeMap<BackendId, u64>,
     /// Tensors that share physical storage (aliased).
     pub aliases: Vec<(TensorId, TensorId)>,
     /// Buffer reuse plan.
@@ -267,7 +267,7 @@ impl ScheduledModule {
             memory_plan: MemoryPlan {
                 total_bytes: 0,
                 peak_bytes: 0,
-                per_backend: HashMap::new(),
+                per_backend: BTreeMap::new(),
                 aliases: Vec::new(),
                 buffer_reuse: Vec::new(),
             },

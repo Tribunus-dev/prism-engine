@@ -33,6 +33,7 @@ tracing = { workspace = true }
 half = { workspace = true }
 libc.workspace = true
 safetensors = "0.8"
+bincode = "1"
 
 [features]
 phase4_evaluation = []
