@@ -1,12 +1,12 @@
 //! BitNet b1.58 native weight importer.
 //!
 //! Ingests already-ternary {-1, 0, +1} weights from a BitNet model into
-//! `TernaryPackedTensor` values. For hermetic testing, deterministic
+//! [`TernaryPackedTensor`] values. For hermetic testing, deterministic
 //! pseudo-random generation is used in place of live safetensors I/O.
 
-use crate::ternary::codec::{TernaryCodecError, TernaryPackedTensor};
-use crate::ternary::pack::pack_ternary_codes;
 use half::f16;
+
+use super::ternary_codec::{pack_ternary_codes, TernaryCodecError, TernaryPackedTensor};
 
 /// BitNet native weight importer.
 ///
@@ -17,16 +17,16 @@ pub struct BitNetImporter;
 impl BitNetImporter {
     /// Generate a deterministic set of {-1, 0, +1} weights.
     ///
-    /// Uses the MMIX LCG (same as the cimage shard builder) to generate
-    /// f32 values in [-1, 1), then thresholds at ±1/3 to produce a roughly
-    /// equal ternary distribution.
+    /// Uses the MMIX LCG (same as the cimage shard builder) to
+    /// generate f32 values in [-1, 1), then thresholds at ±1/3 to
+    /// produce a roughly equal ternary distribution.
     pub fn generate_ternary_weights(seed: u64, num_weights: usize) -> Vec<i8> {
         let mut state = seed;
         let mut weights = Vec::with_capacity(num_weights);
         for _ in 0..num_weights {
             state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             // Reinterpret as f32 in (-1, 1)
             let f = ((state >> 32) as i32 as f64) / (1i64 << 31) as f64;
             let f = f.clamp(-1.0, 1.0) as f32;
@@ -42,14 +42,15 @@ impl BitNetImporter {
         weights
     }
 
-    /// Import a single ternary tensor, packing into codes and computing scales.
+    /// Import a single ternary tensor, packing into codes and computing
+    /// scales.
     ///
-    /// `rows` and `cols` describe the stored (pack) shape, which for a
-    /// BitLinear weight is [in_features, out_features] — the weights are
-    /// already in transposed storage layout.
+    /// `rows` and `cols` describe the stored (pack) shape, which for
+    /// a BitLinear weight is [in_features, out_features] — the
+    /// weights are already in transposed storage layout.
     ///
-    /// For each row, `groups_per_row = cols.div_ceil(group_size)` and one
-    /// f16 scale is emitted per group.
+    /// For each row, `groups_per_row = cols.div_ceil(group_size)` and
+    /// one f16 scale is emitted per group.
     pub fn import_ternary_tensor(
         seed: u64,
         rows: usize,
@@ -96,9 +97,8 @@ impl BitNetImporter {
     /// Import the three MLP weight tensors for a BitNet MLP block.
     ///
     /// Returns `(gate_proj, up_proj, down_proj)`, each as a
-    /// `TernaryPackedTensor` in [in_features, out_features] (stored) layout.
-    ///
-    /// Seeds are offset to avoid correlation between tensors.
+    /// `TernaryPackedTensor` in [in_features, out_features] (stored)
+    /// layout. Seeds are offset to avoid correlation between tensors.
     pub fn import_mlp_block(
         seed: u64,
         hidden_dim: usize,
@@ -119,14 +119,12 @@ impl BitNetImporter {
             intermediate_dim,
             group_size,
         )?;
-        // BitLinear up_proj: same shape.
         let up = Self::import_ternary_tensor(
             seed.wrapping_add(2),
             hidden_dim,
             intermediate_dim,
             group_size,
         )?;
-        // BitLinear down_proj: [hidden_dim, intermediate_dim] → stored [intermediate_dim, hidden_dim]
         let down = Self::import_ternary_tensor(
             seed.wrapping_add(3),
             intermediate_dim,
@@ -137,7 +135,8 @@ impl BitNetImporter {
         Ok((gate, up, down))
     }
 
-    /// Import Q/K/V/O attention projection tensors for a BitNet decoder layer.
+    /// Import Q/K/V/O attention projection tensors for a BitNet decoder
+    /// layer.
     ///
     /// Q,O shapes: stored [hidden_dim, hidden_dim]
     /// K,V shapes: stored [hidden_dim, kv_inner] where kv_inner = num_kv_heads * head_dim
@@ -158,27 +157,40 @@ impl BitNetImporter {
         TernaryCodecError,
     > {
         let kv_inner = num_kv_heads * head_dim;
-        let q =
-            Self::import_ternary_tensor(seed.wrapping_add(1), hidden_dim, hidden_dim, group_size)?;
-        let k =
-            Self::import_ternary_tensor(seed.wrapping_add(2), hidden_dim, kv_inner, group_size)?;
-        let v =
-            Self::import_ternary_tensor(seed.wrapping_add(3), hidden_dim, kv_inner, group_size)?;
-        let o =
-            Self::import_ternary_tensor(seed.wrapping_add(4), hidden_dim, hidden_dim, group_size)?;
+        let q = Self::import_ternary_tensor(
+            seed.wrapping_add(1),
+            hidden_dim,
+            hidden_dim,
+            group_size,
+        )?;
+        let k = Self::import_ternary_tensor(
+            seed.wrapping_add(2),
+            hidden_dim,
+            kv_inner,
+            group_size,
+        )?;
+        let v = Self::import_ternary_tensor(
+            seed.wrapping_add(3),
+            hidden_dim,
+            kv_inner,
+            group_size,
+        )?;
+        let o = Self::import_ternary_tensor(
+            seed.wrapping_add(4),
+            hidden_dim,
+            hidden_dim,
+            group_size,
+        )?;
         Ok((q, k, v, o))
     }
 
     /// Import a 1-D layernorm weight tensor.
     pub fn import_layernorm_tensor(seed: u64, dim: usize) -> TernaryPackedTensor {
         let weights = Self::generate_ternary_weights(seed, dim);
-        // Layernorm: single group, each weight is its own "scale" value
         let group_size = dim;
         let groups_per_row = 1;
         let bytes_per_group = (dim + 3) / 4;
-        let _num_weights = dim;
         let codes = pack_ternary_codes(&weights).unwrap_or_default();
-        // Scale: sum(|w|) / dim per group
         let sum_abs: i32 = weights.iter().map(|&w| (w as i32).abs()).sum();
         let scale_f32 = sum_abs as f32 / dim as f32;
         let scales = vec![half::f16::from_f32(scale_f32)];
@@ -216,7 +228,9 @@ impl BitNetImporter {
         let post_attn_ln = Self::import_layernorm_tensor(seed.wrapping_add(5), hidden_dim);
         let (gate, up, down) =
             Self::import_mlp_block(seed, hidden_dim, intermediate_dim, group_size)?;
-        // Position IDs: sequential 0..seq_len as f32. Not ternary — store codes as raw f32 le bytes.
+
+        // Position IDs: sequential 0..seq_len as f32. Not ternary —
+        // store codes as raw f32 le bytes.
         let pos_data: Vec<u8> = (0..seq_len)
             .flat_map(|i| (i as f32).to_le_bytes())
             .collect();
@@ -249,10 +263,10 @@ impl BitNetImporter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ternary::pack::unpack_ternary_codes;
+    use crate::bitnet::ternary_codec::unpack_ternary_codes;
 
     #[test]
-    fn test_importer_generates_valid_ternary_weights() {
+    fn importer_generates_valid_ternary_weights() {
         let w = BitNetImporter::generate_ternary_weights(42, 1000);
         assert_eq!(w.len(), 1000);
         for &v in &w {
@@ -273,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn test_importer_roundtrip() {
+    fn importer_roundtrip() {
         let tensor = BitNetImporter::import_ternary_tensor(42, 8, 128, 32).unwrap();
         assert_eq!(tensor.rows, 8);
         assert_eq!(tensor.cols, 128);
@@ -285,18 +299,16 @@ mod tests {
         let unpacked = unpack_ternary_codes(&tensor.codes, total_values).unwrap();
         assert_eq!(unpacked.len(), total_values);
 
-        // Scales: rows * groups_per_row.
         assert_eq!(tensor.scales.len(), tensor.rows * tensor.groups_per_row);
     }
 
     #[test]
-    fn test_importer_mlp_block_shapes() {
+    fn importer_mlp_block_shapes() {
         let (gate, up, down) = BitNetImporter::import_mlp_block(42, 256, 1024, 32).unwrap();
         // Gate: stored [hidden_dim, intermediate_dim]
         assert_eq!(gate.rows, 256);
         assert_eq!(gate.cols, 1024);
         assert_eq!(gate.groups_per_row, 1024 / 32);
-        // Up: same
         assert_eq!(up.rows, 256);
         assert_eq!(up.cols, 1024);
         // Down: stored [intermediate_dim, hidden_dim]

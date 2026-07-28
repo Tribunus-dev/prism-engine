@@ -32,7 +32,6 @@ pub mod audio_provider;
 pub mod autopsy;
 pub mod backend;
 pub mod benchmark;
-pub mod bitnet;
 pub mod cache;
 pub mod calibration;
 pub mod candle_cpu_backend;

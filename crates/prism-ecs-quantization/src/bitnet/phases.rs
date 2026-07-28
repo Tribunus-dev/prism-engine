@@ -2,25 +2,23 @@
 //!
 //! ## Codec contract
 //!
-//! The `CodecFamily::Ternary1_58` variant (BitNet's b1.58 format) maps to the
-//! production `RuntimeRepresentationClass::TernaryTile640Base` representation.
-//! The canonical physical contract is recorded in
-//! [`TernaryCandidateRecipe`]
-//! with codec [`TernaryCodec::BitNet158`](crate::ecs::quantization::contract::TernaryCodec).
-//! Each phase uses the existing cimage shard builder infrastructure to
-//! emit a `PendingCImageShard` from BitNet-native ternary weights.
+//! The `CodecFamily::Ternary1_58` variant (BitNet's b1.58 format) maps
+//! to the canonical ternary1.58 codec. Each phase uses the in-module
+//! cimage shim to emit a `PendingCImageShard` from BitNet-native
+//! ternary weights.
 
-use crate::ecs::bitnet::checkpoint::BitNetCheckpoint;
-use crate::ecs::bitnet::importer::BitNetImporter;
-use crate::ecs::cimage::streaming_writer::StreamingCImageWriter;
-use crate::ecs::cimage::*;
-#[allow(unused_imports)]
-use crate::ecs::quantization::contract::TernaryCandidateRecipe;
-use crate::execution_plan::{CodecFamily, DType, HardwareProfileId};
-use crate::ternary::codec::TernaryPackedTensor;
-use crate::ternary::pack::unpack_ternary_codes;
 use sha2::{Digest, Sha256};
 use std::path::Path;
+
+use super::cimage_shim::{
+    CodecFamily, CImageArtifactKind, CImageError, CImageManifestV0, CImagePayloadKind,
+    CImagePayloadRef, CImageResult, CImageTensorEntry, DType, HardwareProfileId,
+    ModelExecutionPlanSummary, PendingCImageShard, PendingPayload, PhysicalTileLayout,
+    StreamingCImageWriter,
+};
+use super::checkpoint::{make_ternary_from_checkpoint, BitNetCheckpoint};
+use super::importer::BitNetImporter;
+use super::ternary_codec::{unpack_ternary_codes, TernaryPackedTensor};
 
 /// Compute SHA-256 hex digest of raw ternary codes (little-endian bytes).
 fn sha256_of_bytes(data: &[u8]) -> String {
@@ -28,9 +26,6 @@ fn sha256_of_bytes(data: &[u8]) -> String {
 }
 
 /// String label used in `PendingPayload.codec` for the BitNet b1.58 ternary format.
-/// Corresponds to `CodecFamily::Ternary1_58` and maps to
-/// `TernaryCodec::BitNet158` in
-/// [`TernaryCandidateRecipe`].
 const BITNET_TERNARY_CODEC_LABEL: &str = "Ternary1_58";
 
 /// Build a `PhysicalTileLayout` for a ternary-grouped tensor.
@@ -44,7 +39,7 @@ fn ternary_layout(tensor: &TernaryPackedTensor) -> PhysicalTileLayout {
         group_size: tensor.group_size as u32,
         groups_per_tile: tensor.groups_per_row as u32,
         packed_bytes_per_tile: (tensor.groups_per_row * tensor.bytes_per_group) as u32,
-        metadata_f32_per_tile: ((tensor.groups_per_row + 1) / 2) as u32, // f16 -> 2 per u32
+        metadata_f32_per_tile: ((tensor.groups_per_row + 1) / 2) as u32,
     }
 }
 
@@ -201,8 +196,6 @@ pub fn emit_bitnet_mlp_block(
     })
 }
 
-/// Phase 3: Emit one full BitNet decoder layer (attention + MLP).
-///
 /// Configuration for emitting a BitNet decoder layer or full model cimage shard.
 #[derive(Debug, Clone)]
 pub struct BitNetDecoderLayerShardConfig {
@@ -247,7 +240,6 @@ fn emit_ternary_decoder_tensor(
     let tensor = BitNetImporter::import_ternary_tensor(seed, rows, cols, group_size)
         .map_err(|e| CImageError::Other(format!("import {tensor_key}: {e}")))?;
 
-    // RawF32 reference: ternary {-1, 0, +1} values as f32.
     let weights = BitNetImporter::generate_ternary_weights(seed, rows * cols);
     let raw_f32_bytes: Vec<u8> = weights
         .iter()
@@ -371,7 +363,6 @@ pub fn emit_bitnet_decoder_layer(
     let mut entries: Vec<CImageTensorEntry> = Vec::with_capacity(11);
     let mut tensor_idx = 0usize;
 
-    // 1. input_layernorm.weight — norm, single scale (group_size = hidden_dim)
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -384,7 +375,6 @@ pub fn emit_bitnet_decoder_layer(
         config.hidden_dim,
     )?;
 
-    // 2. q_proj.weight — attention Q projection
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -397,7 +387,6 @@ pub fn emit_bitnet_decoder_layer(
         config.group_size,
     )?;
 
-    // 3. k_proj.weight — attention K projection
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -410,7 +399,6 @@ pub fn emit_bitnet_decoder_layer(
         config.group_size,
     )?;
 
-    // 4. v_proj.weight — attention V projection
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -423,7 +411,6 @@ pub fn emit_bitnet_decoder_layer(
         config.group_size,
     )?;
 
-    // 5. o_proj.weight — attention O projection
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -436,7 +423,6 @@ pub fn emit_bitnet_decoder_layer(
         config.group_size,
     )?;
 
-    // 6. post_attention_layernorm.weight — norm
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -449,7 +435,6 @@ pub fn emit_bitnet_decoder_layer(
         config.hidden_dim,
     )?;
 
-    // 7. gate_proj.weight — MLP gate projection
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -462,7 +447,6 @@ pub fn emit_bitnet_decoder_layer(
         config.group_size,
     )?;
 
-    // 8. up_proj.weight — MLP up projection
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -475,7 +459,6 @@ pub fn emit_bitnet_decoder_layer(
         config.group_size,
     )?;
 
-    // 9. down_proj.weight — MLP down projection
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -488,7 +471,6 @@ pub fn emit_bitnet_decoder_layer(
         config.group_size,
     )?;
 
-    // 10. position_ids — sequential token positions, RawF32
     let pos_ids: Vec<f32> = (0..config.seq_len).map(|i| i as f32).collect();
     emit_rawf32_tensor(
         &mut all_payloads,
@@ -499,7 +481,6 @@ pub fn emit_bitnet_decoder_layer(
         &pos_ids,
     )?;
 
-    // 11. rmsnorm_w — same data as input_layernorm
     emit_ternary_decoder_tensor(
         &mut all_payloads,
         &mut entries,
@@ -542,8 +523,6 @@ pub fn emit_bitnet_decoder_layer(
 }
 
 /// Emit a full BitNet model by stacking `num_layers` decoder layers.
-///
-/// Each layer's tensors are prefixed with `"layer.{N}."`.
 pub fn emit_bitnet_full_model(
     config: &BitNetDecoderLayerShardConfig,
 ) -> CImageResult<PendingCImageShard> {
@@ -556,7 +535,6 @@ pub fn emit_bitnet_full_model(
         let prefix = format!("layer.{layer_idx}.");
         let kv_inner = config.num_kv_heads * config.head_dim;
 
-        // 1. input_layernorm.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -569,7 +547,6 @@ pub fn emit_bitnet_full_model(
             config.hidden_dim,
         )?;
 
-        // 2. q_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -582,7 +559,6 @@ pub fn emit_bitnet_full_model(
             config.group_size,
         )?;
 
-        // 3. k_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -595,9 +571,6 @@ pub fn emit_bitnet_full_model(
             config.group_size,
         )?;
 
-        // 4. v_proj.weight
-
-        // 4. v_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -609,6 +582,7 @@ pub fn emit_bitnet_full_model(
             kv_inner,
             config.group_size,
         )?;
+
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -621,7 +595,6 @@ pub fn emit_bitnet_full_model(
             config.group_size,
         )?;
 
-        // 6. post_attention_layernorm.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -634,7 +607,6 @@ pub fn emit_bitnet_full_model(
             config.hidden_dim,
         )?;
 
-        // 7. gate_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -647,7 +619,6 @@ pub fn emit_bitnet_full_model(
             config.group_size,
         )?;
 
-        // 8. up_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -660,7 +631,6 @@ pub fn emit_bitnet_full_model(
             config.group_size,
         )?;
 
-        // 9. down_proj.weight
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -673,7 +643,6 @@ pub fn emit_bitnet_full_model(
             config.group_size,
         )?;
 
-        // 10. position_ids (RawF32)
         let pos_ids: Vec<f32> = (0..config.seq_len).map(|i| i as f32).collect();
         emit_rawf32_tensor(
             &mut all_payloads,
@@ -684,7 +653,6 @@ pub fn emit_bitnet_full_model(
             &pos_ids,
         )?;
 
-        // 11. rmsnorm_w
         emit_ternary_decoder_tensor(
             &mut all_payloads,
             &mut entries,
@@ -730,30 +698,27 @@ pub fn emit_bitnet_full_model(
     })
 }
 
+/// Generate a random positive u64 seed from system time.
+fn rand_positive_u64() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64
+}
+
 /// Emit a full BitNet model cimage shard from a real safetensors checkpoint.
-///
-/// Loads the checkpoint, iterates all layers, extracts real codes + scales +
-/// norms, and builds a single combined `PendingCImageShard`.
-///
-/// Per-layer tensors (11 per layer):
-/// - 4 RawF32 norms: input_layernorm, post_attention_layernorm,
-///   attn_sub_norm, ffn_sub_norm
-/// - 7 ternary weights: q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj,
-///   down_proj
-///
-/// Global tensors: embed_tokens, position_ids, final_layernorm.
 pub fn emit_bitnet_from_checkpoint(
     checkpoint_path: &Path,
     output_path: &Path,
     group_size: usize,
-) -> CImageResult<CImageWriteReceipt> {
+) -> CImageResult<super::cimage_shim::CImageWriteReceipt> {
     let resolved_checkpoint = if checkpoint_path.is_dir() {
         checkpoint_path.join("model.safetensors")
     } else {
         checkpoint_path.to_path_buf()
     };
     let path_str = resolved_checkpoint.display();
-    // Read the entire checkpoint into memory for fast random access
     let buffer = std::fs::read(&resolved_checkpoint)
         .map_err(|e| CImageError::Other(format!("failed to read {path_str}: {e}")))?;
     let ckpt = BitNetCheckpoint::from_buffer(buffer)
@@ -764,15 +729,11 @@ pub fn emit_bitnet_from_checkpoint(
     let intermediate_dim = ckpt.intermediate_dim;
     let kv_inner = ckpt.num_kv_heads * ckpt.head_dim;
 
-    // Create streaming writer — tensors go directly to disk, no memory accumulation
     let mut writer = StreamingCImageWriter::new(output_path)?;
 
     let mut entries: Vec<CImageTensorEntry> = Vec::with_capacity(num_layers * 11 + 3);
     let mut tensor_idx = 0usize;
 
-    // ── Global tensors ─────────────────────────────────────────────────
-
-    // embed_tokens.weight (RawF32 from BF16)
     let embed_bytes = ckpt
         .embed_tokens()
         .map_err(|e| CImageError::Other(format!("embed_tokens: {e}")))?;
@@ -785,7 +746,6 @@ pub fn emit_bitnet_from_checkpoint(
         &embed_bytes,
     )?;
 
-    // ── position_ids ────────────────────────────────────────────
     const SEQ_LEN: usize = 4096;
     let pos_ids: Vec<f32> = (0..SEQ_LEN).map(|i| i as f32).collect();
     let mut pos_bytes = Vec::with_capacity(SEQ_LEN * 4);
@@ -801,12 +761,9 @@ pub fn emit_bitnet_from_checkpoint(
         &pos_bytes,
     )?;
 
-    // ── Decoder layers ─────────────────────────────────────────────────
-
     for layer in 0..num_layers {
         let prefix = format!("layer.{layer}.");
 
-        // 1. input_layernorm.weight — RawF32
         let ln_bytes = ckpt
             .layer_norm_weight(layer, "input_layernorm")
             .map_err(|e| CImageError::Other(format!("layer {layer} input_layernorm: {e}")))?;
@@ -819,7 +776,6 @@ pub fn emit_bitnet_from_checkpoint(
             &ln_bytes,
         )?;
 
-        // 2-5. Attention projections (ternary)
         for (name, ckpt_key, rows, cols) in &[
             ("q_proj", "self_attn.q_proj", hidden_dim, hidden_dim),
             ("k_proj", "self_attn.k_proj", kv_inner, hidden_dim),
@@ -841,7 +797,6 @@ pub fn emit_bitnet_from_checkpoint(
             )?;
         }
 
-        // 6. post_attention_layernorm.weight — RawF32
         let paln_bytes = ckpt
             .layer_norm_weight(layer, "post_attention_layernorm")
             .map_err(|e| {
@@ -856,7 +811,6 @@ pub fn emit_bitnet_from_checkpoint(
             &paln_bytes,
         )?;
 
-        // 7-9. MLP projections (ternary)
         stream_checkpoint_ternary_tensor(
             &mut writer,
             &mut entries,
@@ -897,7 +851,6 @@ pub fn emit_bitnet_from_checkpoint(
             group_size,
         )?;
 
-        // 10. ffn_sub_norm.weight — RawF32
         let ffn_sub = ckpt
             .layer_ffn_sub_norm(layer)
             .map_err(|e| CImageError::Other(format!("layer {layer} ffn_sub_norm: {e}")))?;
@@ -910,7 +863,6 @@ pub fn emit_bitnet_from_checkpoint(
             &ffn_sub,
         )?;
 
-        // 11. attn_sub_norm.weight — RawF32
         let attn_sub = ckpt
             .layer_attn_sub_norm(layer)
             .map_err(|e| CImageError::Other(format!("layer {layer} attn_sub_norm: {e}")))?;
@@ -924,7 +876,6 @@ pub fn emit_bitnet_from_checkpoint(
         )?;
     }
 
-    // ── Global norm ────────────────────────────────────────────────────
     if let Ok(final_ln_bytes) = ckpt.final_layernorm() {
         stream_rawf32_norm_tensor(
             &mut writer,
@@ -936,7 +887,6 @@ pub fn emit_bitnet_from_checkpoint(
         )?;
     }
 
-    // ── Manifest ───────────────────────────────────────────────────────
     let total_tensors = entries.len();
     let plan_id = format!("bitnet_from_checkpoint_{:016x}", rand_positive_u64());
     let manifest = CImageManifestV0 {
@@ -960,7 +910,6 @@ pub fn emit_bitnet_from_checkpoint(
         state_store_schema: None,
     };
 
-    // Finalize: writes manifest + directories + footer, atomic rename
     writer.finalize(manifest)
 }
 
@@ -1021,11 +970,6 @@ fn emit_rawf32_norm_tensor(
 
 #[allow(dead_code)]
 /// Emit a ternary weight tensor from checkpoint data.
-///
-/// Loads U8 codes + BF16 scale from the checkpoint for the given layer and
-/// checkpoint tensor name, builds a `TernaryPackedTensor`, and emits three
-/// payloads: codes (packed), scales (f16), and a RawF32 reference (unpacked
-/// values × scale).
 fn emit_checkpoint_ternary_tensor(
     ckpt: &BitNetCheckpoint,
     all_payloads: &mut Vec<PendingPayload>,
@@ -1033,14 +977,12 @@ fn emit_checkpoint_ternary_tensor(
     tensor_idx: &mut usize,
     layer: usize,
     tensor_key: &str,
-    checkpoint_name: &str, // e.g. "self_attn.q_proj"
+    checkpoint_name: &str,
     tensor_class: &str,
     out_features: usize,
     in_features: usize,
     group_size: usize,
 ) -> CImageResult<()> {
-    use crate::ecs::bitnet::checkpoint::make_ternary_from_checkpoint;
-
     let stored_rows = out_features / 4;
     let stored_cols = in_features;
 
@@ -1053,7 +995,6 @@ fn emit_checkpoint_ternary_tensor(
 
     let tensor = make_ternary_from_checkpoint(codes, stored_rows, stored_cols, scale, group_size);
 
-    // Codes payload.
     let codes_payload = PendingPayload {
         payload_id: format!("p_{tensor_key}_codes"),
         payload_kind: CImagePayloadKind::TernaryPackedCodes,
@@ -1061,7 +1002,6 @@ fn emit_checkpoint_ternary_tensor(
         alignment_bytes: 64,
         bytes: tensor.codes.clone(),
     };
-    // Scales payload (f16 LE bytes).
     let scale_bytes: Vec<u8> = tensor.scales.iter().flat_map(|s| s.to_le_bytes()).collect();
     let scales_payload = PendingPayload {
         payload_id: format!("p_{tensor_key}_scales"),
@@ -1070,7 +1010,6 @@ fn emit_checkpoint_ternary_tensor(
         alignment_bytes: 64,
         bytes: scale_bytes,
     };
-    // RawF32 reference: unpack ternary codes × scale.
     let total_values = tensor.rows * tensor.cols;
     let unpacked = unpack_ternary_codes(&tensor.codes, total_values)
         .map_err(|e| CImageError::Other(format!("{tensor_key} unpack: {e}")))?;
@@ -1112,16 +1051,6 @@ fn emit_checkpoint_ternary_tensor(
     Ok(())
 }
 
-/// Generate a random positive u64 seed from `/dev/urandom`.
-/// Generate a random positive u64 seed from system time.
-fn rand_positive_u64() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos() as u64
-}
-
 /// Write a ternary tensor payload to a streaming writer directly to disk.
 fn stream_checkpoint_ternary_tensor(
     writer: &mut StreamingCImageWriter,
@@ -1136,8 +1065,6 @@ fn stream_checkpoint_ternary_tensor(
     in_features: usize,
     group_size: usize,
 ) -> CImageResult<()> {
-    use crate::ecs::bitnet::checkpoint::make_ternary_from_checkpoint;
-
     let codes = ckpt
         .layer_codes(layer, ckpt_proj_name)
         .map_err(|e| CImageError::Other(format!("{tensor_key} codes: {e}")))?;
@@ -1149,7 +1076,6 @@ fn stream_checkpoint_ternary_tensor(
     let stored_cols = in_features;
     let tensor = make_ternary_from_checkpoint(codes, stored_rows, stored_cols, scale, group_size);
 
-    // Write codes payload directly to disk
     let codes_payload_id = format!("p_{}_codes", tensor_key);
     writer.append_payload(
         codes_payload_id.clone(),
@@ -1159,7 +1085,6 @@ fn stream_checkpoint_ternary_tensor(
         &tensor.codes,
     )?;
 
-    // Write scales payload directly to disk
     let scales_payload_id = format!("p_{}_scales", tensor_key);
     let scale_bytes: Vec<u8> = tensor.scales.iter().flat_map(|s| s.to_le_bytes()).collect();
     writer.append_payload(
@@ -1257,23 +1182,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bitnet_emit_single_linear() {
+    fn emit_single_linear() {
         let tensor = BitNetImporter::import_ternary_tensor(42, 8, 128, 32).unwrap();
         let shard = emit_single_bitnet_linear("test_linear", &tensor).unwrap();
         assert_eq!(shard.manifest.tensors.len(), 1);
         assert_eq!(shard.manifest.tensors[0].codec, CodecFamily::Ternary1_58);
-        assert_eq!(shard.payloads.len(), 2); // codes + scales
+        assert_eq!(shard.payloads.len(), 2);
     }
 
     #[test]
-    fn test_bitnet_emit_mlp_block() {
+    fn emit_mlp_block() {
         let shard = emit_bitnet_mlp_block(42, 256, 1024, 32).unwrap();
         assert_eq!(shard.manifest.tensors.len(), 3);
-        assert_eq!(shard.payloads.len(), 6); // codes + scales for each of 3 tensors
+        assert_eq!(shard.payloads.len(), 6);
     }
 
     #[test]
-    fn test_bitnet_emit_decoder_layer() {
+    fn emit_decoder_layer() {
         let config = BitNetDecoderLayerShardConfig {
             seed: 42,
             hidden_dim: 256,
@@ -1286,14 +1211,12 @@ mod tests {
             num_layers: 1,
         };
         let shard = emit_bitnet_decoder_layer(&config).unwrap();
-        // 11 tensors per decoder layer
         assert_eq!(shard.manifest.tensors.len(), 11);
-        // 10 ternary tensors × 3 payloads (codes + scales + raw_f32) + 1 RawF32 × 2 payloads = 32
         assert_eq!(shard.payloads.len(), 32);
     }
 
     #[test]
-    fn test_bitnet_emit_full_model() {
+    fn emit_full_model() {
         let config = BitNetDecoderLayerShardConfig {
             seed: 42,
             hidden_dim: 128,
@@ -1306,8 +1229,7 @@ mod tests {
             num_layers: 2,
         };
         let shard = emit_bitnet_full_model(&config).unwrap();
-        assert_eq!(shard.manifest.tensors.len(), 22); // 2 layers × 11 tensors
-                                                      // Verify layer-prefixed keys
+        assert_eq!(shard.manifest.tensors.len(), 22);
         assert!(shard
             .manifest
             .tensors
@@ -1318,7 +1240,6 @@ mod tests {
             .tensors
             .iter()
             .any(|t| t.tensor_key == "layer.1.input_layernorm.weight"));
-        // Check manifest properties
         assert_eq!(shard.manifest.artifact_kind, CImageArtifactKind::FullModel);
         assert_eq!(shard.manifest.model_family, "BitNet-b1.58-2B4T");
     }

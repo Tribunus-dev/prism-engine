@@ -4,16 +4,18 @@
 //! `[max_seq_len * kv_inner]` where `kv_inner = num_kv_heads * head_dim`.
 //! Data for position `pos` spans `[pos * kv_inner .. (pos+1) * kv_inner]`.
 
-use crate::ecs::cimage::manifest::{CImagePayloadRef, CImageTensorEntry, PhysicalTileLayout};
-use crate::execution_plan::{CodecFamily, DType};
+use super::cimage_shim::{
+    CImagePayloadRef, CImageTensorEntry, CodecFamily, DType, PhysicalTileLayout,
+};
 
 /// In-memory KV cache for BitNet decoder layers.
 ///
 /// Shape convention (illustrative):
 ///   k_cache[layer][head][pos * head_dim .. (pos+1) * head_dim]
 ///
-/// where `head_dim = kv_inner / num_kv_heads`. The implementation stores all
-/// heads concatenated per position in a single flat buffer per layer.
+/// where `head_dim = kv_inner / num_kv_heads`. The implementation
+/// stores all heads concatenated per position in a single flat buffer
+/// per layer.
 pub struct BitNetKvCache {
     pub k_cache: Vec<Vec<Vec<f32>>>,
     pub v_cache: Vec<Vec<Vec<f32>>>,
@@ -63,8 +65,6 @@ impl BitNetKvCache {
     }
 
     /// Read K/V slices for a single token position.
-    ///
-    /// Panics if `layer >= num_layers` or `pos >= seq_len`.
     pub fn read(&self, layer: usize, pos: usize) -> (&[f32], &[f32]) {
         assert!(layer < self.num_layers, "layer out of bounds");
         assert!(pos < self.seq_len, "position beyond current seq_len");
@@ -78,9 +78,6 @@ impl BitNetKvCache {
     }
 
     /// Extend the cache with a prefill of `seq_len` tokens.
-    ///
-    /// `k_tensor` and `v_tensor` are flat slices of length `seq_len * kv_inner`
-    /// (all heads concatenated, positions laid out sequentially).
     pub fn extend_prefill(
         &mut self,
         layer: usize,
@@ -115,9 +112,10 @@ impl BitNetKvCache {
 /// Build a `CImageTensorEntry` that references the state-store schema
 /// for KV cache dimensions.
 ///
-/// The returned entry describes a virtual "KV cache" tensor whose payload
-/// is the state-store schema JSON blob. This is used in the cimage manifest
-/// to declare KV cache residency without embedding actual tensor data.
+/// The returned entry describes a virtual "KV cache" tensor whose
+/// payload is the state-store schema JSON blob. This is used in the
+/// cimage manifest to declare KV cache residency without embedding
+/// actual tensor data.
 pub fn build_bitnet_kv_manifest_entry(
     num_layers: usize,
     kv_inner: usize,
@@ -157,9 +155,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_bitnet_kv_append_read_roundtrip() {
+    fn bitnet_kv_append_read_roundtrip() {
         let num_layers = 2;
-        let kv_inner = 256; // e.g., 4 kv_heads × 64 head_dim
+        let kv_inner = 256;
         let max_seq_len = 8;
 
         let mut cache = BitNetKvCache::new(num_layers, kv_inner, max_seq_len);
@@ -168,24 +166,20 @@ mod tests {
         assert_eq!(cache.kv_inner, kv_inner);
         assert_eq!(cache.max_seq_len, max_seq_len);
 
-        // Append one token to layer 0.
         let k0: Vec<f32> = (0..kv_inner).map(|i| (i as f32) * 0.1).collect();
         let v0: Vec<f32> = (0..kv_inner).map(|i| (i as f32) * 0.2).collect();
         cache.append(0, 0, &k0, &v0);
         assert_eq!(cache.seq_len, 1);
 
-        // Read it back.
         let (rk, rv) = cache.read(0, 0);
         assert_eq!(rk, k0.as_slice());
         assert_eq!(rv, v0.as_slice());
 
-        // Append a second token.
         let k1: Vec<f32> = (0..kv_inner).map(|i| (i as f32) * 0.3).collect();
         let v1: Vec<f32> = (0..kv_inner).map(|i| (i as f32) * 0.4).collect();
         cache.append(0, 1, &k1, &v1);
         assert_eq!(cache.seq_len, 2);
 
-        // Both positions readable.
         let (rk0, rv0) = cache.read(0, 0);
         let (rk1, rv1) = cache.read(0, 1);
         assert_eq!(rk0, k0.as_slice());
@@ -193,12 +187,10 @@ mod tests {
         assert_eq!(rk1, k1.as_slice());
         assert_eq!(rv1, v1.as_slice());
 
-        // Layer 1 is still empty (zeros).
         let (rk_l1, rv_l1) = cache.read(1, 0);
         assert!(rk_l1.iter().all(|&v| v == 0.0));
         assert!(rv_l1.iter().all(|&v| v == 0.0));
 
-        // --- extend_prefill ---
         let kv_inner2 = 256;
         let mut cache2 = BitNetKvCache::new(1, kv_inner2, 8);
         let prefill_len = 3;
@@ -211,7 +203,6 @@ mod tests {
         cache2.extend_prefill(0, &k_pre, &v_pre, prefill_len);
         assert_eq!(cache2.seq_len, prefill_len);
 
-        // Each position should match the original slices.
         for pos in 0..prefill_len {
             let (rk, rv) = cache2.read(0, pos);
             let start = pos * kv_inner2;
@@ -222,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn test_bitnet_kv_manifest_entry() {
+    fn bitnet_kv_manifest_entry() {
         let entry = build_bitnet_kv_manifest_entry(30, 640, 4096);
         assert_eq!(entry.tensor_id, "kv_cache");
         assert_eq!(entry.tensor_class, "KvCache");

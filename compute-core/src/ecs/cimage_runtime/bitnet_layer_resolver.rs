@@ -1,6 +1,6 @@
 //! BitNet layer tensor resolver — maps layer-scoped tensor names to cimage
 //! payload bytes using the naming convention established by the streaming
-//! writer in [`crate::ecs::bitnet::phases`].
+//! writer in [`prism_ecs_quantization::bitnet::phases`].
 //!
 //! The naming convention distinguishes two payload ID patterns:
 //! - **RawF32 (norms / global tensors):** payload IDs use underscore separators:

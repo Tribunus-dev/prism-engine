@@ -6,21 +6,11 @@
 
 use super::phases::BitNetDecoderLayerShardConfig;
 use super::reference::{bitnet_decoder_layer_reference, bitnet_decoder_logits};
-use crate::ternary::codec::TernaryPackedTensor;
-
-// ---------------------------------------------------------------------------
-// TokenKvCache
-// ---------------------------------------------------------------------------
+use super::ternary_codec::TernaryPackedTensor;
 
 /// Per-layer KV cache for auto-regressive decoding.
-///
-/// Each layer has its own `(Vec<Vec<f32>>, Vec<Vec<f32>>)` where every inner
-/// `Vec<f32>` holds one token's key (or value) vector.  This matches the
-/// `&mut Vec<Vec<f32>>` parameter expected by [`bitnet_decoder_layer_reference`].
 pub struct TokenKvCache {
-    /// `keys[l][t]` = key vector for token `t` in layer `l`.
     pub keys: Vec<Vec<Vec<f32>>>,
-    /// `values[l][t]` = value vector for token `t` in layer `l`.
     pub values: Vec<Vec<Vec<f32>>>,
 }
 
@@ -33,26 +23,15 @@ impl TokenKvCache {
         }
     }
 
-    /// Borrow the `(K, V)` cache pair for a single layer, as required by
-    /// [`bitnet_decoder_layer_reference`].
+    /// Borrow the `(K, V)` cache pair for a single layer.
     pub fn refs(&mut self, layer: usize) -> (&mut Vec<Vec<f32>>, &mut Vec<Vec<f32>>) {
         (&mut self.keys[layer], &mut self.values[layer])
     }
 }
 
-// ---------------------------------------------------------------------------
-// Prefill
-// ---------------------------------------------------------------------------
-
 /// Run all decoder layers over the prompt tokens, populating the KV cache.
 ///
-/// `activations` — `[seq_len, hidden_dim]` token embeddings in row-major order.
-/// `tensors` — one `&[TernaryPackedTensor]` per layer, each containing the
-///   11 tensors (input_layernorm, q_proj, k_proj, v_proj, o_proj,
-///   post_attention_layernorm, gate_proj, up_proj, down_proj, position_ids,
-///   rmsnorm_w).
-///
-/// Returns the final hidden state for the **last token** only — `[hidden_dim]`.
+/// Returns the final hidden state for the **last token** only.
 pub fn prefill(
     activations: &[f32],
     tensors: &[&[TernaryPackedTensor]],
@@ -80,23 +59,11 @@ pub fn prefill(
         );
     }
 
-    // Return only the last token's hidden state.
     let offset = state.len() - hidden_dim;
     state[offset..].to_vec()
 }
 
-// ---------------------------------------------------------------------------
-// Single-token decode
-// ---------------------------------------------------------------------------
-
 /// Single-token decode step through all layers.
-///
-/// Processes one token (querying the KV cache accumulated in prior steps) and
-/// returns the next hidden state `[hidden_dim]`.
-///
-/// `position` is the absolute token position (used for RoPE).  For the first
-/// generated token this equals `prompt_len`; for subsequent tokens it is
-/// `prompt_len + gen_step`.
 pub fn decode_single(
     activation: &[f32],
     tensors: &[&[TernaryPackedTensor]],
@@ -107,8 +74,6 @@ pub fn decode_single(
     assert_eq!(activation.len(), config.hidden_dim);
     assert_eq!(tensors.len(), config.num_layers);
 
-    // Build a temporary position_ids tensor for the current decode position
-    // so RoPE receives the correct absolute position.
     let pos_data: Vec<u8> = (position as f32).to_le_bytes().to_vec();
     let pos_tensor = TernaryPackedTensor {
         rows: 1,
@@ -123,8 +88,6 @@ pub fn decode_single(
     let mut state = activation.to_vec();
 
     for l in 0..config.num_layers {
-        // Replace tensor[9] (position_ids) with one that reflects the current
-        // absolute position.  Cloning the slice references is cheap.
         let mut layer_tensors: Vec<&TernaryPackedTensor> = tensors[l].iter().collect();
         layer_tensors[9] = &pos_tensor;
 
@@ -135,7 +98,7 @@ pub fn decode_single(
             config.num_heads,
             config.num_kv_heads,
             config.head_dim,
-            1, // seq_len = 1 for single-token decode
+            1,
             Some((kc, vc)),
         );
     }
@@ -143,13 +106,7 @@ pub fn decode_single(
     state
 }
 
-// ---------------------------------------------------------------------------
-// Sampling
-// ---------------------------------------------------------------------------
-
 /// Greedy sample: return the index of the highest logit value.
-///
-/// Panics if `logits` is empty.
 pub fn greedy_sample(logits: &[f32]) -> u32 {
     assert!(!logits.is_empty(), "logits must not be empty");
     logits
@@ -160,23 +117,14 @@ pub fn greedy_sample(logits: &[f32]) -> u32 {
         .unwrap_or(0)
 }
 
-// ---------------------------------------------------------------------------
-// Tokenizer stub
-// ---------------------------------------------------------------------------
-
 /// Stub tokenizer for BitNet models.
-///
-/// Provides a simple integer-based vocabulary for testing.  Full HuggingFace
-/// `tokenizer.json` integration (via the `tokenizers` crate already in the
-/// dependency tree) is deferred as a follow-up.
 pub struct BitNetTokenizer {
     vocab: Vec<String>,
     reverse: std::collections::HashMap<String, u32>,
 }
 
 impl BitNetTokenizer {
-    /// Create a tokenizer from a list of vocabulary tokens.  Token 0 is
-    /// conventionally `<unk>`.
+    /// Create a tokenizer from a list of vocabulary tokens.
     pub fn new(vocab: Vec<String>) -> Self {
         let reverse = vocab
             .iter()
@@ -198,13 +146,11 @@ impl BitNetTokenizer {
     }
 
     /// Stub : returns `default_test()`.
-    ///
-    /// TODO: read real `tokenizer.json` using the `tokenizers` crate.
     pub fn from_json(_path: &str) -> Self {
         Self::default_test()
     }
 
-    /// Encode text to token IDs.  Unknown tokens map to `0` (`<unk>`).
+    /// Encode text to token IDs.
     pub fn encode(&self, text: &str) -> Vec<u32> {
         text.split_whitespace()
             .map(|word| *self.reverse.get(word).unwrap_or(&0))
@@ -231,44 +177,20 @@ impl BitNetTokenizer {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Embedding helper
-// ---------------------------------------------------------------------------
-
-/// Deterministic `[hidden_dim]` embedding for a token ID.
-///
-/// Uses the same MMIX LCG as [`BitNetImporter::generate_ternary_weights`] so
-/// that embeddings derived from the same token ID are reproducible across
-/// runs.  Values are in `[-1, 1)`.
 fn embed_token(token: u32, hidden_dim: usize) -> Vec<f32> {
     let mut state = token as u64;
     let mut embedding = Vec::with_capacity(hidden_dim);
     for _ in 0..hidden_dim {
         state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
         let f = ((state >> 32) as i32 as f64) / (1i64 << 31) as f64;
         embedding.push(f.clamp(-1.0, 1.0) as f32);
     }
     embedding
 }
 
-// ---------------------------------------------------------------------------
-// Auto-regressive loop
-// ---------------------------------------------------------------------------
-
 /// Full auto-regressive text generation loop.
-///
-/// 1. Embed each prompt token into a `[hidden_dim]` vector.
-/// 2. `prefill` — run all decoder layers, populating the KV cache.
-/// 3. Loop: `decode_single` → `bitnet_decoder_logits` → `greedy_sample`.
-///
-/// Returns only the **generated** token IDs (the prompt tokens are excluded).
-///
-/// The `lm_head` tensor must follow the `RawF32` convention used by
-/// [`bitnet_decoder_logits`]: `rows == hidden_dim`, `cols == vocab_size`,
-/// and `codes` contains `rows * cols * 4` bytes of raw `f32` LE values in
-/// `[in, out]` (row-major) layout.
 pub fn run_text(
     prompt_tokens: &[u32],
     tensors: &[&[TernaryPackedTensor]],
@@ -279,38 +201,27 @@ pub fn run_text(
     let hidden_dim = config.hidden_dim;
     let prompt_len = prompt_tokens.len();
 
-    // 1. Embed prompt tokens.
     let mut activations = Vec::with_capacity(prompt_len * hidden_dim);
     for &token in prompt_tokens {
         activations.extend(embed_token(token, hidden_dim));
     }
 
-    // 2. Build run-time config matching the actual prompt length.
     let run_config = BitNetDecoderLayerShardConfig {
         seq_len: prompt_len,
         ..*config
     };
 
-    // 3. KV cache.
     let mut kv_cache = TokenKvCache::new(config.num_layers);
 
-    // 4. Prefill.
     let mut hidden = prefill(&activations, tensors, &run_config, &mut kv_cache);
 
-    // 5. Auto-regressive decode loop.
     let vocab_size = lm_head.cols;
     let mut generated = Vec::with_capacity(max_new_tokens);
 
     for gen_step in 0..max_new_tokens {
         let position = prompt_len + gen_step;
-
-        // Decode next token.
         hidden = decode_single(&hidden, tensors, config, &mut kv_cache, position);
-
-        // Compute logits over the vocabulary.
         let logits = bitnet_decoder_logits(&hidden, lm_head, hidden_dim, vocab_size);
-
-        // Greedy sample.
         let next_token = greedy_sample(&logits);
         generated.push(next_token);
     }
@@ -318,16 +229,11 @@ pub fn run_text(
     generated
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::bitnet::importer::BitNetImporter;
+    use crate::bitnet::importer::BitNetImporter;
 
-    // Small model dimensions for fast hermetic tests.
     const TEST_HIDDEN_DIM: usize = 8;
     const TEST_NUM_HEADS: usize = 2;
     const TEST_NUM_KV_HEADS: usize = 1;
@@ -335,8 +241,6 @@ mod tests {
     const TEST_INTERMEDIATE_DIM: usize = 16;
     const TEST_GROUP_SIZE: usize = 4;
     const TEST_SEED: u64 = 42;
-
-    // ── Test helpers ──────────────────────────────────────────────────────
 
     fn make_layer(seq_len: usize) -> Vec<TernaryPackedTensor> {
         BitNetImporter::import_full_decoder_layer(
@@ -366,9 +270,6 @@ mod tests {
         }
     }
 
-    /// Build an `lm_head` tensor with raw f32 LE weights matching the
-    /// `bitnet_decoder_logits` convention: `rows = hidden_dim`,
-    /// `cols = vocab_size`.
     fn make_lm_head(vocab_size: usize) -> TernaryPackedTensor {
         let in_features = TEST_HIDDEN_DIM;
         let out_features = vocab_size;
@@ -377,8 +278,8 @@ mod tests {
         let mut state = 999u64;
         for _ in 0..total {
             state = state
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             let f = ((state >> 32) as i32 as f64) / (1i64 << 31) as f64;
             codes.extend_from_slice(&(f.clamp(-1.0, 1.0) as f32).to_le_bytes());
         }
@@ -393,10 +294,8 @@ mod tests {
         }
     }
 
-    // ── Unit tests ────────────────────────────────────────────────────────
-
     #[test]
-    fn test_prefill_runs() {
+    fn prefill_runs() {
         let config = test_config(2, 1);
         let tensors = make_layer(config.seq_len);
         let tensors_refs = vec![tensors.as_slice()];
@@ -406,26 +305,16 @@ mod tests {
             .collect();
 
         let result = prefill(&acts, &tensors_refs, &config, &mut kv_cache);
-        assert_eq!(
-            result.len(),
-            TEST_HIDDEN_DIM,
-            "prefill should return last token hidden state [hidden_dim]"
-        );
-        assert!(
-            result.iter().all(|v| v.is_finite()),
-            "non-finite values in prefill output"
-        );
+        assert_eq!(result.len(), TEST_HIDDEN_DIM);
+        assert!(result.iter().all(|v| v.is_finite()));
     }
 
     #[test]
-    fn test_decode_single_produces_same_as_prefill_for_first_token() {
+    fn decode_single_produces_same_as_prefill_for_first_token() {
         let config = test_config(1, 1);
         let tensors = make_layer(1);
         let tensors_refs = vec![tensors.as_slice()];
 
-        // Both prefill and decode_single process one token with an empty KV
-        // cache at position 0 — the attention attends only to self in both
-        // paths, so the results must match.
         let acts: Vec<f32> = vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
 
         let mut kv_cache_prefill = TokenKvCache::new(1);
@@ -446,14 +335,14 @@ mod tests {
     }
 
     #[test]
-    fn test_greedy_sample_returns_argmax() {
+    fn greedy_sample_returns_argmax() {
         assert_eq!(greedy_sample(&[1.0, 3.0, 2.0, 0.5]), 1);
         assert_eq!(greedy_sample(&[-5.0, -1.0, -10.0]), 1);
         assert_eq!(greedy_sample(&[42.0]), 0);
     }
 
     #[test]
-    fn test_run_text_returns_correct_length() {
+    fn run_text_returns_correct_length() {
         let config = test_config(2, 1);
         let tensors = make_layer(config.seq_len);
         let tensors_refs = vec![tensors.as_slice()];
@@ -462,15 +351,11 @@ mod tests {
         let prompt = vec![1u32, 2u32];
 
         let result = run_text(&prompt, &tensors_refs, &lm_head, &config, max_new);
-        assert_eq!(
-            result.len(),
-            max_new,
-            "run_text should return exactly max_new_tokens generated tokens"
-        );
+        assert_eq!(result.len(), max_new);
     }
 
     #[test]
-    fn test_tokenizer_stub() {
+    fn tokenizer_stub() {
         let tok = BitNetTokenizer::default_test();
         let tokens = tok.encode("Hello world");
         assert_eq!(tokens, vec![1, 2]);
@@ -480,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_kv_cache_multi_layer() {
+    fn kv_cache_multi_layer() {
         let config = test_config(2, 2);
         let layer0 = make_layer(config.seq_len);
         let layer1 = make_layer(config.seq_len);
@@ -493,7 +378,6 @@ mod tests {
 
         let _result = prefill(&acts, &tensors_refs, &config, &mut kv_cache);
 
-        // Verify both layers have cached KV for 2 tokens.
         assert_eq!(kv_cache.keys[0].len(), config.seq_len);
         assert_eq!(kv_cache.values[0].len(), config.seq_len);
         assert_eq!(kv_cache.keys[1].len(), config.seq_len);

@@ -38,10 +38,10 @@ use crate::ecs::cimage_runtime::CimageRuntimeContext;
 use crate::execution_plan::backend_capability::BackendLoweringTarget;
 use crate::execution_plan::HardwareProfileId;
 
-use crate::ecs::bitnet::reference::bitnet_decoder_layer_reference;
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::cimage::CImagePayloadRef;
 use crate::ecs::cimage_runtime::bitnet_layer_resolver::BitNetLayerTensorResolver;
+use prism_ecs_quantization::bitnet::reference::bitnet_decoder_layer_reference;
 use crate::ecs::cimage_runtime::lower_decoder::DecoderShardRegionBuilder;
 use crate::ecs::cimage_runtime::tensor_store::{RuntimeTensor, RuntimeTensorStore};
 use crate::ecs::metal_backend::catalogue_source_for;
@@ -3563,8 +3563,8 @@ fn load_checkpoint_for_validation(
     seq_len: usize,
     num_layers: usize,
 ) -> Result<Vec<Vec<TernaryPackedTensor>>, String> {
-    use crate::ecs::bitnet::checkpoint::{make_ternary_from_checkpoint, BitNetCheckpoint};
     use crate::ternary::codec::TernaryPackedTensor;
+    use prism_ecs_quantization::bitnet::checkpoint::{make_ternary_from_checkpoint, BitNetCheckpoint};
 
     // Resolve checkpoint path: try relative to cimage parent, then env var.
     let ckpt_path = if let Some(parent) = image.path.parent() {
@@ -3685,6 +3685,185 @@ mod tests {
     use crate::ecs::cimage::*;
     use crate::ecs::cimage_runtime::tensor_store::MlpRegionExecutionMode;
     use crate::execution_plan::CodecFamily;
+
+    /// Convert a constitutional `PendingCImageShard` (from
+    /// `prism_ecs_quantization::bitnet::phases::*`) into the engine's
+    /// `PendingCImageShard` so the engine's `CImageWriter::write_v0` can
+    /// consume it. The two types are structurally identical; this helper
+    /// is a field-by-field copy that bridges the two crate boundaries
+    /// during the bitnet engine-deletion migration.
+    fn constitutional_to_engine_pending(
+        pending: prism_ecs_quantization::bitnet::cimage_shim::PendingCImageShard,
+    ) -> PendingCImageShard {
+        use prism_ecs_quantization::bitnet::cimage_shim as cs;
+
+        let manifest = CImageManifestV0 {
+            schema_version: pending.manifest.schema_version,
+            model_family: pending.manifest.model_family,
+            artifact_kind: match pending.manifest.artifact_kind {
+                cs::CImageArtifactKind::SyntheticShard => CImageArtifactKind::SyntheticShard,
+                cs::CImageArtifactKind::ModelShard => CImageArtifactKind::ModelShard,
+                cs::CImageArtifactKind::FullModel => CImageArtifactKind::FullModel,
+                cs::CImageArtifactKind::AssistantGraphProof => {
+                    CImageArtifactKind::AssistantGraphProof
+                }
+            },
+            source_model_digest: pending.manifest.source_model_digest,
+            compiler_policy_digest: pending.manifest.compiler_policy_digest,
+            layout_profile: match pending.manifest.layout_profile {
+                cs::HardwareProfileId::AppleA18Tiny => HardwareProfileId::AppleA18Tiny,
+                cs::HardwareProfileId::AppleMBaseMemoryBound => {
+                    HardwareProfileId::AppleMBaseMemoryBound
+                }
+                cs::HardwareProfileId::AppleMProBalanced => HardwareProfileId::AppleMProBalanced,
+                cs::HardwareProfileId::AppleMMaxBandwidth => HardwareProfileId::AppleMMaxBandwidth,
+                cs::HardwareProfileId::AppleMUltraSharded => HardwareProfileId::AppleMUltraSharded,
+            },
+            tensors: pending
+                .manifest
+                .tensors
+                .into_iter()
+                .map(|t| CImageTensorEntry {
+                    tensor_id: t.tensor_id,
+                    tensor_key: t.tensor_key,
+                    tensor_class: t.tensor_class,
+                    logical_shape: t.logical_shape,
+                    source_dtype: match t.source_dtype {
+                        cs::DType::F32 => DType::F32,
+                        cs::DType::F16 => DType::F16,
+                        cs::DType::I8 => DType::I8,
+                        cs::DType::U8 => DType::U8,
+                        cs::DType::I32 => DType::I32,
+                        cs::DType::U32 => DType::U32,
+                    },
+                    codec: t.codec,
+                    precision_plan: None,
+                    physical_layout: PhysicalTileLayout {
+                        tile_m: t.physical_layout.tile_m,
+                        tile_n: t.physical_layout.tile_n,
+                        tiles_per_row: t.physical_layout.tiles_per_row,
+                        total_tiles: t.physical_layout.total_tiles,
+                        padded_cols: t.physical_layout.padded_cols,
+                        group_size: t.physical_layout.group_size,
+                        groups_per_tile: t.physical_layout.groups_per_tile,
+                        packed_bytes_per_tile: t.physical_layout.packed_bytes_per_tile,
+                        metadata_f32_per_tile: t.physical_layout.metadata_f32_per_tile,
+                    },
+                    payload_ref: match t.payload_ref {
+                        cs::CImagePayloadRef::Single { payload_id } => {
+                            CImagePayloadRef::Single { payload_id }
+                        }
+                        cs::CImagePayloadRef::MixedPrecision {
+                            base_payload_id,
+                            override_table_payload_id,
+                            sidecar_payload_ids,
+                        } => CImagePayloadRef::MixedPrecision {
+                            base_payload_id,
+                            override_table_payload_id,
+                            sidecar_payload_ids,
+                        },
+                    },
+                    raw_f32_reference_ref: t.raw_f32_reference_ref.map(|r| match r {
+                        cs::CImagePayloadRef::Single { payload_id } => {
+                            CImagePayloadRef::Single { payload_id }
+                        }
+                        cs::CImagePayloadRef::MixedPrecision {
+                            base_payload_id,
+                            override_table_payload_id,
+                            sidecar_payload_ids,
+                        } => CImagePayloadRef::MixedPrecision {
+                            base_payload_id,
+                            override_table_payload_id,
+                            sidecar_payload_ids,
+                        },
+                    }),
+                    tensor_sha256: t.tensor_sha256,
+                    validation_digest: t.validation_digest,
+                })
+                .collect(),
+            execution_plan: ModelExecutionPlanSummary {
+                plan_id: pending.manifest.execution_plan.plan_id,
+                region_count: pending.manifest.execution_plan.region_count,
+                total_kernel_ops: pending.manifest.execution_plan.total_kernel_ops,
+                total_input_bytes: pending.manifest.execution_plan.total_input_bytes,
+                total_output_bytes: pending.manifest.execution_plan.total_output_bytes,
+                tensor_refs: pending.manifest.execution_plan.tensor_refs,
+            },
+            receipts: pending
+                .manifest
+                .receipts
+                .into_iter()
+                .map(|r| CImageReceiptRef {
+                    receipt_id: r.receipt_id,
+                    receipt_kind: r.receipt_kind,
+                })
+                .collect(),
+            assistant_graph: pending.manifest.assistant_graph.map(|a| AssistantGraphPayloadRef {
+                graph_json_payload_id: a.graph_json_payload_id,
+            }),
+            state_store_schema: pending.manifest.state_store_schema.map(|s| {
+                StateStoreSchemaPayloadRef {
+                    schema_json_payload_id: s.schema_json_payload_id,
+                }
+            }),
+        };
+
+        let payloads = pending
+            .payloads
+            .into_iter()
+            .map(|p| PendingPayload {
+                payload_id: p.payload_id,
+                payload_kind: match p.payload_kind {
+                    cs::CImagePayloadKind::PackedTensorCodes => CImagePayloadKind::PackedTensorCodes,
+                    cs::CImagePayloadKind::TensorMetadata => CImagePayloadKind::TensorMetadata,
+                    cs::CImagePayloadKind::RawF32Reference => CImagePayloadKind::RawF32Reference,
+                    cs::CImagePayloadKind::MixedPrecisionOverrideTable => {
+                        CImagePayloadKind::MixedPrecisionOverrideTable
+                    }
+                    cs::CImagePayloadKind::MixedPrecisionSidecar => {
+                        CImagePayloadKind::MixedPrecisionSidecar
+                    }
+                    cs::CImagePayloadKind::ExecutionPlanJson => CImagePayloadKind::ExecutionPlanJson,
+                    cs::CImagePayloadKind::ReceiptJson => CImagePayloadKind::ReceiptJson,
+                    cs::CImagePayloadKind::AssistantGraphJson => {
+                        CImagePayloadKind::AssistantGraphJson
+                    }
+                    cs::CImagePayloadKind::StateStoreSchemaJson => {
+                        CImagePayloadKind::StateStoreSchemaJson
+                    }
+                    cs::CImagePayloadKind::TernaryPackedCodes => {
+                        CImagePayloadKind::TernaryPackedCodes
+                    }
+                    cs::CImagePayloadKind::TernaryScales => CImagePayloadKind::TernaryScales,
+                    cs::CImagePayloadKind::TernaryCalibrationMetadata => {
+                        CImagePayloadKind::TernaryCalibrationMetadata
+                    }
+                    cs::CImagePayloadKind::TernaryAdmissionReceiptJson => {
+                        CImagePayloadKind::TernaryAdmissionReceiptJson
+                    }
+                },
+                codec: p.codec,
+                alignment_bytes: p.alignment_bytes,
+                bytes: p.bytes,
+            })
+            .collect();
+
+        let receipts = pending
+            .receipts
+            .into_iter()
+            .map(|r| PendingReceipt {
+                receipt_id: r.receipt_id,
+                receipt_kind: r.receipt_kind,
+                bytes: r.bytes,
+            })
+            .collect();
+
+        PendingCImageShard {
+            manifest,
+            payloads,
+            receipts,
+        }
+    }
 
     /// Build a synthetic RawF32 MLP shard cimage, run it through the Metal
     /// region runner, and verify the output matches the CPU reconstructed
@@ -3933,7 +4112,7 @@ mod tests {
     /// Run a synthetic BitNet decoder layer through the Metal region runner.
     #[test]
     fn test_run_bitnet_decoder_region() {
-        use crate::ecs::bitnet::phases::{
+        use prism_ecs_quantization::bitnet::phases::{
             emit_bitnet_decoder_layer, BitNetDecoderLayerShardConfig,
         };
 
@@ -3949,10 +4128,20 @@ mod tests {
             num_layers: 1,
         };
         let pending = emit_bitnet_decoder_layer(&config).expect("emit bitnet decoder layer");
+        // Convert the constitutional `PendingCImageShard` into the engine's
+        // `PendingCImageShard` so the engine's `CImageWriter::write_v0`
+        // can consume it. The types are structurally identical (one-to-one
+        // field copy); see `constitutional_to_engine_pending` below.
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("test_bitnet_decoder.cimage");
-        CImageWriter::write_v0(&path, pending.manifest, pending.payloads, pending.receipts)
-            .expect("write cimage");
+        let engine_pending = constitutional_to_engine_pending(pending);
+        CImageWriter::write_v0(
+            &path,
+            engine_pending.manifest,
+            engine_pending.payloads,
+            engine_pending.receipts,
+        )
+        .expect("write cimage");
         let loaded = CImageLoader::load_v0(&path).expect("load cimage");
 
         let device = metal::Device::system_default().expect("Metal device unavailable");
