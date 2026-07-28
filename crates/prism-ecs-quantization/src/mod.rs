@@ -46,6 +46,11 @@ pub mod sweep;
 /// Ternarization engine — candidate types, scale optimization, residual
 /// codecs, gates, and physical packaging for ternary representation.
 pub mod ternarization;
+/// BitNet b1.58 2B4T native ternary weight importer — re-implementation
+/// of the engine's `compute-core/src/ecs/bitnet/` subsystem. The engine's
+/// parallel `bitnet` module has been deleted; engine callers now read
+/// from `prism_ecs_quantization::bitnet`.
+pub mod bitnet;
 /// Ternary base-weight assimilation — opt-in mutations behind a research-only gate.
 pub mod ternary_assimilation;
 /// Ternary substitution pass — replaces primary codecs with ternary on eligible

@@ -3799,6 +3799,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "prism-architecture"
+version = "0.1.0"
+
+[[package]]
 name = "prism-audio"
 version = "0.1.0"
 dependencies = [
@@ -4105,6 +4109,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "strum 0.25.0",
+ "tempfile",
  "thiserror 2.0.18",
  "uuid",
 ]
@@ -6592,12 +6597,15 @@ dependencies = [
  "parking_lot",
  "png 0.17.16",
  "prism-ane",
+ "prism-audio",
+ "prism-ecs-agent",
  "prism-ecs-backend",
  "prism-ecs-compile",
  "prism-ecs-constitutional",
  "prism-ecs-core",
  "prism-ecs-ir",
  "prism-ecs-quantization",
+ "prism-ecs-runtime",
  "prism-kv-cache",
  "prost",
  "prost-types",
