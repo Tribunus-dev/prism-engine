@@ -21,6 +21,7 @@
 //! legacy engine backend surface.
 
 pub mod workspace_legacy_assistant_graph_imports;
+pub mod workspace_legacy_ane_imports;
 pub mod workspace_legacy_backend_imports;
 pub mod workspace_legacy_bitnet_imports;
 pub mod workspace_legacy_canonical_imports;
