@@ -7,3 +7,7 @@ license.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# The embedded ANE warmup MIL bytes file is referenced by
+# `include_bytes!("ane_warmup_mil.bytes")` from
+# `src/memory/ane_warmup_mil.rs`. Cargo's default package include
+# keeps non-`.rs` files in `src/` automatically.
