@@ -196,7 +196,15 @@ pub mod supervisor_crash;
 pub mod ternary;
 pub mod tokenizer;
 pub mod toolchain_attest;
-pub mod tools;
+// `tools/` was deleted in the engine-subsystem deletion pass; the
+// canonical home for the tool surface is `prism_ecs_server::tools`.
+// The engine-side façade at `compute-core/src/ecs/legacy_tools/`
+// re-exports the constitutional surface and adds the two
+// engine-coupled extensions (`list_devices` querying the engine's
+// device registry, and the mlx-backend `retry_with_error` driving
+// the engine's `profiled_executor`). See
+// `changelogs/2026-07-27-engine-subsystem-deletion-tools.md`.
+pub mod legacy_tools;
 pub mod training_target;
 pub mod transform_recipe;
 pub mod treatment;

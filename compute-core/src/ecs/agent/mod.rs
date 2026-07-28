@@ -19,7 +19,7 @@
 //!                         └──→ Generating ──(no tools)──→ Done
 //! ```
 
-use crate::ecs::tools::ToolDefinition;
+use crate::ecs::legacy_tools::ToolDefinition;
 use serde::{Deserialize, Serialize};
 
 // ── Constants ──────────────────────────────────────────────────────────
