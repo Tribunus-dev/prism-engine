@@ -37,7 +37,7 @@
 //! starts, and the worker checks that bound against the declared memory
 //! ceiling (Lane B preconditions, PRODUCTION_CONTRACT.md).
 //!
-//! [`teacher_forced_flat`]: crate::ecs::compilation::level1::teacher::Gemma4Teacher::teacher_forced_flat
+//! [`teacher_forced_flat`]: crate::compilation::level1::teacher::Gemma4Teacher::teacher_forced_flat
 
 use super::super::distill_core::{kd_divergence_batch, top1_agreement};
 

@@ -931,7 +931,7 @@ mod tests {
                     max_warmup_latency_ms: 50,
                     tolerance: 0.01,
                 },
-                qualification: crate::ecs::compilation::tri_lane::AneQualificationRecord {
+                qualification: crate::compilation::tri_lane::AneQualificationRecord {
                     compile_success: true,
                     load_success: true,
                     warmup_success: true,

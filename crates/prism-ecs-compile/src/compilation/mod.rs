@@ -39,61 +39,38 @@
 //! `prism_ecs_constitutional::admission_gates`; we re-export them
 //! here for engine callers.
 
-#[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
+// Module declarations are intentionally NOT feature-gated. The
+// engine absorbed these files from `compute-core/src/ecs/compilation/`
+// and the engine callers import them unconditionally (e.g.
+// `use prism_ecs_compile::compilation::tri_lane::*`). Each module's
+// IMPLEMENTATION carries its own cfg-gates where the code depends
+// on platform-specific libraries, so the modules always exist and
+// the gate happens at the impl level — the same pattern Prism's
+// `prism-ecs-constitutional` follows for its hardware-coupled
+// submodules. See the `prism-ane` crate or `pipeline/` for analogous
+// patterns.
 pub mod activation_abi;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
+pub mod admission_gate_re_exports;
 pub mod ane_eligibility;
 pub mod ane_lane;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
 pub mod apple_installation;
 pub mod arena;
 pub mod bench_metrics;
-#[cfg(feature = "prism-backend")]
 pub mod boundary_sensitivity;
 pub mod bridge_provider;
 pub mod cancel;
 pub mod distill_core;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
 pub mod epoch_scheduler;
 pub mod failure_injector;
-#[cfg(feature = "prism-backend")]
+pub mod level1;
+pub mod level2;
+pub mod level3;
 pub mod matrix_distill;
 pub mod phase_ir;
 pub mod phase_types;
 pub mod receipt;
 pub mod region_catalogue;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
 pub mod region_planner;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
 pub mod tri_lane;
 
-// Not gated here: `level1/mod.rs` gates each Metal/CoreML-dependent submodule
-// on `prism-backend` individually, so the std-only pieces (`kd_gate`) compile
-// and unit-test on every host, Linux CI included.
-pub mod level1;
-
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub use crate::admission_gate_re_exports::{LaneAdmissionGate, RiskPolicy};
-
-#[cfg(all(target_os = "macos", feature = "prism-backend"))]
-pub mod level2;
-#[cfg(all(target_os = "macos", feature = "prism-backend"))]
-pub mod level3;
+pub use admission_gate_re_exports::{LaneAdmissionGate, RiskPolicy};
