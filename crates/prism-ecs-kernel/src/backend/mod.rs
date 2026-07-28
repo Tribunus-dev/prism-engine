@@ -17,8 +17,16 @@
 
 pub mod accelerate;
 pub mod ane;
+pub mod authority;
+pub mod completion;
 pub mod cpu;
 pub mod dispatcher;
+pub mod evaluation;
+pub mod graph;
+pub mod intel_usm;
 pub mod legacy;
 pub mod metal;
+pub mod routing;
+pub mod shared_event;
+pub mod unified_arena;
 pub mod lane_executor_registry;
