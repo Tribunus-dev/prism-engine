@@ -172,6 +172,7 @@ pub use model_manifest::{
     ModelProjectorBinding, ModelRequirements, MultiModelManifest,
 };
 pub mod compiler;
+pub mod pipeline;
 pub mod plan_apply;
 pub use cimage::{emit_int8_ane_program, CImageError, TensorPayloadEntry, UniversalCImageWriter};
 pub use compiler::{

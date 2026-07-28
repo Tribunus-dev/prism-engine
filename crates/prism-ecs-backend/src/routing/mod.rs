@@ -111,7 +111,9 @@ pub enum CorrectnessCheckpointPolicy {
 
 // ── Tensor identity ─────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct TensorId(pub u64);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -20,6 +20,7 @@ prism-rocm-runtime = { path = "../prism-rocm-runtime" }
 prism-amd-npu-runtime = { path = "../prism-amd-npu-runtime" }
 prism-ane = { path = "../prism-ane", optional = true }
 prism-ane-runtime = { path = "../prism-ane-runtime", optional = true, features = ["coreml"] }
+prism-ecs-backend = { path = "../prism-ecs-backend" }
 serde = { workspace = true }
 serde_json.workspace = true
 thiserror.workspace = true
