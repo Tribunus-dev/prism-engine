@@ -24,7 +24,7 @@ use crate::ecs::compute_image::legacy_compute_image_runtime::multimodal::descrip
     MultimodalInputDescriptorV1, ProjectionRole, ProjectionTensorRecord,
     MULTIMODAL_DESCRIPTOR_MAGIC,
 };
-use crate::ecs::config::CompileQuantMode;
+use prism_ecs_constitutional::config::CompileQuantMode;
 use memmap2::MmapMut;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -375,7 +375,7 @@ fn synthesize_execution_graph_for_loaded(loaded: &LoadedSource) -> Option<Vec<u8
     {
         let is_sliding = matches!(
             plan.attention_kind,
-            crate::ecs::config::AttentionKind::SlidingAttention
+            prism_ecs_constitutional::config::AttentionKind::SlidingAttention
         );
         layers.push(LayerExecutionNode {
             node_kind: NodeKind::DecoderLayer as u8,
@@ -2980,7 +2980,7 @@ mod tests {
         ResidencyPlan, Segment, SegmentKind as ManifestSegmentKind, ShardHash, SharedWeightLayout,
         SourceIdentity, TensorEntry,
     };
-    use crate::ecs::config::{
+    use prism_ecs_constitutional::config::{
         AudioArchitecture, GenerationRegime, LayerPlan, ModelExecutionPlan, RopeSpec,
         TextArchitecture, VisionArchitecture,
     };

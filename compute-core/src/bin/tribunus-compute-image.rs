@@ -16,8 +16,8 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use tribunus_compute_core::compute_image;
-use tribunus_compute_core::config::CompileQuantMode;
-use tribunus_compute_core::config::HardwareTarget;
+use prism_ecs_constitutional::config::CompileQuantMode;
+use prism_ecs_constitutional::config::HardwareTarget;
 use tribunus_compute_core::kv_cache::KvCache;
 use prism_ecs_quantization::nf4tile640::{
     nf4_dequantize, pack_int8_weights, pack_nf4_tile_with_group_size, pack_nf4_weights,

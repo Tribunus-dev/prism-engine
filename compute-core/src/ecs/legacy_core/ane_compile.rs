@@ -11,7 +11,7 @@ use std::path::Path;
 
 use crate::ecs::compute_image::legacy_compute_image_compile::coreai::compile_ane_islands;
 use crate::ecs::compute_image::legacy_compute_image_compile::SourceTensor;
-use crate::ecs::config::{build_execution_plan, parse_config};
+use prism_ecs_constitutional::config::{build_execution_plan, parse_config};
 use crate::ecs::config_namespace::resolve_namespace;
 
 /// Compile Core ML ANE subgraphs for a model at the given directory.

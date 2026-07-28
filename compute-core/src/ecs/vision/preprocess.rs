@@ -5,7 +5,7 @@
 //! model's mean/std statistics, and returned as an FP32 tensor with
 //! shape `[1, num_channels, image_size, image_size]`.
 
-use crate::ecs::config::VisionArchitecture;
+use prism_ecs_constitutional::config::VisionArchitecture;
 use mlx_rs::Array;
 
 /// Standard ImageNet normalization mean values (per channel).

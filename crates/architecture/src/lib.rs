@@ -12,12 +12,13 @@
 //! legacy engine bitnet surface, the legacy engine LUT surface, the
 //! legacy engine nf4tile640 surface, the legacy engine kv_arena
 //! surface, the legacy engine memory surface, the legacy engine cimage
-//! surface, the legacy engine models surface, the legacy engine runtime
-//! surface, the legacy engine system surface, the legacy engine
-//! decode_attribution surface, the legacy engine tools surface, the
-//! legacy engine compute_image_core surface, the legacy engine
-//! compute_image_compile surface, the legacy engine compute_image_runtime
-//! surface, or the legacy engine backend surface.
+//! surface, the legacy engine config surface, the legacy engine
+//! models surface, the legacy engine runtime surface, the legacy
+//! engine system surface, the legacy engine decode_attribution
+//! surface, the legacy engine tools surface, the legacy engine
+//! compute_image_core surface, the legacy engine compute_image_compile
+//! surface, the legacy engine compute_image_runtime surface, or the
+//! legacy engine backend surface.
 
 pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_backend_imports;
@@ -28,6 +29,7 @@ pub mod workspace_legacy_compute_image_core_imports;
 pub mod workspace_legacy_compute_image_runtime_imports;
 pub mod workspace_legacy_compiler_imports;
 pub mod workspace_legacy_compute_image_compile_imports;
+pub mod workspace_legacy_config_imports;
 pub mod workspace_legacy_core_imports;
 pub mod workspace_legacy_decode_attribution_imports;
 pub mod workspace_legacy_evaluator_imports;

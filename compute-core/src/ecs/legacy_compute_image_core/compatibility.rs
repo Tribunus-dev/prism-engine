@@ -13,7 +13,7 @@
 //! | `num_key_value_heads != num_attention_heads` | GQA detected — warn, validate KV projection handling |
 //! | `hidden_size != n_heads × head_dim` | Architecture inconsistency — hard error |
 
-use crate::ecs::config::{CompileQuantMode, HardwareTarget, TextArchitecture};
+use prism_ecs_constitutional::config::{CompileQuantMode, HardwareTarget, TextArchitecture};
 use serde::Serialize;
 
 // ---------------------------------------------------------------------------
@@ -345,7 +345,7 @@ mod tests {
             final_logit_softcapping: None,
             hidden_size_per_layer_input: 896,
             layer_types: vec![],
-            rope_local: crate::ecs::config::RopeSpec {
+            rope_local: prism_ecs_constitutional::config::RopeSpec {
                 theta: 1_000_000.0,
                 rope_type: "default".to_string(),
                 partial_rotary_factor: None,
@@ -470,7 +470,7 @@ mod tests {
             final_logit_softcapping: None,
             hidden_size_per_layer_input: 4096,
             layer_types: vec![],
-            rope_local: crate::ecs::config::RopeSpec {
+            rope_local: prism_ecs_constitutional::config::RopeSpec {
                 theta: 500_000.0,
                 rope_type: "default".to_string(),
                 partial_rotary_factor: None,

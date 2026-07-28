@@ -63,7 +63,7 @@ pub struct LayerArraysRef<'a> {
 pub fn run_sliding_layer_arrays(
     x: &Array,
     w: &LayerArraysRef<'_>,
-    arch: &crate::ecs::config::TextArchitecture,
+    arch: &prism_ecs_constitutional::config::TextArchitecture,
     rope_cos: &Array,
     rope_sin: &Array,
     kv_offset: u32,
@@ -190,7 +190,7 @@ pub fn run_sliding_layer_arrays(
 pub fn run_full_layer_arrays(
     x: &Array,
     w: &LayerArraysRef<'_>,
-    arch: &crate::ecs::config::TextArchitecture,
+    arch: &prism_ecs_constitutional::config::TextArchitecture,
     rope_cos: &Array,
     rope_sin: &Array,
     kv_offset: u32,
@@ -344,7 +344,7 @@ impl TensorLookup for Shard {
 #[allow(private_bounds)]
 pub fn run_six_layer_prefix<T: TensorLookup>(
     sources: &[&T],
-    arch: &crate::ecs::config::TextArchitecture,
+    arch: &prism_ecs_constitutional::config::TextArchitecture,
 ) -> MlxResult<Array> {
     let root = "language_model.model";
     let (local_cos, local_sin) = primitives::rope_freqs(
@@ -376,7 +376,7 @@ pub fn run_six_layer_prefix<T: TensorLookup>(
         let is_full = arch
             .layer_types
             .get(l)
-            .map(|k| matches!(k, crate::ecs::config::AttentionKind::FullAttention))
+            .map(|k| matches!(k, prism_ecs_constitutional::config::AttentionKind::FullAttention))
             .unwrap_or(false);
         let w = LayerArraysRef {
             attn_norm: &x,

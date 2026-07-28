@@ -4,7 +4,7 @@
 //! noise schedule coefficients (alpha, sigma) matching the formulas in
 //! `generation/diffusiongemma.rs`.
 
-use crate::ecs::config::NoiseScheduleType;
+use prism_ecs_constitutional::config::NoiseScheduleType;
 
 /// Diffusion step scheduler — t from T down to 0.
 pub struct DiffusionScheduler {

@@ -16,7 +16,7 @@ use crate::ecs::placement_profile::ExecutionPlacementProfile;
 use crate::profile_compiler;
 
 use prism_ecs_compile::compute_image_core::manifest::Manifest;
-use crate::ecs::config::ModelExecutionPlan;
+use prism_ecs_constitutional::config::ModelExecutionPlan;
 
 /// Workload classification for profile selection.
 ///

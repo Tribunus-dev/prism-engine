@@ -5,7 +5,7 @@
 //! embeddings are projected into the text model's hidden dimension for
 //! cross-attention injection.
 
-use crate::ecs::config::VisionArchitecture;
+use prism_ecs_constitutional::config::VisionArchitecture;
 use crate::quantized::QuantizedLinearBinding;
 use mlx_rs::Array;
 

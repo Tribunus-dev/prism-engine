@@ -56,4 +56,49 @@ pub mod network;
 pub mod operation_route;
 pub mod parser;
 
+// Migration alias: the engine's `crate::ecs::config::hardware::*` path
+// resolves here as the canonical architecture types. Existing engine
+// callers can be retargeted to `config::architecture::*` (or the
+// module-root re-exports) at their convenience; this alias keeps the
+// transition frictionless.
+pub mod hardware {
+    pub use super::architecture::*;
+}
+
 pub use error::{ConfigError, ConfigResult};
+pub use layer_plan::{build_execution_plan, compile, filter_spec_to_existing};
+pub use namespace_binding::resolve_namespace;
+pub use network::generate_backend_plans;
+pub use parser::parse_config;
+
+// Re-exports of all public types at the module root for ergonomic
+// `prism_ecs_constitutional::config::TextArchitecture`-style imports.
+// Engine callers migrated from `crate::ecs::config::Type` to
+// `prism_ecs_constitutional::config::Type` continue to resolve
+// without changing the import line.
+pub use architecture::{
+    AttentionKind, AudioArchitecture, CommitPolicy, ConfidenceType, DiffusionAttentionKind,
+    DiffusionConfig, DiffusionExecutionPlan, DiffusionForwardRoute, DiffusionStage,
+    GenerationRegime, KvCacheMode, MaskSelection, MoEConfig, NoiseScheduleType,
+    QuantizationMeta, QuantizationMode, RopeSpec, SamplerPolicy, StopCondition,
+    TextArchitecture, VisionArchitecture,
+};
+pub use compile_quant_mode::CompileQuantMode;
+pub use hardware_target::HardwareTarget;
+pub use layer_plan::{
+    ExecutionSpec, LayerSpec, PackedLinearShapes, TensorBinding, TensorRole,
+};
+pub use limits::{CompilationPlan, PlannedSegment, PlannedTensor, TensorDisposition};
+pub use model_execution_plan::{
+    AneFusedIsland, EpiloguePlan, FusedOperation, LayerPlan, ModelExecutionPlan, ProloguePlan,
+    SpeculativeModelConfig,
+};
+pub use namespace_binding::NamespaceBinding;
+pub use network::{
+    CacheConfigSection, ClusterConfigSection, ModelConfigSection, ServerConfig,
+    ServerConfigSection, SpecConfigSection,
+};
+pub use operation_route::OperationRoute;
+pub use parser::{
+    ArchitectureConfig, CimageManifest, ManifestModality, ModelManifest, ShardManifest,
+};

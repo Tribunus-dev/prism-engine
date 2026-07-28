@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use crate::ecs::compute_image::manifest::TensorEntry;
-use crate::ecs::config::parser::{CimageManifest, ManifestModality};
+use prism_ecs_constitutional::config::parser::{CimageManifest, ManifestModality};
 
 /// Compile an audio model checkpoint into a standalone cimage artifact.
 ///
@@ -36,8 +36,8 @@ pub fn compile_audio_model(
     // 3. Construct manifest
     let manifest = CimageManifest {
         modality: ManifestModality::Audio,
-        architecture: crate::ecs::config::ArchitectureConfig::Audio(
-            crate::ecs::config::hardware::AudioArchitecture {
+        architecture: prism_ecs_constitutional::config::ArchitectureConfig::Audio(
+            prism_ecs_constitutional::config::hardware::AudioArchitecture {
                 hidden_size: 384,
                 num_attention_heads: 6,
                 num_hidden_layers: 4,

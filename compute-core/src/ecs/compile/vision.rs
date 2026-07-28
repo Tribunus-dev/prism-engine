@@ -7,8 +7,8 @@
 use std::path::Path;
 
 use crate::ecs::compute_image::TensorEntry;
-use crate::ecs::config::hardware::VisionArchitecture;
-use crate::ecs::config::parser::{ArchitectureConfig, CimageManifest, ManifestModality};
+use prism_ecs_constitutional::config::hardware::VisionArchitecture;
+use prism_ecs_constitutional::config::parser::{ArchitectureConfig, CimageManifest, ManifestModality};
 
 /// Compile a vision model checkpoint into a standalone cimage artifact.
 ///

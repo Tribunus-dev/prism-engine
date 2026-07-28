@@ -5,7 +5,7 @@
 //! along with known weight sizes to lay out all 7 segments at 16 KB
 //! boundaries.
 
-use crate::ecs::config::CompileQuantMode;
+use prism_ecs_constitutional::config::CompileQuantMode;
 use std::path::Path;
 
 const APPLE_PAGE_SIZE: u64 = super::APPLE_PAGE_SIZE as u64;

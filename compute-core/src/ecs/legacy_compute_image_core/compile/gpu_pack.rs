@@ -140,7 +140,7 @@ struct Nf4Tile640PackArtifacts {
     scales_len: usize,
     biases_len: usize,
     packed_in: usize,
-    packed_shape: crate::ecs::config::PackedLinearShapes,
+    packed_shape: prism_ecs_constitutional::config::PackedLinearShapes,
 }
 
 pub(crate) fn nf4_tile640_pack_layout(out_dim: u32, in_dim: u32) -> Nf4Tile640PackLayout {
@@ -291,7 +291,7 @@ pub(crate) fn try_ternary_tile640_pack_gpu(
     let stem = weight_name.strip_suffix(".weight").unwrap_or(weight_name);
     let scales_name = format!("{}.scales", stem);
     let total_u32_count = (out_dim_u * num_tiles * 32) as u32;
-    let packed_shape = crate::ecs::config::PackedLinearShapes {
+    let packed_shape = prism_ecs_constitutional::config::PackedLinearShapes {
         weight: vec![out_dim, total_u32_count],
         scales: vec![out_dim, num_tiles as u32],
         biases: vec![out_dim, num_tiles as u32],
@@ -550,7 +550,7 @@ pub(crate) fn try_nf4_tile640_pack_gpu_bytes(
     Vec<u8>,
     Vec<u8>,
     usize,
-    crate::ecs::config::PackedLinearShapes,
+    prism_ecs_constitutional::config::PackedLinearShapes,
 )> {
     let artifacts = dispatch_nf4_tile640_pack(raw_bytes, dtype, out_dim, in_dim, None)?;
     Some((
@@ -752,7 +752,7 @@ fn dispatch_nf4_tile640_pack(
             .collect(),
     };
 
-    let packed_shape = crate::ecs::config::PackedLinearShapes {
+    let packed_shape = prism_ecs_constitutional::config::PackedLinearShapes {
         weight: vec![out_dim, layout.packed_in as u32],
         scales: vec![out_dim, (layout.num_tiles * layout.groups_per_tile) as u32],
         biases: vec![out_dim, (layout.num_tiles * layout.groups_per_tile) as u32],
