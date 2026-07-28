@@ -1420,7 +1420,7 @@ fn cimage_has_tts_segments(path: &std::path::Path) -> bool {
         Ok(b) => b,
         Err(_) => return false,
     };
-    use tribunus_compute_core::compute_image::compile::ternary::verify_cimage;
+    use tribunus_compute_core::compute_image::legacy_compute_image_compile::ternary::verify_cimage;
     let (header, _) = match verify_cimage(&bytes) {
         Ok(h) => h,
         Err(_) => return false,

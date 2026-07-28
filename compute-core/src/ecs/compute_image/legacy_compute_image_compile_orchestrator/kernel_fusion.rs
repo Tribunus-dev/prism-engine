@@ -14,7 +14,7 @@
 //!   pressure limits on Apple Silicon).
 //! - SWA (Sliding Window Attention) and Full attention never fuse together.
 
-use crate::ecs::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
+use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
 
 /// A fused kernel group: N consecutive layers that can be merged into
 /// a single Metal kernel dispatch.
@@ -112,7 +112,7 @@ pub fn analyze_graph(graph: &ExecutionGraphDescriptor) -> Vec<FusedLayerGroup> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::compile::execution_graph::{AttentionKind, LayerExecutionNode};
+    use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{AttentionKind, LayerExecutionNode};
 
     fn make_decoder(attention_kind: u8, head_dim: u16, compaction_epoch: u8) -> LayerExecutionNode {
         LayerExecutionNode {

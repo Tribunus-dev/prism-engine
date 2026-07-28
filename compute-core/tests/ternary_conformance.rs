@@ -13,7 +13,7 @@
 //! All tests are CPU-only — no Metal, no GPU.
 
 use tribunus_compute_core::compute_image::cimage_loader::validate_binding;
-use tribunus_compute_core::compute_image::compile::ternary::MatrixWeightBindingV1;
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::ternary::MatrixWeightBindingV1;
 use tribunus_compute_core::quantization::admission::pack_candidate;
 use tribunus_compute_core::quantization::admission::reconstruct_candidate;
 use tribunus_compute_core::quantization::contract::RuntimeRepresentationClass;

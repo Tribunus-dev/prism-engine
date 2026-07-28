@@ -107,7 +107,7 @@ fn main() {
         ModelRunMetrics,
     };
     use tribunus_compute_core::compilation::distill_core::{kd_divergence_batch, top1_agreement};
-    use tribunus_compute_core::compute_image::orchestrator::Orchestrator;
+    use tribunus_compute_core::compute_image::legacy_compute_image_compile_orchestrator::Orchestrator;
 
     let args = Args::parse();
     let eval = load_tokens(&args.eval_tokens, args.eval_len, args.vocab_cap, 1);

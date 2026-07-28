@@ -143,13 +143,17 @@ fn scan_workspace_excluding_inventory(dir: &Path, importers: &mut Vec<String>) {
         {
             continue;
         }
-        // Skip the engine's legacy_* directories (e.g. legacy_core/).
-        // The core migration renamed `core/` to `legacy_core/` to
-        // preserve reference code; the legacy_core/ files still
+        // Skip the engine's legacy_* directories (e.g. legacy_core/,
+        // legacy_compute_image_compile/, legacy_runtime/, etc.). The
+        // engine-coupled migrations renamed engine dirs to legacy_*
+        // to preserve reference code; those legacy_* files still
         // import from `crate::ecs::backend::*` and that is by design
-        // (they are reference code, not new callers).
-        if path_str.contains("compute-core/src/ecs/legacy_")
-            || path_str.contains("compute-core\\src\\ecs\\legacy_")
+        // (they are reference code, not new callers). The check
+        // matches any legacy_ segment anywhere in the engine path
+        // (including nested legacy_ dirs created by compute_image
+        // sub-migrations that did not move the dir to top-level).
+        if path_str.contains("/legacy_")
+            || path_str.contains("\\legacy_")
         {
             continue;
         }

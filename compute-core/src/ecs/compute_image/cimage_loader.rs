@@ -12,14 +12,14 @@
 //! (`*b"CIMAGE4\0"`) and creates Metal buffers for all six tensor sections.
 //!
 //! [`TernaryCImageCompiler`]: crate::ecs::compute_image::ternary_compile::TernaryCImageCompiler
-//! [`TernaryCImageCompiler`]: crate::ecs::compute_image::compile::ternary::TernaryCImageCompiler
+//! [`TernaryCImageCompiler`]: crate::ecs::compute_image::legacy_compute_image_compile::ternary::TernaryCImageCompiler
 
-use crate::ecs::compute_image::compile::execution_graph::ExecutionGraphDescriptor;
-use crate::ecs::compute_image::compile::ternary::{
+use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::ExecutionGraphDescriptor;
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
     model_artifact_tag, verify_cimage, LayerDirectoryEntry, ModelArtifactEntry, SegmentEntry,
     SegmentKind, PRISM_MAGIC,
 };
-use crate::ecs::compute_image::compile::ternary::{
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
     read_matrix_weight_binding_v1_le, MatrixWeightBindingV1, MATRIX_WEIGHT_BINDING_V1_BYTE_LENGTH,
 };
 use crate::ecs::compute_image::megakernel::kernels::HIDDEN_DIM;
@@ -45,7 +45,7 @@ const O_ROWS: u32 = 4096;
 const DOWN_ROWS: u32 = 15360;
 
 // Re-export header types so callers only need `cimage_loader::CImageHeader`.
-pub use crate::ecs::compute_image::compile::ternary::{PrismCimageHeader, PrismCimageLayoutMeta};
+pub use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{PrismCimageHeader, PrismCimageLayoutMeta};
 
 // ── V1 layout metadata (legacy format, kept for backward compat parsing) ─────
 #[derive(Debug, Clone, Copy, Default)]
@@ -450,7 +450,7 @@ impl CimageDeployment {
         };
         let sg0 = find_seg(SegmentKind::MetalLib as u32)?;
         let weight_kind = if header.quantization_schema
-            == crate::ecs::compute_image::compile::ternary::QUANT_SCHEMA_NF4_TILE640
+            == crate::ecs::compute_image::legacy_compute_image_compile::ternary::QUANT_SCHEMA_NF4_TILE640
         {
             SegmentKind::Nf4Tile640Weights as u32
         } else {
@@ -475,7 +475,7 @@ impl CimageDeployment {
         };
 
         let num_weights = if header.quantization_schema
-            == crate::ecs::compute_image::compile::ternary::QUANT_SCHEMA_NF4_TILE640
+            == crate::ecs::compute_image::legacy_compute_image_compile::ternary::QUANT_SCHEMA_NF4_TILE640
         {
             (sg1.length / 320) * 640
         } else {
@@ -744,7 +744,7 @@ impl CimageDeployment {
         };
 
         // Repack .cimage ternary (20 trits/u32) → TernaryBlock32 (5 trits/byte) format
-        let blocks = crate::ecs::compute_image::compile::int4_pack::repack_ternary_tensor(src);
+        let blocks = crate::ecs::compute_image::legacy_compute_image_compile::int4_pack::repack_ternary_tensor(src);
         let block_bytes =
             unsafe { std::slice::from_raw_parts(blocks.as_ptr() as *const u8, blocks.len() * 9) };
 
@@ -795,7 +795,7 @@ impl CimageDeployment {
                 ..lbase + LAYER_BLOCK_BYTES];
 
             let layer_fused =
-                crate::ecs::compute_image::compile::int4_pack::interleave_fused_ternary_layer(
+                crate::ecs::compute_image::legacy_compute_image_compile::int4_pack::interleave_fused_ternary_layer(
                     q,
                     k,
                     v,

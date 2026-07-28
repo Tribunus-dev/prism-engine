@@ -10,7 +10,7 @@
 ))]
 
 use crate::ecs::compute_image::cimage_loader::CimageDeployment;
-use crate::ecs::compute_image::compile::ternary::SegmentEntry;
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::SegmentEntry;
 use crate::ecs::tts::code_predictor::TtsCodePredictor;
 use crate::ecs::tts::codec::MimiCodec;
 use crate::ecs::tts::talker::TtsMegakernel;

@@ -36,7 +36,7 @@
 using namespace metal;
 
 // ── ABI structs ──────────────────────────────────────────────────────────────
-// Binary layout matches compute_image::compile::kernel_types exactly.
+// Binary layout matches compute_image::legacy_compute_image_compile::kernel_types exactly.
 
 struct ProjectionParams {
     uint  in_dim;          // intermediate dimension (gate/up activation length)

@@ -9,11 +9,11 @@
 
 use crate::ecs::calibration::accelerate::dot_product;
 #[cfg(feature = "metal-dispatch")]
-use crate::ecs::compute_image::compile::kernel_dispatch::{
+use crate::ecs::compute_image::legacy_compute_image_compile::kernel_dispatch::{
     create_dispatchers, DenseProjectionDispatcher, RegistryRef,
 };
 #[cfg(feature = "metal-dispatch")]
-use crate::ecs::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
+use crate::ecs::compute_image::legacy_compute_image_compile::kernel_types::{KernelReceipt, ProjectionParams};
 #[cfg(feature = "metal-dispatch")]
 use half;
 #[cfg(feature = "metal-dispatch")]
@@ -310,14 +310,14 @@ impl Default for MetalTeacher {
 // hook that surfaces the megakernel's per-step logits.
 #[cfg(feature = "prism-backend")]
 pub struct Gemma4Teacher {
-    orch: crate::ecs::compute_image::orchestrator::Orchestrator,
+    orch: crate::ecs::compute_image::legacy_compute_image_compile_orchestrator::Orchestrator,
 }
 
 #[cfg(feature = "prism-backend")]
 impl Gemma4Teacher {
     /// Load a teacher `.cimage` (batch 1, NF4/native — no int4 expansion).
     pub fn load(cimage: impl AsRef<std::path::Path>) -> Result<Self, String> {
-        let orch = crate::ecs::compute_image::orchestrator::Orchestrator::from_cimage(
+        let orch = crate::ecs::compute_image::legacy_compute_image_compile_orchestrator::Orchestrator::from_cimage(
             cimage.as_ref(),
             1,
             false,
@@ -378,7 +378,7 @@ impl Gemma4Teacher {
     /// Borrow the underlying orchestrator (e.g. to reset slots between eval docs).
     pub fn orchestrator_mut(
         &mut self,
-    ) -> &mut crate::ecs::compute_image::orchestrator::Orchestrator {
+    ) -> &mut crate::ecs::compute_image::legacy_compute_image_compile_orchestrator::Orchestrator {
         &mut self.orch
     }
 }

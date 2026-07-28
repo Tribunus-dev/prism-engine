@@ -6,7 +6,7 @@
 //! accepted. The teacher weights are made bindable to both the Metal and
 //! stateless-ANE lanes by the NF4Tile640 shared arena (see
 //! `compilation::apple_installation::derive_nf4_tile640_arena_abi`); the student
-//! weights are produced by `compute_image::compile::ternary_pipeline`.
+//! weights are produced by `compute_image::legacy_compute_image_compile::ternary_pipeline`.
 //!
 //! This module is intentionally dependency-free (no MLX / Metal / compute-core
 //! types) so it compiles and unit-tests on every host, including Linux CI. The

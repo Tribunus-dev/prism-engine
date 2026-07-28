@@ -12,7 +12,7 @@
 //! receipt serialization.
 
 use tribunus_compute_core::compute_image::cimage_loader::validate_binding;
-use tribunus_compute_core::compute_image::compile::ternary::{
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::ternary::{
     write_matrix_weight_binding_v1_le, MatrixWeightBindingV1,
 };
 use tribunus_compute_core::quantization::admission::{pack_candidate, reconstruct_candidate};
