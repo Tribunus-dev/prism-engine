@@ -154,6 +154,8 @@ prism-backend = [
     "dep:image",
     "dep:prism-ane",
     "prism-ane/ane",
+    "prism-ecs-compile/prism-backend",
+    "prism-ecs-compile/ane",
 ]
 # Explicit production/compiler bundle. Keep LLVM/MLIR out of ordinary backend
 # tests unless the caller is qualifying the compiler path itself.
@@ -164,10 +166,10 @@ test-core = []
 test-hardware = ["prism-backend"]
 test-compiler = ["prism-backend-full"]
 prism-backend-ios = ["prism-backend", "metal-dispatch", "backend-metal", "dep:image"]
-mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend"]
+mlx-backend = ["dep:mlx-rs", "dep:mlx-sys", "prism-backend", "prism-ecs-compile/mlx-backend"]
 research = ["prism-backend", "mlx-backend"]
 ffi = ["prism-backend"]
-ane = []
+ane = ["prism-backend", "prism-ecs-compile/ane"]
 ane-executor = ["prism-backend"]
 metal-dispatch = ["dep:metal", "dep:objc", "dep:block"]
 server = ["dep:axum", "dep:tower-http"]
