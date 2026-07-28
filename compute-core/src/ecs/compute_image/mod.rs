@@ -32,9 +32,7 @@ pub mod cimage_packer;
 pub mod compaction;
 pub mod compatibility;
 pub mod compile;
-pub mod content_store;
 pub mod diag;
-pub mod executable;
 pub mod execution_shape;
 #[cfg(target_os = "macos")]
 pub mod fallback_plan;
@@ -44,22 +42,15 @@ pub mod fusion_receipts;
 pub mod fusion_sealing;
 #[cfg(feature = "tensix")]
 pub mod fusion_tensix;
-#[cfg(any(
-    target_os = "macos",
-    all(feature = "prism-backend-ios", target_os = "ios")
-))]
-pub mod heterogeneous;
 pub mod hf;
 pub mod hw_assessment;
 pub mod hw_bench_suite;
 pub mod kernel_provider;
-pub mod kernel_selection;
 pub mod kv_interleave;
 pub mod kv_plan;
 #[cfg(feature = "tensix")]
 pub mod layout_tensix;
 pub mod manifest;
-pub mod megakernel;
 pub mod metal_codegen;
 #[cfg(test)]
 pub mod metal_codegen_model_test;
@@ -73,8 +64,6 @@ pub mod metal_codegen_model_test;
 ))]
 pub mod metal_epilogue;
 pub mod metal_pipeline;
-pub mod model_family;
-pub mod multimodal;
 #[cfg(target_os = "macos")]
 #[cfg(any(
     target_os = "macos",
@@ -95,11 +84,8 @@ pub mod phase_program_version;
 pub mod pipeline;
 #[cfg(feature = "mlx-backend")]
 pub mod plan;
-pub mod program;
 pub mod quant;
 pub mod receipts;
-pub mod residency;
-pub mod scheduler;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod segment;
 pub mod slot_types;
@@ -113,11 +99,15 @@ pub mod subgraph_mil;
 #[cfg(feature = "tensix")]
 pub mod tensix;
 pub mod tree_attention;
-pub mod variants;
-pub mod verification;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub mod verify;
 pub mod vm_manager;
+
+// Runtime + ancillary surface — moved to `legacy_compute_image_runtime/`
+// during the constitutional absorption (2026-07-27). Engine-coupled
+// implementations remain there; data-only types are re-exported from
+// the constitutional surface at `prism_ecs_compile::compute_image_runtime`.
+pub(crate) mod legacy_compute_image_runtime;
 
 pub use manifest::{
     image_build_attestation, is_valid_storage_abi, representation_aware_admission_estimate,

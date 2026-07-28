@@ -12,8 +12,8 @@
     feature = "prism-backend-ios"
 ))]
 
-use crate::ecs::compute_image::executable::admission::ExecutableAdmissionError;
-use crate::ecs::compute_image::executable::profile::ExecutableTargetProfile;
+use crate::ecs::compute_image::legacy_compute_image_runtime::executable::admission::ExecutableAdmissionError;
+use crate::ecs::compute_image::legacy_compute_image_runtime::executable::profile::ExecutableTargetProfile;
 
 /// Snapshot of the runtime's hardware and OS capabilities.
 ///

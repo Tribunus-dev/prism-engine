@@ -16,8 +16,8 @@
     feature = "prism-backend-ios"
 ))]
 
-use crate::ecs::compute_image::content_store::integrity::IntegrityVerifier;
-use crate::ecs::compute_image::executable::seal::ExecutableSeal;
+use crate::ecs::compute_image::legacy_compute_image_runtime::content_store::integrity::IntegrityVerifier;
+use crate::ecs::compute_image::legacy_compute_image_runtime::executable::seal::ExecutableSeal;
 use crate::integration::ContentHash;
 
 /// Stateless seal verifier.
@@ -215,7 +215,7 @@ impl std::error::Error for SealVerificationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::executable::seal::ExecutableSeal;
+    use crate::ecs::compute_image::legacy_compute_image_runtime::executable::seal::ExecutableSeal;
     use crate::integration::ContentHash;
 
     fn make_valid_seal() -> ExecutableSeal {

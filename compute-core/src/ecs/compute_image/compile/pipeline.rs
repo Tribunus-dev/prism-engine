@@ -2123,8 +2123,8 @@ pub(crate) fn emit_heterogeneous_image(
     loaded: &LoadedSource,
     output_dir: &Path,
 ) -> Result<(), String> {
-    use crate::ecs::compute_image::heterogeneous::builder::HeterogeneousImageBuilder;
-    use crate::ecs::compute_image::heterogeneous::types::*;
+    use crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::builder::HeterogeneousImageBuilder;
+    use crate::ecs::compute_image::legacy_compute_image_runtime::heterogeneous::types::*;
 
     // Build model identity
     let identity = ModelIdentity {
