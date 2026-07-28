@@ -9,6 +9,7 @@ mod kernel;
 pub mod modality;
 pub mod pipeline_parity;
 pub mod ports;
+pub mod runtime;
 pub mod schedule;
 pub mod scheduling;
 pub mod speculative_decoding;
