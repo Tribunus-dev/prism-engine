@@ -10,7 +10,7 @@ use std::time::Instant;
 use super::super::bridge_provider::{
     BridgeCapability, BridgePlan, BridgeProvider, BridgeVerification,
 };
-use super::super::phase_types::TensorDescriptor;
+use crate::compilation::phase_types::TensorDescriptor;
 use super::super::receipt::BridgeReceipt;
 use std::sync::LazyLock;
 
@@ -492,7 +492,7 @@ impl BridgeProvider for StitchedProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
+    use crate::compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
 
     fn dummy_descriptor() -> TensorDescriptor {
         TensorDescriptor {

@@ -14,6 +14,13 @@
 //! Each provider implements `super::bridge_provider::BridgeProvider`. The
 //! router (`routing::Level3Router`) maintains a capability fingerprint cache
 //! and selects the best available route.
+//!
+//! ## Engine-feature gating
+//!
+//! These submodules are NOT feature-gated at the module-declaration level
+//! because engine callers (level2/scheduler, level3/routing) reference them
+//! across crate boundaries. The implementations carry their own internal
+//! cfg-gates where the code depends on platform-specific libraries.
 
 pub mod gates;
 pub mod providers;

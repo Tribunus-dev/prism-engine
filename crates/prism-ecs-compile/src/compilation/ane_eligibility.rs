@@ -16,7 +16,89 @@ use super::phase_ir::{CompilePhaseDescriptor, ShapeClass};
 use super::region_catalogue::{
     LayoutContract, RegionCatalogue, RegionCatalogueEntry,
 };
-use super::tri_lane::AneRejectionReason;
+use crate::compilation::phase_ir::TensorDtype;
+
+/// Reasons an ANE candidate region was rejected. Mirrored from the engine's
+/// `tri_lane::AneRejectionReason` (which is engine-internal) — the
+/// constitutional surface owns its own copy so ane_eligibility is
+/// self-contained and the engine-coupled `tri_lane` module can stay
+/// engine-side at `compute-core/src/ecs/legacy_compilation/tri_lane.rs`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AneRejectionReason {
+    /// Required operator cannot be lowered to Core ML MIL.
+    UnsupportedOperatorLowering(String),
+    /// Quantization representation not supported by Core ML.
+    UnsupportedQuantization(String),
+    /// Dynamic shape outside certified range.
+    DynamicShapeOutOfRange(String),
+    /// Layout conversion cost exceeds budget.
+    LayoutConversionExceedsBudget(u64),
+    /// Core ML compilation failed during qualification.
+    CoreAiCompilationFailure(String),
+    /// Runtime Core ML model load failed.
+    RuntimeLoadFailure(String),
+    /// Output contract mismatch after prediction.
+    OutputContractMismatch(String),
+    /// Numerical divergence exceeds tolerance.
+    NumericalDivergence(f64),
+    /// ANE lane cannot overlap critical GPU path.
+    CannotOverlapCriticalPath,
+    /// Predicted speedup below minimum threshold.
+    PredictedGainBelowThreshold {
+        predicted_us: u64,
+        threshold_us: u64,
+    },
+    /// GPU contention risk from this placement.
+    GpuContentionRisk,
+    /// Phase has dynamic shape (needs static for production).
+    DynamicShape { tensor_id: String },
+    /// Boundary tensor dtype is not FP16.
+    UnsupportedBoundaryDtype {
+        tensor_id: String,
+        expected: TensorDtype,
+        actual: TensorDtype,
+    },
+    /// Missing boundary contract for a tensor.
+    MissingBoundaryContract { tensor_id: String },
+    /// FP16 layout not representable as one-component IOSurface slot.
+    InvalidFp16Layout { tensor_id: String, reason: String },
+    /// Cost profitability evaluation failed.
+    CostUnprofitable {
+        ane_cost_ns: u64,
+        gpu_cost_ns: u64,
+        bridge_cost_ns: u64,
+    },
+    /// Phase has dynamic dimension(s) that prevent static ANE binding.
+    DynamicDimension { dimension: String },
+    /// Phase contains a dynamic reshape that Core ML cannot express.
+    DynamicReshape,
+    /// Phase contains scatter/gather ops incompatible with ANE.
+    ScatterGather,
+    /// Phase uses dynamic indexing (non-constant index tensors).
+    DynamicIndexing,
+    /// Phase mutates KV-cache state in a way Core ML cannot represent.
+    MutableKvState,
+    /// Broadcast dimensions are outside Core ML's certified range.
+    UnsupportedBroadcast,
+    /// Rank conversion at a lane boundary is not representable.
+    BoundaryRankConversion,
+    /// Boundary copy to CPU is required but exceeds the acceptable threshold.
+    BoundaryCpuCopyRequired,
+    /// Operator has no valid tensor shape for lowering.
+    UnsizedOp,
+    /// No catalogue entry exists for this operator family.
+    MissingCatalogueEntry { operator_family: String },
+    /// Data type not supported on the ANE lane.
+    UnsupportedDtype,
+    /// Input buffer ABI is incompatible with Core ML expectations.
+    UnsupportedInputAbi,
+    /// Output buffer ABI is incompatible with Core ML expectations.
+    UnsupportedOutputAbi,
+    /// ANE weight allocation would exceed the device budget.
+    WeightBudgetExceeded,
+    /// The required Core ML model function is unavailable on this runtime.
+    CoreAiFunctionUnavailable,
+}
 
 // ── Eligibility result ────────────────────────────────────────────────────
 

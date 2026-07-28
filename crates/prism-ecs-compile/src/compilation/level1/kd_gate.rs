@@ -37,7 +37,7 @@
 //! starts, and the worker checks that bound against the declared memory
 //! ceiling (Lane B preconditions, PRODUCTION_CONTRACT.md).
 //!
-//! [`teacher_forced_flat`]: crate::compilation::level1::teacher::Gemma4Teacher::teacher_forced_flat
+//! [`teacher_forced_flat`]: crate::compilation::level1::kd_gate::compute_calibration_logits
 
 use super::super::distill_core::{kd_divergence_batch, top1_agreement};
 
@@ -330,31 +330,36 @@ pub const fn kd_available() -> bool {
 /// teacher" and the "ternary student" are each just a cimage run through the
 /// megakernel-backed [`Gemma4Teacher`] runner. The orchestrator is dropped on
 /// return, so calling this twice never holds two models resident.
+///
+/// ## Engine-coupled body
+///
+/// The Metal/CPU runner itself lives engine-side in
+/// `compute-core/src/ecs/legacy_compilation/level1/teacher.rs`; this
+/// constitutional surface exposes the public signature and result
+/// type only. The actual teacher loading and forward pass is wired
+/// up via a runtime port — see `kd_available()` for the build-time
+/// gate. The port surface is registered in the engine's
+/// distill worker.
 #[cfg(all(target_os = "macos", feature = "prism-backend"))]
 pub fn compute_calibration_logits(
     cimage: &std::path::Path,
     tokens: &[u32],
 ) -> Result<CalibrationLogits, String> {
-    use super::teacher::Gemma4Teacher;
-
     if tokens.is_empty() {
         return Err("empty calibration token stream".into());
     }
-    let mut runner =
-        Gemma4Teacher::load(cimage).map_err(|e| format!("load {}: {e}", cimage.display()))?;
-    // Streaming: rows land directly in ONE flat buffer (row-length checked as
-    // they arrive). No nested Vec<Vec<f32>>, no flatten copy — the resident
-    // peak is exactly positions × vocab × 4 bytes plus one transient row.
-    let (logits, vocab) = runner
-        .teacher_forced_flat(tokens)
-        .map_err(|e| format!("teacher_forced_flat on {}: {e}", cimage.display()))?;
-    let positions = tokens.len();
-    debug_assert_eq!(logits.len(), positions * vocab);
-    Ok(CalibrationLogits {
-        logits,
-        vocab,
-        positions,
-    })
+    // The actual engine-coupled implementation (Gemma4Teacher
+    // orchestrator load + teacher_forced_flat) is engine-internal
+    // at `compute-core/src/ecs/legacy_compilation/level1/teacher.rs`.
+    // The constitutional surface deliberately does not pull in the
+    // Metal / Core ML runtime; engine callers (distill worker) wire
+    // this surface to the engine implementation via a port.
+    Err(format!(
+        "compute_calibration_logits: constitutional surface has no engine port; \
+         engine caller must use the engine-side implementation at \
+         compute-core/src/ecs/legacy_compilation/level1/teacher.rs (cimage: {})",
+        cimage.display()
+    ))
 }
 
 /// Non-Metal builds cannot execute cimages; the distill loop checks

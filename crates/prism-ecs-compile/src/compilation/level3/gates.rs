@@ -13,7 +13,7 @@
 
 use super::super::arena::ActivationArena;
 use super::super::bridge_provider::{BridgePlan, BridgeProvider, BridgeReceipt};
-use super::super::phase_types::TensorDescriptor;
+use crate::compilation::phase_types::TensorDescriptor;
 use super::super::receipt::CertificationSection;
 use super::routing::Level3Router;
 
@@ -281,7 +281,7 @@ pub fn run_all_gates(router: &Level3Router, source: &TensorDescriptor) -> Certif
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
+    use crate::compilation::phase_types::{ElementType, PhysicalLayout, ResidencyClass};
 
     fn dummy_descriptor() -> TensorDescriptor {
         TensorDescriptor {
