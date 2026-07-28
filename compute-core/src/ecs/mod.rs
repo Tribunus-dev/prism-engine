@@ -79,7 +79,6 @@ pub mod engine_policy;
 pub mod engine_receipts;
 pub mod errors;
 pub mod evidence;
-pub mod evolution;
 pub mod execution_profile;
 pub mod executor;
 pub mod executor_projection;
