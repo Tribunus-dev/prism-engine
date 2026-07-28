@@ -6,7 +6,7 @@
 //! Provides a lightweight summary struct that can be serialised for
 //! consumption by a monitoring or management UI.
 
-use crate::ecs::cimage::generation_api::GenerationApi;
+use crate::ecs::legacy_cimage::generation_api::GenerationApi;
 
 /// Evidence dashboard summary.
 ///
@@ -40,7 +40,7 @@ impl EvidenceSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::generation_api::GenerationApi;
+    use crate::ecs::legacy_cimage::generation_api::GenerationApi;
 
     #[test]
     fn test_evidence_summary_empty() {

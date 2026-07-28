@@ -47,3 +47,6 @@ pub use receipts::{
     CImageShardValidationReceipt, CImageValidationStatus, CImageWriteReceipt, EvidenceReceiptV0,
     ReceiptEvidenceKind,
 };
+
+// Canonical JSON helper, re-exported from the `canonical` submodule.
+pub use canonical::canonical_json_bytes;

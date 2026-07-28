@@ -36,7 +36,7 @@ pub mod cache;
 pub mod calibration;
 pub mod candle_cpu_backend;
 pub mod capability;
-pub mod cimage;
+pub mod legacy_cimage;
 pub mod cimage_runtime;
 pub mod cli;
 pub mod compilation;

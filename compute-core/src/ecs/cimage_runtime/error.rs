@@ -1,6 +1,6 @@
 //! CImage runtime bridge — errors for artifact-driven execution.
 
-use crate::ecs::cimage::CImageError;
+use crate::ecs::legacy_cimage::CImageError;
 use crate::execution_plan::CodecFamily;
 
 /// Errors that can occur during cimage runtime execution.

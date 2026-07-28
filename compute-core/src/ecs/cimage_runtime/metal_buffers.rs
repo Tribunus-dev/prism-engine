@@ -438,7 +438,7 @@ fn codec_family_to_id(codec: CodecFamily) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::*;
+    use crate::ecs::legacy_cimage::*;
     use crate::ecs::cimage_runtime::lower_mlp::MlpShardRegionBuilder;
     use crate::ecs::cimage_runtime::resolver::CImageRuntimeResolver;
     use crate::ecs::cimage_runtime::tensor_store::MlpRegionExecutionMode;

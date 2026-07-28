@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 
-use crate::ecs::cimage::error::{CImageError, CImageResult};
+use crate::ecs::legacy_cimage::error::{CImageError, CImageResult};
 
 /// Serialize `value` to canonical (deterministic) JSON bytes.
 ///

@@ -3,7 +3,7 @@
 //! Reads a cimage V0 file from disk, validates structure, and returns a
 //! [`LoadedCImageV0`] with all sections deserialized and in-memory.
 
-use crate::ecs::cimage::{
+use crate::ecs::legacy_cimage::{
     CImageError, CImageHeaderV0, CImageManifestV0, CImagePayloadDirectoryV0,
     CImageReceiptDirectoryV0, CImageResult,
 };
@@ -88,9 +88,9 @@ impl CImageLoader {
             .map_err(|e| CImageError::Io(format!("bincode header deserialize: {e}")))?;
 
         // Validate magic and format version.
-        if header.magic != crate::ecs::cimage::CIMAGE_MAGIC {
+        if header.magic != crate::ecs::legacy_cimage::CIMAGE_MAGIC {
             return Err(CImageError::InvalidMagic {
-                expected: crate::ecs::cimage::CIMAGE_MAGIC,
+                expected: crate::ecs::legacy_cimage::CIMAGE_MAGIC,
                 got: header.magic.to_vec(),
             });
         }
@@ -208,7 +208,7 @@ impl CImageLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::{
+    use crate::ecs::legacy_cimage::{
         CImageArtifactKind, CImageHeaderV0, CImageManifestV0, CImagePayloadDirectoryV0,
         CImagePayloadEntry, CImagePayloadKind, CImageReceiptDirectoryV0, CImageReceiptEntry,
         ModelExecutionPlanSummary, CIMAGE_FORMAT_VERSION, CIMAGE_MAGIC,

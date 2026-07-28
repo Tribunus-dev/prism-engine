@@ -3,8 +3,8 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::ecs::cimage::mlp_reference::{load_mlp_shard_tensors, run_mlp_reconstructed_reference};
-use crate::ecs::cimage::{CImageManifestV0, CImagePayloadRef, CImageTensorEntry, LoadedCImageV0};
+use crate::ecs::legacy_cimage::mlp_reference::{load_mlp_shard_tensors, run_mlp_reconstructed_reference};
+use crate::ecs::legacy_cimage::{CImageManifestV0, CImagePayloadRef, CImageTensorEntry, LoadedCImageV0};
 use crate::execution_plan::CodecFamily;
 
 use super::error::{CImageRuntimeError, CImageRuntimeResult};
@@ -73,7 +73,7 @@ impl CImageRuntimeResolver {
         let gate_raw = extract_rawf32(image, 1)?;
         let up_raw = extract_rawf32(image, 2)?;
         let down_raw = extract_rawf32(image, 3)?;
-        let rawf32_output = crate::ecs::cimage::mlp_reference::run_mlp_rawf32_reference(
+        let rawf32_output = crate::ecs::legacy_cimage::mlp_reference::run_mlp_rawf32_reference(
             &deterministic_input,
             &rmsnorm_raw,
             &gate_raw,
@@ -234,7 +234,7 @@ fn extract_rawf32(image: &LoadedCImageV0, tensor_idx: usize) -> CImageRuntimeRes
 fn compute_digest_for_cimage(image: &LoadedCImageV0) -> String {
     // Compute sha256 of the raw_file_bytes (excluding footer)
     let file_len = image.raw_file_bytes.len();
-    let footer_size = std::mem::size_of::<crate::ecs::cimage::header::CImageFooterV0>();
+    let footer_size = std::mem::size_of::<crate::ecs::legacy_cimage::header::CImageFooterV0>();
     let digest_len = file_len.saturating_sub(footer_size);
     let bytes = &image.raw_file_bytes[..digest_len];
     format!("{:x}", Sha256::digest(bytes))
@@ -266,7 +266,7 @@ fn sha256_hex_f32(data: &[f32]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::cimage::*;
+    use crate::ecs::legacy_cimage::*;
     use crate::execution_plan::CodecFamily;
 
     fn build_test_cimage(codec: CodecFamily) -> (tempfile::TempDir, LoadedCImageV0) {

@@ -1,35 +1,57 @@
-//! CImage module — CImage V0 proof format: writing, loading, validating, and
-//! executing synthetic shards.
+//! Engine-internal execution-plane home for the CImage V0 proof format.
 //!
-//! This module is an independent crate-level module within compute-core.
-//! It does not depend on `compute_image` or `compile` internals.
+//! The constitutional surface for the engine-independent V0 file format
+//! data types (header, footer, payload directory, receipt directory,
+//! error, canonical-JSON helper) lives in `prism_ecs_compile::cimage_v0`.
+//! This module is the engine-internal home for the higher-level CImage
+//! operations (writer, loader, streaming_writer, manifest, sealed_v1,
+//! validator, shard_builder, MLP reference, generation store, dashboard,
+//! privacy, durability, compatibility, generation_api) that depend on
+//! engine-internal types (`PrecisionPlan`, `PrivacyContract`,
+//! `CompiledKernelArtifact`, `CimageGeneration`, `GenerationApi`, etc.).
+//!
+//! # Re-exports
+//!
+//! The five engine-agnostic data-type modules are re-exported from the
+//! constitutional surface so engine callers can read them through the
+//! `legacy_cimage` path. New code should prefer the
+//! `prism_ecs_compile::cimage_v0::...` import path; the re-exports here
+//! are the migration bridge.
 
 pub mod canonical;
 pub mod compatibility;
 pub mod dashboard;
+pub mod durability;
 pub mod error;
 pub mod generation_api;
 pub mod generation_store;
 pub mod header;
+pub mod loader;
 pub mod manifest;
 pub mod mlp_reference;
 pub mod payload;
 pub mod privacy;
 pub mod receipts;
-
-// Implementation modules — written after type definitions.
-pub mod durability;
-pub mod loader;
 pub mod sealed_v1;
 pub mod shard_builder;
 pub mod streaming_writer;
 pub mod validate;
 pub mod writer;
 
-// Public API surface.
+// Re-exports of the constitutional data types (see
+// `prism_ecs_compile::cimage_v0`). Existing engine callers that import
+// `crate::ecs::legacy_cimage::CImageError` etc. continue to work; new
+// code should prefer the constitutional path.
+pub use prism_ecs_compile::cimage_v0::{
+    canonical_json_bytes, CImageError, CImageFooterV0, CImageHeaderV0, CImageLoadReceipt,
+    CImagePayloadDirectoryV0, CImagePayloadEntry, CImagePayloadKind, CImageProofKind,
+    CImageReceiptDirectoryV0, CImageReceiptEntry, CImageResult, CImageShardValidationReceipt,
+    CImageValidationStatus, CImageWriteReceipt, EvidenceReceiptV0, PendingPayload, PendingReceipt,
+    ReceiptEvidenceKind, CIMAGE_FORMAT_VERSION, CIMAGE_MAGIC,
+};
 
-pub use error::{CImageError, CImageResult};
-pub use header::{CImageFooterV0, CImageHeaderV0, CIMAGE_FORMAT_VERSION, CIMAGE_MAGIC};
+// Re-exports of the engine-internal types (defined in submodules of
+// this module).
 pub use loader::{CImageLoader, LoadedCImageV0};
 pub use manifest::{
     AssistantGraphPayloadRef, CImageArtifactKind, CImageManifestV0, CImagePayloadRef,
@@ -40,14 +62,6 @@ pub use mlp_reference::{
     compute_cosine_similarity, compute_max_abs_error, compute_nrmse,
     run_decoder_layer_rawf32_reference, run_mlp_rawf32_reference, run_mlp_reconstructed_reference,
     validate_decoder_layer_shard, LoadedMlpShardTensors,
-};
-pub use payload::{
-    CImagePayloadDirectoryV0, CImagePayloadEntry, CImagePayloadKind, PendingPayload, PendingReceipt,
-};
-pub use receipts::{
-    CImageLoadReceipt, CImageProofKind, CImageReceiptDirectoryV0, CImageReceiptEntry,
-    CImageShardValidationReceipt, CImageValidationStatus, CImageWriteReceipt, EvidenceReceiptV0,
-    ReceiptEvidenceKind,
 };
 pub use sealed_v1::{
     AbiIdentity, CanonicalManifest, KernelArtifactIdentity, SealedCimageBuilder,

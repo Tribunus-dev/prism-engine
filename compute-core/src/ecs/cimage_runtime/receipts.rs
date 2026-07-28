@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::cimage::ReceiptEvidenceKind;
+use crate::ecs::legacy_cimage::ReceiptEvidenceKind;
 use crate::execution_plan::backend_capability::BackendLoweringTarget;
 use crate::execution_plan::HardwareProfileId;
 

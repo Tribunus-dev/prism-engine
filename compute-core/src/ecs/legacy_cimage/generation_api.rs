@@ -11,7 +11,7 @@ use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::canonical::generation::EngramBinding;
 use crate::ecs::canonical::identity::*;
 use crate::ecs::canonical::provenance::{LifecycleReceiptBundle, PromotionRequest};
-use crate::ecs::cimage::generation_store::{ContentStore, GenerationStore, PromotionTransaction};
+use crate::ecs::legacy_cimage::generation_store::{ContentStore, GenerationStore, PromotionTransaction};
 use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::training_target::engram::trainer::TrainedEngram;
 use crate::ecs::training_target::spec::EngramArtifact;
