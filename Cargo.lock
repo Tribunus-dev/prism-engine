@@ -6611,6 +6611,7 @@ dependencies = [
  "prism-ecs-compile",
  "prism-ecs-constitutional",
  "prism-ecs-core",
+ "prism-ecs-data",
  "prism-ecs-ir",
  "prism-ecs-kernel",
  "prism-ecs-quantization",

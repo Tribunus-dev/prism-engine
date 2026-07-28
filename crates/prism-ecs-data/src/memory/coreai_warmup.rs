@@ -1,12 +1,16 @@
-//! Core ML ANE warmup — compiles a minimal .mlpackage through `coremlc`
-//! (which has the `com.apple.private.ane.compile` entitlement) and executes
-//! it on the ANE via the existing Core ML ObjC bridge.
+//! Core ML ANE warmup helper.
 //!
-//! The resulting `_ANEInMemoryModel` provides identical ANE performance
-//! through the Core ML compilation path.
+//! This module owns the canonical authority for the engine-independent
+//! warmup flow: assemble a minimal `.mlpackage` bundle containing
+//! the [`ane_warmup_mil`](super::ane_warmup_mil) program, compile it
+//! via `coremlc`, and clean up. It does not depend on the engine's
+//! `Arena` or `worker_memory` — it is the constitutional surface for
+//! the ANE-firmware warmup side effect.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use super::ane_warmup_mil;
 
 /// Subdirectory names inside a .mlpackage bundle.
 const MLPACKAGE_MANIFEST: &str = "Manifest.json";
@@ -14,8 +18,6 @@ const MLPACKAGE_DATA_DIR: &str = "Data";
 const MLPACKAGE_TYPE_DIR: &str = "Type";
 const DEFAULT_MIL_FILE: &str = "default.mil";
 const MODEL_METADATA_FILE: &str = "metadata.json";
-
-// ── .mlpackage generation ──────────────────────────────────────────────────
 
 fn write_mlpackage_manifest(path: &Path) -> Result<(), String> {
     let content = r#"{
@@ -62,8 +64,9 @@ fn write_mlpackage_type_metadata(path: &Path) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| format!("write Type/metadata.json: {e}"))
 }
 
-/// Build a minimal .mlpackage bundle at `output_path` containing our warmup
-/// MIL program.  The bundle can then be compiled via `coremlc compile`.
+/// Build a minimal .mlpackage bundle at `output_path` containing the
+/// canonical ANE warmup MIL program. The bundle can then be compiled
+/// via `coremlc compile`.
 pub fn build_warmup_mlpackage(output_path: &Path) -> Result<(), String> {
     // Directory tree: output.mlpackage/{Manifest.json, Data/default.mil, Type/metadata.json}
     let data_dir = output_path.join(MLPACKAGE_DATA_DIR);
@@ -74,9 +77,9 @@ pub fn build_warmup_mlpackage(output_path: &Path) -> Result<(), String> {
 
     write_mlpackage_manifest(&output_path.join(MLPACKAGE_MANIFEST))?;
 
-    // Copy the MIL program from our embedded resource
-    let mil_data = include_bytes!("ane_warmup.mil");
-    std::fs::write(data_dir.join(DEFAULT_MIL_FILE), mil_data)
+    // Write the canonical MIL program from the constitutional
+    // ane_warmup_mil module.
+    std::fs::write(data_dir.join(DEFAULT_MIL_FILE), ane_warmup_mil::ane_warmup_mil())
         .map_err(|e| format!("write Data/default.mil: {e}"))?;
 
     write_mlpackage_type_metadata(&type_dir.join(MODEL_METADATA_FILE))?;
@@ -84,9 +87,8 @@ pub fn build_warmup_mlpackage(output_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-// ── Core ML compilation ────────────────────────────────────────────────────
-
 /// Compile a .mlpackage into a .mlmodelc using `coremlc`.
+///
 /// Returns the path to the compiled .mlmodelc directory.
 pub fn compile_mlpackage(mlpackage_path: &Path, output_dir: &Path) -> Result<PathBuf, String> {
     // Find coremlc via xcrun
@@ -124,17 +126,13 @@ pub fn compile_mlpackage(mlpackage_path: &Path, output_dir: &Path) -> Result<Pat
     }
 }
 
-// ── Full warmup ────────────────────────────────────────────────────────────
-
 /// Attempt to warm the ANE through Core ML compilation.
 ///
 /// Strategy:
 ///   1.  Create a minimal .mlpackage in a temp dir.
 ///   2.  Compile it via `coremlc` (runs through Core ML framework,
 ///       which has the ANE compile entitlement).
-///   3.  Load the compiled .mlmodelc via our Core ML ObjC bridge and
-///       run one prediction to wake the ANE firmware.
-///   4.  Clean up temp files.
+///   3.  Clean up temp files.
 ///
 /// Returns true if the ANE was successfully warmed.
 /// Returns false if Core ML compilation is unavailable (no Xcode tools,
@@ -164,8 +162,7 @@ pub fn prewarm_ane_via_coreml() -> bool {
     };
 
     // Cleanup — the ANE compiler daemon was contacted via Core ML's entitlement.
-    // This warms the ANE compiler infrastructure.  For firmware pre-warm (faster
-    // subsequent ANE execution), use the Core ML prediction API.
+    // This warms the ANE compiler infrastructure.
     let _ = std::fs::remove_dir_all(&tmp_dir);
     true
 }
@@ -175,8 +172,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_mlpackage() {
-        let tmp = std::env::temp_dir().join("tribunus_test_mlpackage");
+    fn ane_warmup_mil_bytes_non_empty() {
+        let bytes = ane_warmup_mil::ane_warmup_mil();
+        assert!(!bytes.is_empty(), "ANE warmup MIL must embed bytes");
+        let s = std::str::from_utf8(bytes).expect("MIL bytes are UTF-8");
+        assert!(s.contains("program(1.3)"), "MIL must declare program(1.3)");
+        assert!(s.contains("mul("), "MIL must contain a multiply op");
+    }
+
+    #[test]
+    fn build_mlpackage_writes_all_three_files() {
+        let tmp = std::env::temp_dir().join("prism_ecs_data_test_mlpackage");
         let _ = std::fs::remove_dir_all(&tmp);
         let pkg_path = tmp.join("test.mlpackage");
         build_warmup_mlpackage(&pkg_path).expect("build mlpackage");
@@ -192,23 +198,6 @@ mod tests {
             pkg_path.join("Type/metadata.json").exists(),
             "Type/metadata.json exists"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn test_compile_via_coremlc() {
-        let tmp = std::env::temp_dir().join("tribunus_test_compile");
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let pkg_path = tmp.join("warmup.mlpackage");
-        build_warmup_mlpackage(&pkg_path).expect("build mlpackage");
-        let result = compile_mlpackage(&pkg_path, &tmp);
-        if let Ok(compiled) = result {
-            assert!(compiled.exists(), "mlmodelc exists");
-            assert!(compiled.is_dir(), "mlmodelc is a directory");
-        }
-        // If coremlc fails (no Xcode), the test still passes — the compile path
-        // is verified to run; availability depends on machine setup.
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

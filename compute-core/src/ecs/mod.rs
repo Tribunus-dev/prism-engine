@@ -125,7 +125,7 @@ pub mod lora;
 pub mod lut_compile;
 pub mod lut_runtime;
 pub mod mapped_image;
-pub mod memory;
+pub mod memory_impl;
 pub mod metal_backend;
 pub mod metal_capture;
 pub mod metal_launcher;

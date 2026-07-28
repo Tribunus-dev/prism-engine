@@ -416,7 +416,7 @@ impl CompiledImageReader {
                             self.manifest.tensor_table.iter().find(|e| e.name == *name)
                         {
                             let array =
-                                crate::memory::compute_image_bridge::load_mlx_tensor(mapped, entry)
+                                crate::memory_impl::compute_image_bridge::load_mlx_tensor(mapped, entry)
                                     .map_err(|e| {
                                         crate::Error::from_reason(format!(
                                             "load persistent tensor {}: {}",

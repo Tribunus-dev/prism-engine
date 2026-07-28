@@ -34,6 +34,18 @@ prism-ecs-runtime = { path = "../crates/prism-ecs-runtime" }
 # dependency routes all engine callers through the constitutional
 # re-export at `prism_ecs_agent::assistant_graph`.
 prism-ecs-agent = { path = "../crates/prism-ecs-agent" }
+# Canonical home of the memory subsystem data types and pure
+# abstractions — memory pressure levels, memory statistics, engine
+# pool with memory-based eviction, memory enforcer actions, the
+# pre-computed memory plan data types, the unified memory telemetry
+# snapshot, and the Core ML ANE warmup helper. The engine used to
+# have its own parallel `ecs::memory::*` module (now absorbed); this
+# dependency routes the engine's pure-data callers through the
+# constitutional re-export at `prism_ecs_data::memory`. Execution-
+# plane code that depends on engine-internal Arena, ExternalStorage,
+# MappedSegment, and worker_memory stays engine-side at
+# `compute-core/src/ecs/memory_impl/`.
+prism-ecs-data = { path = "../crates/prism-ecs-data" }
 # Prism ANE crate — canonical home for the MIL builder and the two
 # high-level ANE program constructors. The engine used to have its
 # own parallel MIL builder (now absorbed); this dependency routes

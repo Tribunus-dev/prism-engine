@@ -317,11 +317,6 @@ pub use crate::ecs::legacy_core::model;
 pub use crate::ecs::execution_profile;
 #[cfg(feature = "mlx-backend")] // research surface: MLX executor/model stack
 pub use crate::ecs::exo;
-#[cfg(all(
-    target_os = "macos",
-    any(feature = "mlx-backend", feature = "prism-backend")
-))]
-pub use crate::ecs::memory;
 // model_adapter removed — legacy, was behind legacy_mutations feature
 #[cfg(any(
     feature = "mlx-backend",

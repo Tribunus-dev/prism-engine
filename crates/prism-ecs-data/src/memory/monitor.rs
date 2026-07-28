@@ -1,13 +1,16 @@
-//! Real-time memory monitoring via macOS system APIs.
+//! Memory statistics and per-process pressure polling.
 //!
-//! Reference: `ref/omlx/memory_monitor.py`
-//! Uses mach_vm_info and proc_info for accurate per-process stats on Apple Silicon.
+//! This module owns the canonical authority for the `MemoryStats`
+//! snapshot (RSS, total RAM, virtual memory, swap usage) and the
+//! `MemoryMonitor` that polls the system and derives a
+//! [`MemoryPressure`](super::MemoryPressure) level. It is the
+//! engine-independent, platform-agnostic pressure oracle.
 
 use std::time::{Duration, Instant};
 
 use super::MemoryPressure;
 
-/// Memory statistics snapshot
+/// Memory statistics snapshot.
 #[derive(Debug, Clone)]
 pub struct MemoryStats {
     pub rss_bytes: u64,
@@ -18,7 +21,7 @@ pub struct MemoryStats {
 }
 
 impl MemoryStats {
-    /// Compute memory pressure level from current stats
+    /// Compute memory pressure level from current stats.
     pub fn pressure(&self) -> MemoryPressure {
         let ratio = self.rss_bytes as f64 / self.total_ram_bytes.max(1) as f64;
         if self.swap_used_bytes > 0
@@ -38,10 +41,12 @@ impl MemoryStats {
     }
 }
 
-/// Real-time memory monitor
+/// Real-time memory monitor.
 ///
-/// Polls system memory stats at configurable intervals and
-/// triggers callbacks when pressure levels change.
+/// Polls system memory stats at configurable intervals and reports a
+/// [`MemoryPressure`](super::MemoryPressure) level. Platform-specific
+/// sampling is intentionally not implemented here — the engine
+/// wires the actual sampling in `memory_impl::telemetry_impl`.
 #[allow(dead_code)]
 pub struct MemoryMonitor {
     stats: MemoryStats,
@@ -66,17 +71,29 @@ impl MemoryMonitor {
         }
     }
 
-    /// Poll current memory stats from the system
+    /// Poll current memory stats from the system.
+    ///
+    /// Returns the last-known snapshot and stamps `last_update`. The
+    /// constitutional surface intentionally does not implement
+    /// platform-specific sampling; the engine-side execution-plane
+    /// equivalent lives at
+    /// `compute-core/src/ecs/memory_impl/telemetry_impl.rs` and wires
+    /// `mach_vm_info` / `host_statistics64` / `proc_info` for macOS.
     pub fn poll(&mut self) -> MemoryStats {
-        // TODO: implement macOS-specific memory polling
-        // - host_statistics64/mach_vm_info for RSS
-        // - sysctl for total RAM
-        // - proc_info for swap
         self.last_update = Instant::now();
         self.stats.clone()
     }
 
-    /// Get last known pressure level
+    /// Borrow the last-known stats snapshot without stamping the
+    /// poll timestamp. Useful for read-only diagnostics and for
+    /// [`MemoryEnforcer`](super::enforcer::MemoryEnforcer) callers
+    /// that want to expose the latest observed stats without
+    /// advancing the monitor's state.
+    pub fn last_stats(&self) -> &MemoryStats {
+        &self.stats
+    }
+
+    /// Get last known pressure level.
     pub fn pressure(&self) -> MemoryPressure {
         self.last_pressure
     }

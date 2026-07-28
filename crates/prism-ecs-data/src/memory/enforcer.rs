@@ -1,13 +1,16 @@
-//! Proactive memory enforcement — prevents OOM by taking action
-//! based on memory pressure level.
+//! Memory pressure enforcer.
 //!
-//! Reference: `ref/omlx/process_memory_enforcer.py`
-//! Design: `docs/omlx-memory-management.md`
+//! This module owns the canonical authority for the `MemoryAction`
+//! taxonomy and the `MemoryEnforcer` that observes
+//! [`MemoryPressure`](super::MemoryPressure) escalations and emits
+//! the appropriate actions. It is engine-independent and
+//! replay-safe — every escalation decision is a pure function of
+//! the previous and current pressure levels.
 
-use super::monitor::MemoryMonitor;
+use super::monitor::{MemoryMonitor, MemoryStats};
 use super::MemoryPressure;
 
-/// Actions the enforcer can take under pressure
+/// Actions the enforcer can take under pressure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryAction {
     CompressKvCache,
@@ -19,7 +22,7 @@ pub enum MemoryAction {
     FreePagedCache,
 }
 
-/// Proactive memory enforcer
+/// Proactive memory enforcer.
 ///
 /// Monitors memory pressure and dispatches appropriate actions:
 /// - Warning:     compress KV cache
@@ -40,7 +43,7 @@ impl MemoryEnforcer {
         }
     }
 
-    /// Run one enforcement cycle — returns actions to take
+    /// Run one enforcement cycle — returns actions to take.
     pub fn enforce(&mut self) -> Vec<MemoryAction> {
         let stats = self.monitor.poll();
         let pressure = stats.pressure();
@@ -81,5 +84,21 @@ impl MemoryEnforcer {
             }
             _ => vec![],
         }
+    }
+
+    /// Expose the current observed pressure level (replay-safe).
+    pub fn current_pressure(&self) -> MemoryPressure {
+        self.current_pressure
+    }
+
+    /// Expose the underlying monitor for read-only access.
+    pub fn monitor(&self) -> &MemoryMonitor {
+        &self.monitor
+    }
+
+    /// Last stats snapshot observed (purely a function of the
+    /// enforcer's history; safe to log for diagnostics).
+    pub fn last_stats(&self) -> MemoryStats {
+        self.monitor.last_stats().clone()
     }
 }

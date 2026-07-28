@@ -221,7 +221,7 @@ pub struct ProfiledInferenceSession {
     /// Remaining prompt tokens for chunked prefill (None = prefill complete).
     pub pending_prompt_tokens: Option<Vec<u32>>,
     /// Active memory plan for the Metal allocator (applied before layers).
-    pub memory_plan: Option<crate::memory::plan::MemoryPlan>,
+    pub memory_plan: Option<prism_ecs_data::memory::MemoryPlan>,
     /// Compression ratio for KV cache memory plan (None = uncompressed FP16).
     /// When set, the planned allocation sizes are divided by this ratio.
     pub compression_ratio: Option<f64>,
@@ -444,7 +444,7 @@ impl ProfiledInferenceSession {
             if std::env::var("TRIBUNUS_SKIP_MEMORY_PLAN").is_ok() {
                 return;
             }
-            if let Some(plan) = crate::memory::plan::plan_from_scheduled_module(
+            if let Some(plan) = crate::memory_impl::plan::plan_from_scheduled_module(
                 scheduled,
                 &crate::arena::Arena::new(1, 1, crate::arena::DataType::Float32)
                     .unwrap_or_else(|_| panic!("tmp arena")),
@@ -893,7 +893,7 @@ impl ProfiledInferenceSession {
         // Subsequent allocations (epilogue, next chunk) use normal paths
         // unless a new plan is applied before the next region.
         if self.memory_plan.is_some() {
-            let _ = crate::memory::plan::clear_memory_plan();
+            let _ = crate::memory_impl::plan::clear_memory_plan();
         }
 
         // Record a receipt for this prefill chunk.
@@ -1648,7 +1648,7 @@ impl ProfiledInferenceSession {
 
         // Clear memory plan after layer loop
         if self.memory_plan.is_some() {
-            let _ = crate::memory::plan::clear_memory_plan();
+            let _ = crate::memory_impl::plan::clear_memory_plan();
         }
 
         // ── Pooling ────────────────────────────────────────────────────
@@ -2180,7 +2180,7 @@ impl ProfiledInferenceSession {
 
         // Clear memory plan if active.
         if self.memory_plan.is_some() {
-            let _ = crate::memory::plan::clear_memory_plan();
+            let _ = crate::memory_impl::plan::clear_memory_plan();
         }
 
         self.absolute_position = prompt_token_ids.len() as u32;

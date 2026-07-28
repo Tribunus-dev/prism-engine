@@ -14,7 +14,7 @@ use crate::ecs::backend::heterogeneous_executor::BackendInstance;
 use prism_ecs_kernel::backend::routing::*;
 use crate::ecs::backend::MlxBackend;
 use prism_ecs_kernel::backend::TensorBackend;
-use crate::ecs::memory::allocator::IosurfaceAllocator;
+use crate::ecs::memory_impl::allocator::IosurfaceAllocator;
 
 /// Complete hybrid deployment profile.
 #[derive(Debug, Clone, Serialize, Deserialize)]

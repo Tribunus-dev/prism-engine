@@ -1,5 +1,7 @@
 use serde::{de::DeserializeOwned, Serialize};
 use std::{collections::BTreeMap, marker::PhantomData};
+
+pub mod memory;
 #[derive(Debug, thiserror::Error)]
 pub enum DataError {
     #[error("missing key: {0}")]
