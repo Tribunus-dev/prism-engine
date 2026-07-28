@@ -122,7 +122,7 @@ pub struct TensorMaterializationId(pub u64);
 
 // ── Evidence / digest ───────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EvidenceDigest(pub String);
 
 // ── Backend artifact identity ───────────────────────────────────────────
@@ -318,6 +318,14 @@ impl SealedExecutionBoundaryPlan {
             plan,
             sha256: EvidenceDigest(format!("{:x}", h.finish())),
         }
+    }
+
+    /// Verify the sealed boundary by recomputing the SHA-256 from
+    /// the plan and comparing to the stored digest. Returns true
+    /// if the plan is intact.
+    pub fn verify(&self) -> bool {
+        let recomputed = Self::seal(self.plan.clone()).sha256;
+        recomputed.0 == self.sha256.0
     }
 }
 

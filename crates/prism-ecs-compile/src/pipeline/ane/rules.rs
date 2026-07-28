@@ -5,8 +5,8 @@
 //! specification. Each rule is an [`AneRule`] implementation that
 //! contributes a verdict to the [`AneLegality`] evaluator.
 
-use prism_ecs_backend::routing::{EvidenceDigest, OperationFamily};
-use prism_ecs_backend::DType;
+use prism_ecs_kernel::backend::routing::{EvidenceDigest, OperationFamily};
+use prism_ecs_kernel::backend::DType;
 
 use super::super::pass::PassIdentity;
 use super::super::scheduled::{ScheduledRegion, StorageClass};
@@ -251,7 +251,7 @@ const _FAMILY: OperationFamily = OperationFamily::Matmul;
 mod tests {
     use super::*;
     use crate::pipeline::scheduled::RegionId;
-    use prism_ecs_backend::routing::BackendId;
+    use prism_ecs_kernel::backend::routing::BackendId;
 
     fn region() -> ScheduledRegion {
         ScheduledRegion {

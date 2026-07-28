@@ -16,7 +16,7 @@ use prism_ecs_kernel::backend::routing::{
 #[cfg(test)]
 use prism_ecs_kernel::backend::routing::BACKEND_ACCELERATE;
 use prism_ecs_kernel::backend::DType;
-use crate::ecs::config::FusedOperation;
+use crate::pipeline::fused_op::FusedOperation;
 
 // ── Physical tensor ───────────────────────────────────────────────────────
 

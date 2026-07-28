@@ -10,7 +10,7 @@ use prism_ecs_kernel::backend::routing::{
     ExecutionBoundaryPlan, OperationFamily, OperationId, PhysicalLayout,
     SealedExecutionBoundaryPlan, SynchronizationPolicy, TensorId, TensorTransferPlan, BACKEND_MLX,
 };
-use crate::ecs::compiler::pass::{PassIdentity, TransformPass, TransformReceipt};
+use crate::pipeline::pass::{PassIdentity, TransformPass, TransformReceipt};
 
 // ── Graph types ────────────────────────────────────────────────────────────
 

@@ -11,11 +11,11 @@ use prism_ecs_kernel::backend::routing::{
     BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX,
 };
 use prism_ecs_kernel::backend::DType;
-use crate::ecs::compiler::scheduled::{
+use crate::pipeline::scheduled::{
     BufferReuse, DependencyKind, MemoryPlan, RegionDependency, RegionId, ScheduledModule,
     ScheduledRegion, SealedEvaluationBoundary, StorageClass, TransferPlan,
 };
-use crate::ecs::config::{LayerPlan, ModelExecutionPlan, TextArchitecture};
+use crate::pipeline::plan::{LayerPlan, ModelExecutionPlan, TextArchitecture};
 use std::collections::HashMap;
 
 /// Compile a model manifest to a [`ScheduledModule`].
@@ -186,7 +186,7 @@ pub fn compile_model_to_scheduled_module(
         };
 
         // State effects: KV cache write
-        let state_effects = vec![crate::ecs::compiler::scheduled::StateEffect::KvCacheWrite];
+        let state_effects = vec![crate::pipeline::scheduled::StateEffect::KvCacheWrite];
 
         module.regions.push(ScheduledRegion {
             region_id: RegionId(layer_id),
@@ -319,11 +319,11 @@ fn physical_tensor(
     dtype: DType,
     storage: StorageClass,
     backend: BackendId,
-) -> crate::ecs::compiler::scheduled::PhysicalTensor {
-    crate::ecs::compiler::scheduled::PhysicalTensor {
+) -> crate::pipeline::scheduled::PhysicalTensor {
+    crate::pipeline::scheduled::PhysicalTensor {
         semantic_id: id,
         name,
-        shape: TensorShape { dims: shape },
+        shape: TensorShape { dims: shape.into_iter().map(u64::from).collect() },
         dtype,
         layout: PhysicalLayout::RowMajor,
         storage_class: storage,
@@ -357,8 +357,8 @@ mod tests {
             attention_k_eq_v: false,
             final_logit_softcapping: None,
             hidden_size_per_layer_input: 3840,
-            layer_types: vec![crate::ecs::config::AttentionKind::SlidingAttention; 48],
-            rope_local: crate::ecs::config::RopeSpec {
+            layer_types: vec![crate::pipeline::plan::AttentionKind::SlidingAttention; 48],
+            rope_local: crate::pipeline::plan::RopeSpec {
                 theta: 500_000.0,
                 rope_type: "default".into(),
                 partial_rotary_factor: None,
@@ -396,30 +396,30 @@ mod tests {
                 attention_k_eq_v: false,
                 q_norm_enabled: false,
                 k_norm_enabled: false,
-                q_proj_tensor_id: 100 + i * 10,
-                k_proj_tensor_id: 101 + i * 10,
-                v_proj_tensor_id: 102 + i * 10,
-                o_proj_tensor_id: 103 + i * 10,
+                q_proj_tensor_id: u64::from(100 + i * 10),
+                k_proj_tensor_id: u64::from(101 + i * 10),
+                v_proj_tensor_id: u64::from(102 + i * 10),
+                o_proj_tensor_id: u64::from(103 + i * 10),
                 q_norm_tensor_id: None,
                 k_norm_tensor_id: None,
-                gate_proj_tensor_id: 104 + i * 10,
-                up_proj_tensor_id: 105 + i * 10,
-                down_proj_tensor_id: 106 + i * 10,
-                input_layernorm_tensor_id: 107 + i * 10,
-                post_attention_layernorm_tensor_id: 108 + i * 10,
+                gate_proj_tensor_id: u64::from(104 + i * 10),
+                up_proj_tensor_id: u64::from(105 + i * 10),
+                down_proj_tensor_id: u64::from(106 + i * 10),
+                input_layernorm_tensor_id: u64::from(107 + i * 10),
+                post_attention_layernorm_tensor_id: u64::from(108 + i * 10),
                 pre_ffw_layernorm_tensor_id: None,
                 post_ffw_layernorm_tensor_id: None,
                 layer_scalar_ids: vec![],
                 quantization_ids: vec![],
-                route: crate::ecs::config::operation_route::OperationRoute::default(),
+                route: crate::pipeline::plan::OperationRoute::default(),
                 fused_operations: Default::default(),
             });
         }
 
         ModelExecutionPlan {
-            prologue: crate::ecs::config::ProloguePlan::default(),
+            prologue: crate::pipeline::plan::ProloguePlan::default(),
             layers,
-            epilogue: crate::ecs::config::EpiloguePlan::default(),
+            epilogue: crate::pipeline::plan::EpiloguePlan::default(),
             fused_ane_islands: vec![],
             hidden_size: arch.hidden_size,
             vocab_size: arch.vocab_size,

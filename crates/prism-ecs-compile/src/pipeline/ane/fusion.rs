@@ -8,10 +8,10 @@
 
 use std::time::Instant;
 
-use prism_ecs_backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, EvidenceDigest, OperationFamily, OperationId, BACKEND_ANE,
 };
-use prism_ecs_backend::DType;
+use prism_ecs_kernel::backend::DType;
 
 use super::super::pass::{PassIdentity, TransformPass, TransformReceipt};
 use super::super::scheduled::{RegionId, ScheduledRegion};
@@ -167,7 +167,7 @@ const _ANE_DTYPE: DType = DType::F32;
 mod tests {
     use super::*;
     use crate::pipeline::scheduled::{RegionId, ScheduledRegion};
-    use prism_ecs_backend::routing::BackendId;
+    use prism_ecs_kernel::backend::routing::BackendId;
 
     fn ane_region(id: u64, name: &str) -> ScheduledRegion {
         ScheduledRegion {

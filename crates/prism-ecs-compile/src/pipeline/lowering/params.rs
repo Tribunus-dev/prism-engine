@@ -240,15 +240,11 @@ impl CoreAiTarget {
 #[derive(Debug, Clone)]
 pub struct OpParamSchema {
     /// Constant-value inputs emitted alongside tensor inputs.
-    pub constant_inputs: Vec<(String, mil_spec_value)>,
+    pub constant_inputs: Vec<(String, String)>,
     /// Tensor inputs resolved from value_bindings.
     pub tensor_inputs: Vec<(String, TensorId)>,
 }
 
-// Re-export mil_spec::Value as mil_spec_value for the schema.
-use coreml_proto::proto::mil_spec;
-#[allow(non_camel_case_types)]
-type mil_spec_value = mil_spec::Value;
 
 // ── LoweringDiagnostic ─────────────────────────────────────────────────────
 
@@ -404,7 +400,7 @@ pub struct MilValueRef {
     /// SSA name in the MIL program.
     pub ssa_name: String,
     /// MIL type of the value.
-    pub value_type: mil_spec::ValueType,
+    pub value_type: String,
     /// MIL op type that produced this value.
     pub producing_op: String,
     /// Output index (for multi-output ops).
@@ -412,7 +408,7 @@ pub struct MilValueRef {
 }
 
 impl MilValueRef {
-    pub fn new(ssa_name: String, value_type: mil_spec::ValueType, producing_op: &str) -> Self {
+    pub fn new(ssa_name: String, value_type: String, producing_op: &str) -> Self {
         Self {
             ssa_name,
             value_type,
@@ -427,7 +423,7 @@ impl MilValueRef {
 /// Per-tensor metadata tracked during lowering.
 #[derive(Debug, Clone)]
 pub struct TensorMeta {
-    pub dtype: mil_spec::DataType,
+    pub dtype: String,
     pub shape_policy: ShapePolicy,
     pub is_input: bool,
     pub is_output: bool,
