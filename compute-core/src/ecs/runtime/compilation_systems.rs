@@ -8,7 +8,7 @@ use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::canonical::identity::CandidateId;
 use crate::ecs::canonical::identity::GenerationId;
 use crate::ecs::cimage::generation_api::{GenerationApi, PromotionEvidence};
-use crate::ecs::compilation::distill_core::{
+use prism_ecs_compile::compilation::distill_core::{
     on_policy_refine, RefinementConfig, TemperatureSchedule,
 };
 use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
@@ -441,7 +441,7 @@ pub fn refine_tensors(world: &mut World) {
 
                 // Activation-parity check: teacher = source, student = reconstructed
                 let rel_tol = 0.05;
-                let acceptance = crate::ecs::compilation::distill_core::block_accept(
+                let acceptance = prism_ecs_compile::compilation::distill_core::block_accept(
                     &source,
                     &reconstructed,
                     rel_tol,

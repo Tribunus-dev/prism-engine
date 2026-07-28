@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
-use crate::ecs::compilation::tri_lane::{
+use prism_ecs_compile::compilation::tri_lane::{
     AneExecutionEvidence, AneLaneLifecycle, AneQualificationRecord, AppleFallbackPlan,
     AppleTriLaneExecutionReceipt, CoreAiWarmupContract, EpochRouteOrigin, FallbackStatus,
     LaneExecutionEvent, NumericalStatus, OverlapMetrics,
@@ -598,7 +598,7 @@ impl CoreAiLane {
             epoch,
             lane_events,
             ane_artifact_id: self.subgraphs.first().map(|sg| sg.name.clone()),
-            ane_admission: crate::ecs::compilation::tri_lane::AneAdmission::Admitted,
+            ane_admission: prism_ecs_compile::compilation::tri_lane::AneAdmission::Admitted,
             boundary_events: vec![],
             slot_events: vec![],
             overlap_ns: OverlapMetrics {

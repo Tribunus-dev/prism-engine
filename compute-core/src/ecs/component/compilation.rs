@@ -11,7 +11,7 @@ pub type PathId = String;
 pub type NodeId = String;
 pub type BackendTarget = String;
 pub type OpId = String;
-use crate::ecs::compilation::phase_ir::CompilePhaseDescriptor;
+use prism_ecs_compile::compilation::phase_ir::CompilePhaseDescriptor;
 use crate::ecs::config::ModelExecutionPlan;
 
 impl Component for CompilePhaseDescriptor {}

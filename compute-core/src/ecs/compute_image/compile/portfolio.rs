@@ -3,9 +3,9 @@
 //!
 //! PRISM-COREML-PORTFOLIO-COMPILATION-0001
 
-use crate::ecs::compilation::activation_abi::{ActivationAbi, ActivationContract, PhysicalLayout};
-use crate::ecs::compilation::ane_eligibility::{ShapeBucket, ShapeBucketFamily};
-use crate::ecs::compilation::region_planner::CoreAiIsland;
+use prism_ecs_compile::compilation::activation_abi::{ActivationAbi, ActivationContract, PhysicalLayout};
+use prism_ecs_compile::compilation::ane_eligibility::{ShapeBucket, ShapeBucketFamily};
+use prism_ecs_compile::compilation::region_planner::CoreAiIsland;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -348,13 +348,13 @@ pub fn select_shape_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compilation::activation_abi::{
+    use prism_ecs_compile::compilation::activation_abi::{
         ActivationAbi, ActivationContract, DecodeActivationV1Params, PhysicalLayout,
     };
-    use crate::ecs::compilation::ane_eligibility::ShapeBucketFamily;
-    use crate::ecs::compilation::phase_ir::TensorDtype;
-    use crate::ecs::compilation::region_catalogue::RegionAdmission;
-    use crate::ecs::compilation::region_planner::{CoreAiIsland, ScheduledOp};
+    use prism_ecs_compile::compilation::ane_eligibility::ShapeBucketFamily;
+    use prism_ecs_compile::compilation::phase_ir::TensorDtype;
+    use prism_ecs_compile::compilation::region_catalogue::RegionAdmission;
+    use prism_ecs_compile::compilation::region_planner::{CoreAiIsland, ScheduledOp};
 
     fn sample_shape_bucket() -> ShapeBucket {
         ShapeBucket {
