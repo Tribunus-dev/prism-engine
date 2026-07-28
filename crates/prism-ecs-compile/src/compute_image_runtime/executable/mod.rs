@@ -1,0 +1,1 @@
+//! Executable descriptors — placeholder.

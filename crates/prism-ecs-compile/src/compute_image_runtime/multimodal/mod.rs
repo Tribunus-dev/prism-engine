@@ -1,0 +1,1 @@
+//! Multimodal bindings — placeholder.

@@ -1,0 +1,1 @@
+//! Content-addressed store — placeholder.

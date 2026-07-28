@@ -223,6 +223,16 @@ pub use compilation_systems::*;
 // catalogue, and tri-lane (Apple three-lane execution).
 pub mod compilation;
 
+// `compute_image_runtime/` — constitutional surface for the engine's
+// legacy `compute-core/src/ecs/compute_image/{residency,...,verification}/`
+// directory (68 files, ~14K LOC), absorbed on 2026-07-27. Houses
+// residency plans, content store, executable descriptors, variant
+// selection, program/phase IR, kernel selection, megakernel, multimodal
+// bindings, model-family bindings, scheduling helpers, and verification
+// receipts — the runtime + ancillary surface of the engine's
+// `compute_image` subsystem.
+pub mod compute_image_runtime;
+
 pub mod runtime;
 pub use runtime::{CImageXdnaRouteDispatcher, ExecutionMode, RuntimeError, RuntimeModel};
 pub mod observability;
