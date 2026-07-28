@@ -23,7 +23,7 @@ fn main() {
         let template_dir = std::path::Path::new(&manifest_dir)
             .join("src")
             .join("ecs")
-            .join("compute_image")
+            .join("legacy_compute_image_core")
             .join("templates");
         let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
 
@@ -83,7 +83,7 @@ fn main() {
         let fragment_dir = std::path::Path::new(&manifest_dir)
             .join("src")
             .join("ecs")
-            .join("compute_image")
+            .join("legacy_compute_image_core")
             .join("fragments");
         let nf4_fragment =
             std::fs::read_to_string(fragment_dir.join("nf4_decode.metal")).unwrap_or_default();

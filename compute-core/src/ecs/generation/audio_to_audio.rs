@@ -16,7 +16,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::ecs::compute_image::CompiledImageReader;
+use prism_ecs_compile::compute_image_core::manifest::CompiledImageReader;
 use crate::ecs::kv_cache::KvCache;
 use crate::profiled_executor::{LoadedProfiledModel, ProfiledInferenceSession};
 use crate::session::InferenceSessionState;

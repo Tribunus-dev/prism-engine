@@ -15,7 +15,7 @@ use crate::ecs::mapped_image::{MappedImage, SegmentView};
 use crate::ecs::placement_profile::ExecutionPlacementProfile;
 use crate::profile_compiler;
 
-use crate::ecs::compute_image::Manifest;
+use prism_ecs_compile::compute_image_core::manifest::Manifest;
 use crate::ecs::config::ModelExecutionPlan;
 
 /// Workload classification for profile selection.
@@ -428,7 +428,7 @@ impl ModelRuntime {
     /// Execute the full 48-layer model from the installed ComputeImage.
     /// Returns the next token ID. Uses the copied segment backend.
     pub fn run_full_model(&self, token_ids: &[i32]) -> crate::Result<u32> {
-        use crate::ecs::compute_image::{CompiledImageReader, StorageBackend};
+        use prism_ecs_compile::compute_image_core::manifest::{CompiledImageReader, StorageBackend};
         let reader = CompiledImageReader::open(&self.image_dir)?;
         let mut runtime = reader.open_runtime(StorageBackend::Copied)?;
         runtime.run_full_model(token_ids)
@@ -469,7 +469,7 @@ fn dtype_byte_size(dtype: &str) -> Option<u32> {
 /// worst-case query/kv lengths (max_position_embeddings), float32 workspace,
 /// and a full KV cache reservation for the maximum sequence length.
 pub fn compute_admission_estimate(manifest: &Manifest) -> ModelAdmissionEstimate {
-    use crate::ecs::compute_image::SegmentKind;
+    use prism_ecs_compile::compute_image_core::manifest::SegmentKind;
 
     let arch = &manifest.architecture;
     let num_layers = arch.num_hidden_layers as u64;
@@ -630,7 +630,7 @@ mod tests {
     /// TensorCatalogEntry construction from TensorEntry fields.
     #[test]
     fn test_tensor_catalog_entry_from_tensor_entry() {
-        use crate::ecs::compute_image::TensorEntry;
+        use prism_ecs_compile::compute_image_core::manifest::TensorEntry;
         let te = TensorEntry {
             id: 1,
             name: "wq.0.weight".into(),

@@ -1,4 +1,4 @@
-use crate::ecs::compute_image::kv_plan::KvCodec;
+use crate::ecs::legacy_compute_image_core::kv_plan::KvCodec;
 use crate::ecs::state_store::epochs::StateEpoch;
 use crate::ecs::state_store::kv::KvCacheManager;
 use crate::ecs::state_store::pages::PageTable;

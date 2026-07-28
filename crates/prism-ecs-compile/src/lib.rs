@@ -232,6 +232,16 @@ pub mod compilation;
 // and the orchestrator data types (phases, MTP, decode policy).
 pub mod compute_image_compile;
 
+// Canonical home of the `compute_image/` core surface (52 top-level
+// files + `cimage_packer/` + `manifest/`) absorbed from
+// `compute-core/src/ecs/compute_image/`. Houses data-only types
+// for fusion receipts, phase graph metadata, KV cache plans, slot
+// state, residency plans, and CImage manifest data shapes. Engine-
+// coupled implementations (Metal epilogues, ANE MIL builders, Core
+// ML pipeline code) stay engine-side at
+// `compute-core/src/ecs/legacy_compute_image_core/`.
+pub mod compute_image_core;
+
 // `compute_image_runtime/` — constitutional surface for the engine's
 // legacy `compute-core/src/ecs/compute_image/{residency,...,verification}/`
 // directory (68 files, ~14K LOC), absorbed on 2026-07-27. Houses

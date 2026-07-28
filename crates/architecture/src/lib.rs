@@ -14,14 +14,17 @@
 //! surface, the legacy engine memory surface, the legacy engine cimage
 //! surface, the legacy engine models surface, the legacy engine runtime
 //! surface, the legacy engine system surface, the legacy engine
-//! decode_attribution surface, the legacy engine tools surface, or the
-//! legacy engine backend surface.
+//! decode_attribution surface, the legacy engine tools surface, the
+//! legacy engine compute_image_core surface, the legacy engine
+//! compute_image_compile surface, the legacy engine compute_image_runtime
+//! surface, or the legacy engine backend surface.
 
 pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_backend_imports;
 pub mod workspace_legacy_bitnet_imports;
 pub mod workspace_legacy_cimage_imports;
 pub mod workspace_legacy_compilation_imports;
+pub mod workspace_legacy_compute_image_core_imports;
 pub mod workspace_legacy_compute_image_runtime_imports;
 pub mod workspace_legacy_compiler_imports;
 pub mod workspace_legacy_compute_image_compile_imports;

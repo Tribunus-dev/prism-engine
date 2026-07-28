@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::ecs::compute_image::manifest::MetalKernelArtifact;
+use crate::ecs::legacy_compute_image_core::manifest::MetalKernelArtifact;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Public API

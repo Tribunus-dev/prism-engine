@@ -25,7 +25,7 @@ use crate::ecs::legacy_compilation::tri_lane::{
 use tempfile::TempDir;
 
 use crate::coreai_pipeline;
-use crate::ecs::compute_image::hw_assessment::KernelBenchResult;
+use crate::ecs::legacy_compute_image_core::hw_assessment::KernelBenchResult;
 
 /// Compute profile for the Core ML execution lane.
 ///
@@ -426,7 +426,7 @@ impl CoreAiLane {
         &mut self,
         subgraph_name: &str,
         warmup_contract: &CoreAiWarmupContract,
-        arena: &mut crate::ecs::compute_image::apple_shared_arena::AppleSharedArena,
+        arena: &mut crate::ecs::legacy_compute_image_core::apple_shared_arena::AppleSharedArena,
         binding: &mut crate::ecs::backend::coreai_iosurface::CoreAiIOSurfaceExecutable,
     ) -> Result<AneQualificationRecord, String> {
         // Validate the subgraph exists
@@ -442,7 +442,7 @@ impl CoreAiLane {
 
         // Validate binding against arena
         let arena_slots: Vec<_> = arena.slots.values().map(|s| {
-            crate::ecs::compute_image::apple_cimage_manifest::IOSurfaceSlotManifest {
+            crate::ecs::legacy_compute_image_core::apple_cimage_manifest::IOSurfaceSlotManifest {
                 slot_id: s.manifest.slot_id,
                 tensor_id: s.manifest.tensor_id.clone(),
                 byte_offset: s.manifest.byte_offset,
@@ -455,9 +455,9 @@ impl CoreAiLane {
                 producer: s.manifest.producer,
                 consumer: s.manifest.consumer,
                 reuse_class: match s.manifest.reuse_class {
-                    crate::ecs::compute_image::apple_shared_arena::SlotReuseClass::Exclusive => "exclusive".into(),
-                    crate::ecs::compute_image::apple_shared_arena::SlotReuseClass::SharedReadOnly => "shared_readonly".into(),
-                    crate::ecs::compute_image::apple_shared_arena::SlotReuseClass::RingReuse { .. } => "ring_reuse".into(),
+                    crate::ecs::legacy_compute_image_core::apple_shared_arena::SlotReuseClass::Exclusive => "exclusive".into(),
+                    crate::ecs::legacy_compute_image_core::apple_shared_arena::SlotReuseClass::SharedReadOnly => "shared_readonly".into(),
+                    crate::ecs::legacy_compute_image_core::apple_shared_arena::SlotReuseClass::RingReuse { .. } => "ring_reuse".into(),
                 },
                 required_alignment: s.manifest.required_alignment,
             }

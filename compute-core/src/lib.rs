@@ -78,7 +78,7 @@ pub use crate::ecs::compile;
     feature = "prism-backend-ios",
     feature = "ffi"
 ))]
-pub use crate::ecs::compute_image;
+pub use crate::ecs::legacy_compute_image_core;
 pub use crate::ecs::compute_image_v0;
 pub use crate::ecs::config;
 /// Constitutional ECS kernel — stable identity types, causal messaging, command/effect/event types, and schema registry.

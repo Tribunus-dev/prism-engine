@@ -27,7 +27,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use uuid::Uuid;
 
-use crate::ecs::compute_image::CompiledImageReader;
+use prism_ecs_compile::compute_image_core::manifest::CompiledImageReader;
 use crate::ecs::config::LayerPlan;
 use tribunus_evidence_schema::mission0007::{
     ArtifactRange, AttentionKind, DType, KernelSignature, KernelSignatureId, OperationFamily,

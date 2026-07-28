@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::ecs::compute_image::KvCachePlan;
+use prism_ecs_compile::compute_image_core::kv_plan::KvCachePlan;
 use crate::ecs::state_store::pages::PageDescriptor;
 use crate::ecs::state_store::receipts::{KvAppendReceipt, KvReadReceipt};
 use crate::ecs::state_store::schema::{

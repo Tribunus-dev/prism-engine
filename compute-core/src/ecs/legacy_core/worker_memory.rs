@@ -326,8 +326,8 @@ pub fn configure_mlx_limits_for_model(
     let mlx_budget = available.saturating_sub(needed);
     let active_limit = mlx_budget / 2;
     let cache_limit = mlx_budget / 4;
-    crate::ecs::compute_image::set_mlx_memory_limit(active_limit);
-    crate::ecs::compute_image::set_mlx_cache_limit(cache_limit);
+    crate::ecs::legacy_compute_image_core::set_mlx_memory_limit(active_limit);
+    crate::ecs::legacy_compute_image_core::set_mlx_cache_limit(cache_limit);
 }
 
 // ── MLX memory snapshot ────────────────────────────────────────────────────

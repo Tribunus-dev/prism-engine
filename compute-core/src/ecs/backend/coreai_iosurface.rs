@@ -105,7 +105,7 @@ impl CoreAiIOSurfaceExecutable {
     /// Bind from an AppleSharedArena manifest — validates shape/dtype/layout match.
     pub fn bind_from_arena(
         &mut self,
-        arena_slots: &[crate::ecs::compute_image::apple_cimage_manifest::IOSurfaceSlotManifest],
+        arena_slots: &[crate::ecs::legacy_compute_image_core::apple_cimage_manifest::IOSurfaceSlotManifest],
     ) -> Result<(), String> {
         for binding in self.input_bindings.iter_mut() {
             let slot = arena_slots
@@ -510,7 +510,7 @@ mod tests {
         use crate::ecs::backend::coreai_lane::{CoreAiLane, CoreAiSubgraph, CoreAiSubgraphStatus};
         use crate::ecs::backend::placement::ExecutionLane;
         use crate::ecs::legacy_compilation::tri_lane::{AneLaneLifecycle, CoreAiWarmupContract};
-        use crate::ecs::compute_image::apple_shared_arena::{
+        use crate::ecs::legacy_compute_image_core::apple_shared_arena::{
             AppleSharedArena, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
 
@@ -533,7 +533,7 @@ mod tests {
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 64,
             },
-            state: crate::ecs::compute_image::apple_shared_arena::SlotState::Free,
+            state: crate::ecs::legacy_compute_image_core::apple_shared_arena::SlotState::Free,
             generation: 0,
             layout_digest: "digest-00000000".into(),
             metal_view: None,
@@ -558,7 +558,7 @@ mod tests {
                 reuse_class: SlotReuseClass::Exclusive,
                 required_alignment: 64,
             },
-            state: crate::ecs::compute_image::apple_shared_arena::SlotState::Free,
+            state: crate::ecs::legacy_compute_image_core::apple_shared_arena::SlotState::Free,
             generation: 0,
             layout_digest: "digest-00000000".into(),
             metal_view: None,

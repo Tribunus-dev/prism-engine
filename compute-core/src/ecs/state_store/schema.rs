@@ -1,4 +1,4 @@
-use crate::ecs::compute_image::kv_plan::KvCodec;
+use crate::ecs::legacy_compute_image_core::kv_plan::KvCodec;
 use serde::{Deserialize, Serialize};
 
 /// Top-level state store schema — a collection of store declarations plus
