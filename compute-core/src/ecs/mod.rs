@@ -16,7 +16,7 @@ mod tests;
 pub mod agent;
 pub mod amd_rocm;
 pub mod analysis;
-pub mod ane;
+pub mod legacy_ane;
 pub mod ane_bridge;
 pub mod ane_compile;
 pub mod ane_keepalive;

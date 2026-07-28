@@ -30,7 +30,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use crate::ecs::ane::draft_model::AneDraftModel;
+use crate::ecs::legacy_ane::draft_model::AneDraftModel;
 use crate::ecs::config::{DiffusionConfig, NoiseScheduleType};
 use crate::profiled_executor::LoadedProfiledModel;
 

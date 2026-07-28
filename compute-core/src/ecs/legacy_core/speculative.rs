@@ -12,7 +12,7 @@
 //! 5. When all N are accepted, a bonus token is sampled from the target.
 
 #[cfg(feature = "ane")]
-use crate::ecs::ane::draft_model::AneMultiCoreDraft;
+use crate::ecs::legacy_ane::draft_model::AneMultiCoreDraft;
 use std::collections::HashMap;
 use std::fmt;
 

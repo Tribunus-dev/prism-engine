@@ -4,8 +4,8 @@
 //! All projection dispatch logic extracted from `executor.rs`. Contains the
 //! fallback-chain `qmatmul()` / `run_epilogue()` and their helpers.
 
-use crate::ecs::ane::hot_row_predictor::HotRowPredictor;
-use crate::ecs::ane::weight_row_cache::WeightRowCache;
+use crate::ecs::legacy_ane::hot_row_predictor::HotRowPredictor;
+use crate::ecs::legacy_ane::weight_row_cache::WeightRowCache;
 use crate::ecs::backend::MlxBackend;
 use crate::ecs::config::EpiloguePlan;
 use crate::ecs::projection_executor::{
