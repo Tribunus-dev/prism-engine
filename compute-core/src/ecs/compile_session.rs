@@ -1,4 +1,4 @@
-use crate::ecs::compiler::event_emitter::{now_micros, CompilerEvent, CompilerEventStream};
+use prism_ecs_compile::pipeline::event_emitter::{now_micros, CompilerEvent, CompilerEventStream};
 use crate::ecs::{EntityKind, SchedulePhase, World, WorldSystemsExt};
 use std::path::{Path, PathBuf};
 
