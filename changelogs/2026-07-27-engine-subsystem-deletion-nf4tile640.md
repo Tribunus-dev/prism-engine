@@ -1,7 +1,10 @@
 # Goal: Delete `compute-core/src/ecs/nf4tile640/`
 
 **Date:** 2026-07-27 (Pacific)
-**Status:** Goal declared; agent dispatched.
+**Status:** Goal achieved. Migration E-0..E-6 complete; engine
+subsystem physically deleted; constitutional surface in
+`crates/prism-ecs-quantization/src/nf4tile640/`; architecture
+safety net test green.
 
 ## Source
 
@@ -54,3 +57,47 @@ Create an isolated worktree at
 - Engine pre-existing build error count is unchanged or
   decreased (currently 193).
 - Constitutional-side tests green.
+
+## Migration sequence (E-0..E-6)
+
+The engine already had a `prism-ecs-quantization` dependency in
+its Cargo.toml (left over from the bitnet migration), so E-0
+was a no-op. The actual sequence was E-1..E-6.
+
+  - E-1 `f2357de5` — `feat(constitutional): add
+    prism-ecs-quantization::nf4tile640 surface` — re-implement
+    the engine's ecs::nf4tile640 module as the canonical
+    constitutional surface. 15 source files, one authority per
+    file, 8,450 LOC after dropping one dead function.
+  - E-2 `c740dadd` — `chore(engine): migrate nf4tile640
+    engine-internal callers to constitutional surface` — 7
+    engine-internal files: cimage/shard_builder.rs,
+    cimage/mlp_reference.rs, backend/metal.rs,
+    compilation/matrix_distill.rs, tts/code_predictor.rs,
+    tts/pipeline.rs, tts/talker.rs.
+  - E-3 `66b2586c` — `chore(engine): migrate nf4tile640
+    cross-crate callers to constitutional surface` — 4
+    cross-crate files: bin/diagnose_nf4_roundtrip.rs,
+    bin/tribunus-compute-image.rs,
+    tests/metal_nf4_int8_conformance.rs,
+    tests/residency_tests.rs.
+  - E-4 `098e6bd4` — `chore(engine): drop nf4tile640 re-export
+    and module declaration` — drop `pub use crate::ecs::nf4tile640`
+    in lib.rs:465 and `pub mod nf4tile640;` in ecs/mod.rs:143.
+  - E-5 `3d56cc1e` — `feat(architecture): add nf4tile640
+    legacy-import safety net` — new
+    `workspace_contains_no_legacy_nf4tile640_imports` test in
+    crates/architecture/src/workspace_legacy_nf4tile640_imports.rs.
+  - E-6 `0003755c` — `chore(engine): delete the legacy engine's
+    nf4tile640 subsystem` — `git rm -r` the 15 files, 8,586 LOC
+    directory.
+
+## Verification
+
+- `cargo test -p prism-architecture --lib` → 9 passed
+  (incl. the new `workspace_contains_no_legacy_nf4tile640_imports`).
+- `cargo test -p prism-ecs-quantization --lib nf4tile640`
+  → 109 passed.
+- `cargo check -p tribunus-compute-core --lib` → 192 errors
+  (down from 193; the legacy module's own compile errors no
+  longer count).
