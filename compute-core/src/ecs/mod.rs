@@ -46,7 +46,6 @@ pub mod compile_pipeline;
 pub mod compile_progress;
 pub mod compile_run;
 pub mod compile_state;
-pub mod compiler;
 pub mod compute_image;
 pub mod compute_image_v0;
 pub mod compute_ir;

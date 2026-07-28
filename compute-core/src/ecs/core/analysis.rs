@@ -5,10 +5,6 @@
 //! under one umbrella so the compute module exposes a single coherent truth
 //! model for runtime, analysis, and orchestration.
 
-pub use crate::ecs::compiler;
-pub use crate::ecs::compiler::{
-    BackendLowering, LegalityReceipt, LegalityViolation, LoweringReceipt,
-};
 pub use crate::ecs::decode_attribution;
 pub use crate::ecs::decode_attribution::graph_catalog::GraphFamily;
 pub use crate::ecs::decode_attribution::suite_manifest::{SuiteRow, SuiteTier};

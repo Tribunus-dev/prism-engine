@@ -76,12 +76,6 @@ pub use crate::ecs::compile;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
-    feature = "prism-backend-ios"
-))]
-pub use crate::ecs::compiler;
-#[cfg(any(
-    feature = "mlx-backend",
-    feature = "prism-backend",
     feature = "prism-backend-ios",
     feature = "ffi"
 ))]
