@@ -295,6 +295,12 @@ pub use moe_budget::{MemoryBudgetSystem, MoERoutingSystem};
 
 pub mod planning_core {
     use super::*;
+    // Re-export the data types from the constitutional surface so
+    // engine callers (compilation/level1/scheduler.rs etc.) can use
+    // them via `crate::ecs::system_adapters::planning_core::*`.
+    pub use prism_ecs_runtime::systems::planning_core::{
+        MemoryBudget, MemoryPlan, RegionKind, SpillPolicy,
+    };
     pub struct AneEligibilitySystem(pub prism_ecs_runtime::systems::planning_core::AneEligibilitySystem);
     impl CompilerSystem for AneEligibilitySystem {
         fn name(&self) -> &str { "AneEligibilitySystem" }

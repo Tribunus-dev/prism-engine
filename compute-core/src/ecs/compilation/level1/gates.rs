@@ -251,7 +251,7 @@ pub struct MemoryResult {
 /// Creates a worst-case plan: max microbatch (16K tokens), full hidden dim
 /// (3840), both teacher and student active simultaneously.
 pub fn check_memory() -> MemoryResult {
-    use crate::ecs::system::planning_core::{MemoryBudget, MemoryPlan, RegionKind, SpillPolicy};
+    use crate::ecs::system_adapters::planning_core::{MemoryBudget, MemoryPlan, RegionKind, SpillPolicy};
 
     let budget = MemoryBudget::m1_16gb_default();
 

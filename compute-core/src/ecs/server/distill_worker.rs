@@ -30,7 +30,7 @@ use crate::ecs::compilation::phase_types::{
 };
 use crate::ecs::compilation::receipt::{BlockReceipt, EngineExecutionLog, OperationalReceipt};
 use crate::ecs::server::state::{MemoryAllocationBroker, ServerOperationalMode};
-use crate::ecs::system::planning_core::MemoryBudget;
+use crate::ecs::system_adapters::planning_core::MemoryBudget;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
