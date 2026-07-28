@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
-use crate::ecs::compute_image::apple_shared_arena::AppleSharedArena;
+use crate::ecs::legacy_compute_image_core::apple_shared_arena::AppleSharedArena;
 #[cfg(target_os = "macos")]
-use crate::ecs::compute_image::apple_shared_arena::SlotState;
+use crate::ecs::legacy_compute_image_core::apple_shared_arena::SlotState;
 
 // Metal import — only on macOS with metal-dispatch feature.
 #[cfg(all(target_os = "macos", feature = "metal-dispatch"))]
@@ -107,7 +107,7 @@ impl MetalConsumer {
     /// Metal and CPU checksums.
     pub fn validate(
         &mut self,
-        arena: &crate::ecs::compute_image::apple_shared_arena::AppleSharedArena,
+        arena: &crate::ecs::legacy_compute_image_core::apple_shared_arena::AppleSharedArena,
         _expected_epoch: u64,
     ) -> Result<MetalValidationResult, String> {
         // 1. Verify layout digests match arena
@@ -152,7 +152,7 @@ impl MetalConsumer {
     pub fn verify_coreai_output_accessible(
         &mut self,
         slot_id: u32,
-        arena: &crate::ecs::compute_image::apple_shared_arena::AppleSharedArena,
+        arena: &crate::ecs::legacy_compute_image_core::apple_shared_arena::AppleSharedArena,
     ) -> Result<bool, String> {
         let slot = arena
             .slot(slot_id)
@@ -178,7 +178,7 @@ impl MetalConsumer {
     /// slot metadata (slot_id, byte_length, generation) rather than a constant.
     fn compute_cpu_digest(
         &self,
-        arena: &crate::ecs::compute_image::apple_shared_arena::AppleSharedArena,
+        arena: &crate::ecs::legacy_compute_image_core::apple_shared_arena::AppleSharedArena,
         _epoch: u64,
     ) -> Result<u64, String> {
         let slot_id = self
@@ -217,7 +217,7 @@ impl MetalConsumer {
     /// recreation.
     fn compute_metal_digest(
         &mut self,
-        arena: &crate::ecs::compute_image::apple_shared_arena::AppleSharedArena,
+        arena: &crate::ecs::legacy_compute_image_core::apple_shared_arena::AppleSharedArena,
         _epoch: u64,
     ) -> Result<u64, String> {
         let slot_id = self
@@ -396,7 +396,7 @@ kernel void checksum(texture2d<ushort, access::read> in  [[texture(0)]],
 mod tests {
     use super::*;
     use crate::ecs::backend::placement::ExecutionLane;
-    use crate::ecs::compute_image::apple_shared_arena::{
+    use crate::ecs::legacy_compute_image_core::apple_shared_arena::{
         AppleSharedArena, IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
     };
 

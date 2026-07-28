@@ -18,7 +18,7 @@ use crate::ecs::backend::{
     QuantizedMatmulOp, QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend,
     TensorHandle,
 };
-use crate::ecs::compute_image::orchestrator::Orchestrator;
+use crate::ecs::legacy_compute_image_core::orchestrator::Orchestrator;
 
 /// Megakernel backend — owns the Orchestrator and its Metal resources.
 pub struct MegakernelBackend {

@@ -16,7 +16,7 @@ use std::time::Instant;
 
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher as NotifyWatcher};
 
-use crate::ecs::compute_image::Manifest;
+use prism_ecs_compile::compute_image_core::manifest::Manifest;
 use crate::ecs::config::HardwareTarget;
 use crate::ecs::lora::SharedWeightTable;
 use crate::ecs::metrics::{CacheKind, InferenceTelemetry};

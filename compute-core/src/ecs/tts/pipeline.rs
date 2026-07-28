@@ -9,8 +9,8 @@
     feature = "prism-backend-ios"
 ))]
 
-use crate::ecs::compute_image::cimage_loader::CimageDeployment;
-use crate::ecs::compute_image::compile::ternary::SegmentEntry;
+use crate::ecs::legacy_compute_image_core::cimage_loader::CimageDeployment;
+use crate::ecs::legacy_compute_image_core::compile::ternary::SegmentEntry;
 use crate::ecs::tts::code_predictor::TtsCodePredictor;
 use crate::ecs::tts::codec::MimiCodec;
 use crate::ecs::tts::talker::TtsMegakernel;

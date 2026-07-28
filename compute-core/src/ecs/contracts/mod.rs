@@ -426,7 +426,7 @@ fn sample_process_memory(counters: CounterSnapshot) -> MemorySnapshot {
 #[cfg(feature = "mlx-backend")]
 #[inline]
 fn mlx_active_fallback() -> u64 {
-    crate::ecs::compute_image::mlx_active_memory_bytes()
+    crate::ecs::legacy_compute_image_core::mlx_active_memory_bytes()
 }
 #[cfg(not(feature = "mlx-backend"))]
 #[inline]
@@ -437,7 +437,7 @@ fn mlx_active_fallback() -> u64 {
 #[cfg(feature = "mlx-backend")]
 #[inline]
 fn mlx_cache_fallback() -> u64 {
-    crate::ecs::compute_image::mlx_cache_memory_bytes()
+    crate::ecs::legacy_compute_image_core::mlx_cache_memory_bytes()
 }
 #[cfg(not(feature = "mlx-backend"))]
 #[inline]

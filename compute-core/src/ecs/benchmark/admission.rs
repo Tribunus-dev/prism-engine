@@ -6,7 +6,7 @@
 
 #![cfg(feature = "mlx-backend")]
 
-use crate::ecs::compute_image::fusion_abi::SealedMetalFusionArtifact;
+use crate::ecs::legacy_compute_image_core::fusion_abi::SealedMetalFusionArtifact;
 
 /// Whether the admission gate allows a fused kernel to run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,7 +25,7 @@ pub fn check_fused_metal_benchmark_admission(
     hardware_profile: &str,
 ) -> AdmissionVerdict {
     // 1. Verify seal integrity.
-    if !crate::ecs::compute_image::fusion_sealing::verify_seal(artifact, metallib_bytes) {
+    if !crate::ecs::legacy_compute_image_core::fusion_sealing::verify_seal(artifact, metallib_bytes) {
         return AdmissionVerdict::Rejected("seal mismatch".into());
     }
 
@@ -38,7 +38,7 @@ pub fn check_fused_metal_benchmark_admission(
     }
 
     // 3. Check that the metallib is non-empty and has valid MTLB magic.
-    if !crate::ecs::compute_image::metal_pipeline::validate_metallib_magic(metallib_bytes) {
+    if !crate::ecs::legacy_compute_image_core::metal_pipeline::validate_metallib_magic(metallib_bytes) {
         return AdmissionVerdict::Rejected("invalid metallib magic".into());
     }
 
@@ -55,7 +55,7 @@ fn is_hardware_compatible(artifact: &SealedMetalFusionArtifact, _hardware_profil
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::fusion_abi::{
+    use crate::ecs::legacy_compute_image_core::fusion_abi::{
         ArtifactHash, MetalFusionFamily, MetalLaunchContract, SealedMetalFusionArtifact,
     };
     use std::collections::HashMap;
@@ -78,7 +78,7 @@ mod tests {
         );
         // Seal it
         let bytes = b"MTLBvalid_metallib";
-        a = crate::ecs::compute_image::fusion_sealing::seal_fusion_artifact(a, bytes);
+        a = crate::ecs::legacy_compute_image_core::fusion_sealing::seal_fusion_artifact(a, bytes);
         a
     }
 

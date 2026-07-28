@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use mlx_rs::{Array, Dtype as MlxDtype};
 
-use crate::ecs::compute_image::TensorEntry;
+use prism_ecs_compile::compute_image_core::manifest::TensorEntry;
 use crate::external_array::{new_external_array, StaticStorage};
 use crate::mapped_image::MappedSegment;
 
@@ -152,7 +152,7 @@ pub fn load_mlx_tensor_by_name(
 
 /// Load all weight tensors from a ComputeImage into a name→Array map.
 ///
-/// Only loads tensors with `crate::ecs::compute_image::TensorRole::Weight` — skips KV cache
+/// Only loads tensors with `crate::ecs::legacy_compute_image_core::TensorRole::Weight` — skips KV cache
 /// initializers and scratch buffers.
 ///
 /// Returns a HashMap of tensor_name → no-copy Array.

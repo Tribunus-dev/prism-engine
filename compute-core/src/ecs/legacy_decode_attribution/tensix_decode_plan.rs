@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::hash::{Hash, Hasher};
 
 use prism_ecs_kernel::backend::{EvaluationReceipt, MatmulOp, RmsNormOp, RoPEOp};
-use crate::ecs::compute_image::tensix::TensixComputeImage;
+use crate::ecs::legacy_compute_image_core::tensix::TensixComputeImage;
 
 /// A stage in the composed decode plan.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::ecs::compute_image::compile::coreai::compile_ane_islands;
-use crate::ecs::compute_image::compile::SourceTensor;
+use crate::ecs::legacy_compute_image_core::compile::coreai::compile_ane_islands;
+use crate::ecs::legacy_compute_image_core::compile::SourceTensor;
 use crate::ecs::config::{build_execution_plan, parse_config};
 use crate::ecs::config_namespace::resolve_namespace;
 

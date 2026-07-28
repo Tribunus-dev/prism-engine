@@ -1,12 +1,12 @@
 //! Vision model compilation pipeline.
 //!
-//! Mirrors [`crate::ecs::compute_image::compile::pipeline::compile_sequential`] but
+//! Mirrors [`crate::ecs::legacy_compute_image_core::compile::pipeline::compile_sequential`] but
 //! for vision weights: extracts tensor data from safetensors, optionally packages
 //! an ANE program archive, and writes a portable cimage manifest to disk.
 
 use std::path::Path;
 
-use crate::ecs::compute_image::TensorEntry;
+use prism_ecs_compile::compute_image_core::manifest::TensorEntry;
 use crate::ecs::config::hardware::VisionArchitecture;
 use crate::ecs::config::parser::{ArchitectureConfig, CimageManifest, ManifestModality};
 

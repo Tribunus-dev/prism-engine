@@ -12,8 +12,8 @@
     feature = "prism-backend-ios"
 ))]
 
-use crate::ecs::compute_image::executable::admission::ExecutableAdmissionError;
-use crate::ecs::compute_image::executable::profile::ExecutableTargetProfile;
+use crate::ecs::legacy_compute_image_core::executable::admission::ExecutableAdmissionError;
+use crate::ecs::legacy_compute_image_core::executable::profile::ExecutableTargetProfile;
 
 /// Snapshot of the runtime's hardware and OS capabilities.
 ///
@@ -264,7 +264,7 @@ mod tests {
             profile_id: name.into(),
             profile_hash: Default::default(),
             hardware_contract:
-                crate::ecs::compute_image::executable::profile::HardwareTargetContract {
+                crate::ecs::legacy_compute_image_core::executable::profile::HardwareTargetContract {
                     hardware_family: "apple-m1".into(),
                     gpu_core_count: 8,
                     ane_count: 1,
@@ -272,14 +272,14 @@ mod tests {
                     max_threadgroup_size: 256,
                 },
             runtime_contract:
-                crate::ecs::compute_image::executable::profile::RuntimeTargetContract {
+                crate::ecs::legacy_compute_image_core::executable::profile::RuntimeTargetContract {
                     min_os_version: "14.0".into(),
                     feature_flags: vec![],
                 },
             shape_variants: vec![],
             residency_plans: vec![],
             default_variant_selection:
-                crate::ecs::compute_image::executable::profile::DefaultVariantSelection {
+                crate::ecs::legacy_compute_image_core::executable::profile::DefaultVariantSelection {
                     decode_variant_id: "decode1".into(),
                     prefill_variant_id: "prefill_small".into(),
                 },

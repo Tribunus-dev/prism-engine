@@ -345,7 +345,7 @@ fn dequantize_mlx_block(
 /// builds an execution graph, dequantizes weights (GGML → f32) and palettizes
 /// each weight matrix via k-means clustering.
 pub fn compile_gguf_to_cimage(gguf_path: &Path, output_path: &Path) -> Result<(), String> {
-    use crate::ecs::compute_image::compile::try_q8_0_ternary_pack_gpu;
+    use crate::ecs::legacy_compute_image_core::compile::try_q8_0_ternary_pack_gpu;
     use crate::gguf;
 
     // 1. Parse GGUF header → metadata + tensor inventory + architecture

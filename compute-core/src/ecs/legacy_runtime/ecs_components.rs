@@ -8,7 +8,7 @@ use crate::ecs::canonical::generation::CimageGeneration;
 use crate::ecs::legacy_cimage::generation_store::ContentStore;
 use crate::ecs::cimage_runtime::context::CimageRuntimeContext;
 use prism_ecs_compile::compilation::distill_core::OnPolicyRefinementResult;
-use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
+use crate::ecs::legacy_compute_image_core::compile::ternary::MatrixWeightBindingV1;
 use crate::ecs::runtime::world::{Entity, World};
 use crate::ecs::runtime::world_txn::WorldTxn;
 use crate::quantization::contract::{CanonicalShape, RuntimeRepresentationClass};

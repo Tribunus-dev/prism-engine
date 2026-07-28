@@ -604,7 +604,7 @@ fn run_parity_stage(
     total_blocks: usize,
 ) -> Result<Option<(ParityRun, String, PathBuf, CalibrationStream)>, String> {
     use prism_ecs_compile::compilation::level1::kd_gate::validate_token_taps;
-    use crate::ecs::compute_image::orchestrator::Orchestrator;
+    use crate::ecs::legacy_compute_image_core::orchestrator::Orchestrator;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let Some(golden_dir) = request.parity_golden_dir.as_ref() else {
@@ -641,7 +641,7 @@ fn run_parity_stage(
     // a long-lived worker reusing an untapped kernel here. The structural
     // check below is belt-and-braces (it also catches a future constructor
     // regression), and it runs BEFORE any decoding begins.
-    use crate::ecs::compute_image::megakernel::TapMode;
+    use crate::ecs::legacy_compute_image_core::megakernel::TapMode;
     let mut orch = Orchestrator::from_cimage_with_mode(
         std::path::Path::new(&request.teacher_checkpoint),
         1,
@@ -757,7 +757,7 @@ fn build_profile() -> String {
 /// artifact actually seals (kernels/MULTIMODAL_NF4_BIAS_ABI.md). Returns the
 /// residency string for the operational receipt.
 fn check_bias_policy(request: &DistillationRequest) -> Result<String, (FailureClass, String)> {
-    use crate::ecs::compute_image::compile::ternary::{verify_cimage, SegmentKind};
+    use crate::ecs::legacy_compute_image_core::compile::ternary::{verify_cimage, SegmentKind};
     let policy = request.multimodal_bias_policy.as_deref().unwrap_or("auto");
     if !matches!(policy, "auto" | "require-resident" | "zero-only") {
         return Err((

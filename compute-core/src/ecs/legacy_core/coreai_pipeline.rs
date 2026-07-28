@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::ecs::compute_image::manifest::Nf4Tile640Layout;
+use crate::ecs::legacy_compute_image_core::manifest::Nf4Tile640Layout;
 use crate::ecs::mil_builder::MilBuilder;
 use crate::ecs::mlpackage::{self, ModelMeta};
 use crate::ecs::toolchain_attest::ToolchainAttestation;

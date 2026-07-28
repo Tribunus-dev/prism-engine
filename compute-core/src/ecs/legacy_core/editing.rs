@@ -417,7 +417,7 @@ impl KnowledgeEditor {
         let manifest_path = image_dir.join("manifest.json");
         let manifest_str =
             std::fs::read_to_string(&manifest_path).map_err(|e| format!("read manifest: {}", e))?;
-        let manifest: crate::ecs::compute_image::Manifest =
+        let manifest: crate::ecs::legacy_compute_image_core::Manifest =
             serde_json::from_str(&manifest_str).map_err(|e| format!("parse manifest: {}", e))?;
 
         // Find the tensor entry for this layer's down_proj weight.
@@ -575,7 +575,7 @@ impl KnowledgeEditor {
         let manifest_path = image_dir.join("manifest.json");
         let manifest_str =
             std::fs::read_to_string(&manifest_path).map_err(|e| format!("read manifest: {}", e))?;
-        let manifest: crate::ecs::compute_image::Manifest =
+        let manifest: crate::ecs::legacy_compute_image_core::Manifest =
             serde_json::from_str(&manifest_str).map_err(|e| format!("parse manifest: {}", e))?;
 
         let tensor_name = format!("layer_{}_down_proj_weight", result.target_layer);

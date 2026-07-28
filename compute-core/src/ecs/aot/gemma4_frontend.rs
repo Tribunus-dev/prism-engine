@@ -10,7 +10,7 @@ use crate::ecs::canonical::model_ir::{
     ArchitectureId, LogicalGraph, ModelConfiguration, ModelIdentity, ModelIr, SourceProvenance,
     SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
 };
-use crate::ecs::compute_image::model_family::gemma4_inspect::inspect_gemma4_checkpoint;
+use crate::ecs::legacy_compute_image_core::model_family::gemma4_inspect::inspect_gemma4_checkpoint;
 
 pub struct Gemma4SafetensorsFrontend;
 

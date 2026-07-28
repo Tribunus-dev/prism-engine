@@ -83,6 +83,10 @@ pub mod hw_bench_suite;
 pub mod kv_plan;
 /// KV interleave ABI constants and data types.
 pub mod kv_interleave;
+/// CImage manifest data types (data-only; engine-coupled
+/// `Manifest` and `runtime.rs` live in the engine's
+/// `legacy_compute_image_core/manifest/`).
+pub mod manifest;
 /// Adapter (cross-platform stub).
 pub mod adapter;
 /// Apple CImage manifest data types.

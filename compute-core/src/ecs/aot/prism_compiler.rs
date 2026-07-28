@@ -179,7 +179,7 @@ impl PrismCompiler {
                 .and_then(crate::ecs::config::CompileQuantMode::from_name);
 
             let (_compiled_image, mut outcome) =
-                crate::ecs::compute_image::compile::compile_gguf_to_canonical(
+                crate::ecs::legacy_compute_image_core::compile::compile_gguf_to_canonical(
                     &request.source_path,
                     &output_dir,
                     quant_mode,
@@ -305,7 +305,7 @@ impl PrismCompiler {
             .as_deref()
             .and_then(|s| parse_hardware_target(Some(s)));
 
-        let compiled_image = crate::ecs::compute_image::compile::compile_gguf_speculative(
+        let compiled_image = crate::ecs::legacy_compute_image_core::compile::compile_gguf_speculative(
             &request.source_path,
             draft_path,
             &output_dir,
@@ -374,7 +374,7 @@ impl PrismCompiler {
         let metal_path = request.metallib_path.as_deref();
         let mlx_cap = request.mlx_capture_dir.as_deref();
 
-        let compiled_image = crate::ecs::compute_image::compile::compile_gguf_with_authority(
+        let compiled_image = crate::ecs::legacy_compute_image_core::compile::compile_gguf_with_authority(
             &request.source_path,
             &output_dir,
             authority,
@@ -615,8 +615,8 @@ mod tests {
 
 /// Parse an authority string into a CompilationAuthority.
 #[cfg(feature = "mlx-backend")]
-fn parse_authority(s: Option<&str>) -> crate::ecs::compute_image::manifest::CompilationAuthority {
-    use crate::ecs::compute_image::manifest::CompilationAuthority;
+fn parse_authority(s: Option<&str>) -> crate::ecs::legacy_compute_image_core::manifest::CompilationAuthority {
+    use crate::ecs::legacy_compute_image_core::manifest::CompilationAuthority;
     match s {
         Some("TestFixture") => CompilationAuthority::TestFixture,
         Some("SealedComputeImage") => CompilationAuthority::SealedComputeImage,
@@ -648,7 +648,7 @@ fn parse_hardware_target(s: Option<&str>) -> Option<crate::ecs::config::Hardware
 /// minimal placeholder.
 #[cfg(feature = "mlx-backend")]
 fn build_outcome_from_image(
-    compiled_image: &crate::ecs::compute_image::manifest::CompiledImage,
+    compiled_image: &crate::ecs::legacy_compute_image_core::manifest::CompiledImage,
     output_dir: &str,
     request: &CompileRequest,
 ) -> CompileOutcome {

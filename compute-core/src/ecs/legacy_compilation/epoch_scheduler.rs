@@ -17,7 +17,7 @@ use crate::ecs::legacy_compilation::tri_lane::{
 use crate::ecs::backend::coreai_iosurface::CoreAiIOSurfaceExecutable;
 use crate::ecs::backend::metal_consumer::MetalConsumer;
 use crate::ecs::backend::metal_iosurface::MetalExecutable;
-use crate::ecs::compute_image::apple_shared_arena::{AppleSharedArena, SlotState};
+use crate::ecs::legacy_compute_image_core::apple_shared_arena::{AppleSharedArena, SlotState};
 
 // ── Re-exports ───────────────────────────────────────────────────────────
 
@@ -1115,7 +1115,7 @@ mod tests {
         let mut arena = AppleSharedArena::new("test-exec-arena".into(), 2);
 
         // Add a slot for input/output
-        use crate::ecs::compute_image::apple_shared_arena::{
+        use crate::ecs::legacy_compute_image_core::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
         arena.add_slot(LiveIOSurfaceSlot {
@@ -1260,7 +1260,7 @@ mod tests {
         use crate::ecs::legacy_compilation::tri_lane::{
             CompletionContract, DependencyKind, ExecutionEpoch, LaneDependency,
         };
-        use crate::ecs::compute_image::apple_shared_arena::{
+        use crate::ecs::legacy_compute_image_core::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
 
@@ -1385,7 +1385,7 @@ mod tests {
             CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
         };
         use crate::ecs::backend::metal_consumer::MetalSlotBinding;
-        use crate::ecs::compute_image::apple_shared_arena::{
+        use crate::ecs::legacy_compute_image_core::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
 
@@ -1499,7 +1499,7 @@ mod tests {
             CoreAiComputePolicy, CoreAiIOSurfaceBinding, CoreAiIOSurfaceExecutable,
         };
         use crate::ecs::backend::metal_consumer::MetalSlotBinding;
-        use crate::ecs::compute_image::apple_shared_arena::{
+        use crate::ecs::legacy_compute_image_core::apple_shared_arena::{
             IOSurfaceSlotManifest, LiveIOSurfaceSlot, SlotReuseClass,
         };
 

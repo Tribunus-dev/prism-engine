@@ -1,7 +1,7 @@
 //! AMD DS4 persistent megakernel — one HIP kernel launch per decode session.
 //!
 //! Uses a ring-buffer dispatch protocol matching the existing Metal
-//! [`Megakernel`](crate::ecs::compute_image::megakernel::Megakernel) pattern.
+//! [`Megakernel`](crate::ecs::legacy_compute_image_core::megakernel::Megakernel) pattern.
 //! Weights, KV cache, and ring buffers are pre-allocated at session startup;
 //! the kernel runs persistently (polling its ring slot) until a shutdown
 //! flag is raised.

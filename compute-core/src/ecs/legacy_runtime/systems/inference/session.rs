@@ -18,9 +18,9 @@ use crate::ecs::cache::evolkv::CalibrationSet;
 use crate::ecs::cache::evolkv::LayerBudget;
 #[cfg(feature = "magic-teleportation")]
 use crate::ecs::cache::prefix_cache::{check_shared_prefix, insert_shared_prefix};
-use crate::ecs::compute_image::phase_dag::EmittedPhaseGraph;
-use crate::ecs::compute_image::phase_dag::PhaseCompletionStatus;
-use crate::ecs::compute_image::CompiledImageReader;
+use prism_ecs_compile::compute_image_core::phase_dag::EmittedPhaseGraph;
+use prism_ecs_compile::compute_image_core::phase_dag::PhaseCompletionStatus;
+use prism_ecs_compile::compute_image_core::manifest::CompiledImageReader;
 use crate::ecs::config::ModelExecutionPlan;
 use crate::ecs::kv_cache::{KvCache, PageMigrationService};
 use crate::ecs::runtime::executable_session::RuntimeBackends;
@@ -1364,10 +1364,10 @@ impl ProfiledInferenceSession {
                 layer_elapsed_ms,
                 handles_before,
                 crate::ecs::bridge::handle_count(),
-                format_bytes(crate::ecs::compute_image::mlx_active_memory_bytes()),
-                format_bytes(crate::ecs::compute_image::mlx_active_memory_bytes()), // measured after eval above
-                format_bytes(crate::ecs::compute_image::mlx_cache_memory_bytes()),
-                format_bytes(crate::ecs::compute_image::mlx_cache_memory_bytes()),
+                format_bytes(crate::ecs::legacy_compute_image_core::mlx_active_memory_bytes()),
+                format_bytes(crate::ecs::legacy_compute_image_core::mlx_active_memory_bytes()), // measured after eval above
+                format_bytes(crate::ecs::legacy_compute_image_core::mlx_cache_memory_bytes()),
+                format_bytes(crate::ecs::legacy_compute_image_core::mlx_cache_memory_bytes()),
                 shape_d0, shape_d1,
                 true,
             );

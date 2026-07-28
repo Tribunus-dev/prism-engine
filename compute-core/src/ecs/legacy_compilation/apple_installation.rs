@@ -15,14 +15,14 @@ use prism_ecs_kernel::backend::shared_event::{
     SharedEventAccess, SharedEventBinding, SharedEventContract,
 };
 use crate::ecs::legacy_compilation::tri_lane::{AneQualificationRecord, CoreAiWarmupContract};
-use crate::ecs::compute_image::apple_cimage_manifest::{
+use crate::ecs::legacy_compute_image_core::apple_cimage_manifest::{
     AppleTriLaneArtifactManifest, IOSurfaceSlotManifest as CimageSlotManifest,
     SharedEventContractManifest,
 };
-use crate::ecs::compute_image::apple_shared_arena::{
+use crate::ecs::legacy_compute_image_core::apple_shared_arena::{
     AppleSharedArena, IOSurfaceSlotManifest, SlotReuseClass,
 };
-use crate::ecs::compute_image::manifest::Nf4Tile640Layout;
+use crate::ecs::legacy_compute_image_core::manifest::Nf4Tile640Layout;
 
 #[cfg(feature = "metal-dispatch")]
 pub struct InstalledSharedEvent {
@@ -726,14 +726,14 @@ pub fn warmup_with_arena(
 mod tests {
     use super::*;
     use prism_ecs_kernel::backend::placement::ExecutionLane;
-    use crate::ecs::compute_image::apple_cimage_manifest::{
+    use crate::ecs::legacy_compute_image_core::apple_cimage_manifest::{
         AppleFallbackManifest, AppleHardwareCompatibility, AppleNumericalPolicy,
         AppleSharedArenaManifest, AppleTriLaneAdmissionManifest, CoreAiArtifactManifest,
         MetalArtifactManifest,
     };
-    use crate::ecs::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation;
-    use crate::ecs::compute_image::apple_shared_arena::LiveIOSurfaceSlot;
-    use crate::ecs::compute_image::apple_shared_arena::SlotState;
+    use crate::ecs::legacy_compute_image_core::apple_shared_arena::IOSurfaceAllocationAttestation;
+    use crate::ecs::legacy_compute_image_core::apple_shared_arena::LiveIOSurfaceSlot;
+    use crate::ecs::legacy_compute_image_core::apple_shared_arena::SlotState;
 
     fn dummy_hardware() -> AppleHardwareCompatibility {
         AppleHardwareCompatibility {
@@ -1401,7 +1401,7 @@ mod tests {
     #[test]
     #[cfg_attr(not(target_os = "macos"), ignore)]
     fn test_install_allocated_slots_have_attestation() {
-        use crate::ecs::compute_image::apple_cimage_manifest::AppleSharedArenaManifest;
+        use crate::ecs::legacy_compute_image_core::apple_cimage_manifest::AppleSharedArenaManifest;
 
         let manifest = AppleSharedArenaManifest {
             arena_layout_digest: "digest_00000000".into(),

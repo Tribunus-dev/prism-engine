@@ -4,7 +4,7 @@
 //! config.json and produces a normalized TextArchitecture + QuantizationMeta.
 
 #[cfg(feature = "prism-backend")]
-use crate::ecs::compute_image::TensorEntry;
+use prism_ecs_compile::compute_image_core::manifest::TensorEntry;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;

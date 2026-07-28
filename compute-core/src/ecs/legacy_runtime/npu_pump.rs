@@ -21,7 +21,7 @@
 //! materialises them into native format on-the-fly via its pump.  There
 //! is never a duplicate weight segment for a second architecture.
 
-use crate::ecs::compute_image::compile::ternary::{
+use crate::ecs::legacy_compute_image_core::compile::ternary::{
     repack_ternary_to_swizzled_u8, swizzled_buffer_size, SegmentKind,
 };
 

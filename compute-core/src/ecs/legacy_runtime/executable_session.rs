@@ -14,13 +14,13 @@
 //!    [`LaneArtifactRegistry`].
 //! 5. **Return the prepared session** for scheduler handoff (E5).
 
-use crate::ecs::compute_image::execution_shape::ExecutionShapeClass;
-use crate::ecs::compute_image::program::phase_program::SerializedPhaseProgram;
-use crate::ecs::compute_image::residency::admission::{
+use crate::ecs::legacy_compute_image_core::execution_shape::ExecutionShapeClass;
+use crate::ecs::legacy_compute_image_core::program::phase_program::SerializedPhaseProgram;
+use crate::ecs::legacy_compute_image_core::residency::admission::{
     ResidencyAdmission, ResidencyAdmissionResult,
 };
-use crate::ecs::compute_image::residency::plan::CompiledResidencyPlan;
-use crate::ecs::compute_image::variants::selection::{
+use crate::ecs::legacy_compute_image_core::residency::plan::CompiledResidencyPlan;
+use crate::ecs::legacy_compute_image_core::variants::selection::{
     select_program_variant, VariantSelectionRefusal,
 };
 use crate::ecs::runtime::executable_bindings::ExecutableBindings;
@@ -87,7 +87,7 @@ pub struct LoadedExecutableImage {
     /// Compiler-emitted phase DAG (optional -- present when the image was
     /// compiled with the phase-dag pipeline).  The scheduler uses this
     /// to dispatch typed phases instead of reconstructing dependencies.
-    pub phase_dag: Option<crate::ecs::compute_image::phase_dag::EmittedPhaseGraph>,
+    pub phase_dag: Option<crate::ecs::legacy_compute_image_core::phase_dag::EmittedPhaseGraph>,
 }
 
 /// A fully prepared execution session, ready for scheduler dispatch.

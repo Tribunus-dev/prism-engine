@@ -38,7 +38,7 @@ use crate::ecs::backend::{
     QuantizedMatmulOp, QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend,
     TensorHandle,
 };
-use crate::ecs::compute_image::megakernel::{LAYERS, MAX_CONTEXT, NUM_KV_HEADS};
+use crate::ecs::legacy_compute_image_core::megakernel::{LAYERS, MAX_CONTEXT, NUM_KV_HEADS};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 

@@ -24,8 +24,8 @@
     feature = "prism-backend-ios"
 ))]
 
-use crate::ecs::compute_image::executable::profile::ExecutableTargetProfile;
-use crate::ecs::compute_image::program::phase_program::{ExecutionLane, SerializedPhaseProgram};
+use crate::ecs::legacy_compute_image_core::executable::profile::ExecutableTargetProfile;
+use crate::ecs::legacy_compute_image_core::program::phase_program::{ExecutionLane, SerializedPhaseProgram};
 
 // ---------------------------------------------------------------------------
 // Core data structures
@@ -236,12 +236,12 @@ impl std::error::Error for BindingError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::executable::profile::{
+    use crate::ecs::legacy_compute_image_core::executable::profile::{
         DefaultVariantSelection, ExecutableTargetProfile, HardwareTargetContract,
         RuntimeTargetContract,
     };
-    use crate::ecs::compute_image::executable::variant::{ShapeProfile, ShapeSpecializedProgram};
-    use crate::ecs::compute_image::program::phase_program::{
+    use crate::ecs::legacy_compute_image_core::executable::variant::{ShapeProfile, ShapeSpecializedProgram};
+    use crate::ecs::legacy_compute_image_core::program::phase_program::{
         CanonicalArtifactIdentity, ExecutionKind, PhaseArtifactKind, PhaseCompletionContract,
         PhaseDependencyContract, PhaseResourceReservation, ProgramArtifactSelection,
         SerializedPhase, SerializedPhaseProgram,
@@ -283,7 +283,7 @@ mod tests {
         SerializedPhase {
             phase_id: phase_id.into(),
             semantic_operation:
-                crate::ecs::compute_image::program::phase_program::SemanticOperation::RmsNorm,
+                crate::ecs::legacy_compute_image_core::program::phase_program::SemanticOperation::RmsNorm,
             lane,
             artifact_identity: CanonicalArtifactIdentity {
                 artifact_id: artifact_id.into(),
@@ -312,7 +312,7 @@ mod tests {
         SerializedPhaseProgram {
             program_id: program_id.into(),
             program_hash: ContentHash(0),
-            shape_class: crate::ecs::compute_image::execution_shape::ExecutionShapeClass::Decode1,
+            shape_class: crate::ecs::legacy_compute_image_core::execution_shape::ExecutionShapeClass::Decode1,
             execution_kind: ExecutionKind::Decode,
             phases,
             edges: vec![],

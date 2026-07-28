@@ -38,14 +38,14 @@ use prism_ecs_kernel::backend::routing::{
 #[cfg(feature = "mlx-backend")]
 use crate::ecs::backend::MlxBackend;
 use prism_ecs_kernel::backend::TensorHandle;
-use crate::ecs::compute_image::compile::execution_graph::{
+use crate::ecs::legacy_compute_image_core::compile::execution_graph::{
     ExecutionGraphDescriptor, NodeKind, EXECUTION_GRAPH_MAGIC,
 };
-use crate::ecs::compute_image::compile::ternary::{
+use crate::ecs::legacy_compute_image_core::compile::ternary::{
     CimageHeader, SegmentKind, CIMAGE_HEADER_WIRE_SIZE,
 };
 #[cfg(feature = "mlx-backend")]
-use crate::ecs::compute_image::{
+use crate::ecs::legacy_compute_image_core::{
     clear_mlx_cache, mlx_active_memory_bytes, mlx_cache_memory_bytes, mlx_get_memory_limit,
 };
 use crate::ecs::engine_error::{EngineError, EngineErrorCode};
@@ -99,7 +99,7 @@ enum LoadedModel {
         graph: ExecutionGraphDescriptor,
         /// Matrix contract — per-tensor format contracts.
         #[allow(dead_code)]
-        contract: Vec<crate::ecs::compute_image::compile::execution_graph::MatrixWeightBinding>,
+        contract: Vec<crate::ecs::legacy_compute_image_core::compile::execution_graph::MatrixWeightBinding>,
         /// Raw weight segment data keyed by SegmentKind.
         weight_segments: HashMap<u32, Vec<u8>>,
         /// Metal shader library bytes (SegmentKind::MetalLib = 0).
@@ -376,7 +376,7 @@ impl ComputeEngine {
             Some(bytes) if bytes.len() >= 4 => {
                 let count = u32::from_le_bytes(bytes[..4].try_into().unwrap()) as usize;
                 let binding_size = std::mem::size_of::<
-                    crate::ecs::compute_image::compile::execution_graph::MatrixWeightBinding,
+                    crate::ecs::legacy_compute_image_core::compile::execution_graph::MatrixWeightBinding,
                 >();
                 let mut bindings = Vec::with_capacity(count);
                 for i in 0..count {
@@ -385,7 +385,7 @@ impl ComputeEngine {
                         break;
                     }
                     let b = unsafe {
-                        &*(bytes[offset..].as_ptr() as *const crate::ecs::compute_image::compile::execution_graph::MatrixWeightBinding)
+                        &*(bytes[offset..].as_ptr() as *const crate::ecs::legacy_compute_image_core::compile::execution_graph::MatrixWeightBinding)
                     };
                     bindings.push(*b);
                 }

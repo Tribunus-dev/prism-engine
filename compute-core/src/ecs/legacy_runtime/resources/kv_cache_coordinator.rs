@@ -22,7 +22,7 @@ use mlx_rs::{ops, Array};
 use parking_lot::Mutex;
 
 use crate::ecs::cache::evolkv::{CalibrationSet, EvolKV};
-use crate::ecs::compute_image::kv_plan::KvCachePlan;
+use crate::ecs::legacy_compute_image_core::kv_plan::KvCachePlan;
 use crate::ecs::runtime::scheduling::component_id::{ResourceId, SchedulableResource};
 use crate::ecs::state_store::{
     KvAppendReceipt, KvCacheLayout, KvCacheManager, KvCacheStoreDecl, KvCodecPolicy, KvReadReceipt,

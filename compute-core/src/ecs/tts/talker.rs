@@ -13,7 +13,7 @@
 ))]
 
 #[allow(unused_imports)]
-use crate::ecs::compute_image::megakernel::kernels::{
+use crate::ecs::legacy_compute_image_core::megakernel::kernels::{
     SHADER_SRC, TTS_FFN_INTERMEDIATE, TTS_HIDDEN, TTS_LAYERS, TTS_MAX_CONTEXT, TTS_NUM_KV_HEADS,
     TTS_TILES, TTS_TILES_FFN, TTS_VOCAB,
 };

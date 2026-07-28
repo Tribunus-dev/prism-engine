@@ -131,7 +131,7 @@ pub fn validate_schema(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::kv_plan::KvCodec;
+    use crate::ecs::legacy_compute_image_core::kv_plan::KvCodec;
     use crate::ecs::state_store::schema::*;
 
     fn valid_decl(id: &str) -> StateStoreDecl {

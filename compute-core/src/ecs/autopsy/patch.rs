@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::ecs::autopsy::replay::ReplayResult;
-use crate::ecs::compute_image::Manifest;
+use prism_ecs_compile::compute_image_core::manifest::Manifest;
 
 /// A patch to a single segment in a ComputeImage.
 /// Applied post-hoc without full recompilation.

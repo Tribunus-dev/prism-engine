@@ -26,19 +26,19 @@ use std::sync::Arc;
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-use crate::ecs::compute_image::cimage_loader::load_cimage_mmap;
+use crate::ecs::legacy_compute_image_core::cimage_loader::load_cimage_mmap;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-use crate::ecs::compute_image::cimage_packer::pipeline::compile_and_pack_god_binary;
+use crate::ecs::legacy_compute_image_core::cimage_packer::pipeline::compile_and_pack_god_binary;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-use crate::ecs::compute_image::compile::source::load_source;
+use crate::ecs::legacy_compute_image_core::compile::source::load_source;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",

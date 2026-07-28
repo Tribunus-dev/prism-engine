@@ -26,7 +26,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use super::npu_pump::NpuWeightPump;
-use crate::ecs::compute_image::compile::ternary::SegmentKind;
+use crate::ecs::legacy_compute_image_core::compile::ternary::SegmentKind;
 
 // ── Shared block scales cache ─────────────────────────────────────
 
@@ -41,7 +41,7 @@ struct BlockScaleCache {
 impl BlockScaleCache {
     fn from_mmap(
         mmap: &[u8],
-        header: &crate::ecs::compute_image::compile::ternary::CimageHeader,
+        header: &crate::ecs::legacy_compute_image_core::compile::ternary::CimageHeader,
     ) -> Self {
         let entry = header.segment(SegmentKind::BlockScales);
         let raw = match entry {
@@ -166,7 +166,7 @@ impl PumpPool {
     /// accept work via `enqueue_layer`.
     pub fn spawn(
         mmap: Arc<memmap2::Mmap>,
-        header: &crate::ecs::compute_image::compile::ternary::CimageHeader,
+        header: &crate::ecs::legacy_compute_image_core::compile::ternary::CimageHeader,
         devices: Vec<NpuDevice>,
     ) -> Self {
         let n_devices = devices.len() as u32;
@@ -350,7 +350,7 @@ impl Drop for PumpPool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::compile::ternary::{
+    use crate::ecs::legacy_compute_image_core::compile::ternary::{
         CimageHeader, SegmentEntry, CIMAGE_PAGE_SIZE, CIMAGE_SEGMENT_CAPACITY, PRISM_MAGIC,
     };
     use crate::ecs::runtime::npu_pump::AneWeightPump;

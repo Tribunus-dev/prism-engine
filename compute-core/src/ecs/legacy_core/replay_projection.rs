@@ -9,7 +9,7 @@
 //! No per-projection synchronization in normal inference — this is a separate
 //! qualification CLI command.
 
-use crate::ecs::compute_image::CompiledImageReader;
+use prism_ecs_compile::compute_image_core::manifest::CompiledImageReader;
 use crate::ecs::mapped_image::{MappedImage, SegmentView};
 use crate::ecs::projection_identity::{self, ProjectionFamily};
 use mlx_rs::Array;
@@ -263,8 +263,8 @@ impl ProjectionHarness {
             let input = Array::full::<f32>(&input_shape, &Array::from_f32(0.5))
                 .expect("create input array");
 
-            let active_before = crate::ecs::compute_image::mlx_active_memory_bytes();
-            let cache_before = crate::ecs::compute_image::mlx_cache_memory_bytes();
+            let active_before = crate::ecs::legacy_compute_image_core::mlx_active_memory_bytes();
+            let cache_before = crate::ecs::legacy_compute_image_core::mlx_cache_memory_bytes();
 
             let t_total = Instant::now();
 
@@ -292,9 +292,9 @@ impl ProjectionHarness {
             let sync_ns: u128 = 0;
             let total_ns = t_total.elapsed().as_nanos();
 
-            let active_after = crate::ecs::compute_image::mlx_active_memory_bytes();
-            let cache_after = crate::ecs::compute_image::mlx_cache_memory_bytes();
-            let peak = crate::ecs::compute_image::mlx_peak_memory_bytes();
+            let active_after = crate::ecs::legacy_compute_image_core::mlx_active_memory_bytes();
+            let cache_after = crate::ecs::legacy_compute_image_core::mlx_cache_memory_bytes();
+            let peak = crate::ecs::legacy_compute_image_core::mlx_peak_memory_bytes();
             let rss = crate::worker_memory::sample_process_rss_self();
 
             // Output digest
@@ -557,8 +557,8 @@ impl ProjectionHarness {
         };
         let ptr_alignment = 4096;
 
-        let active_before = crate::ecs::compute_image::mlx_active_memory_bytes();
-        let cache_before = crate::ecs::compute_image::mlx_cache_memory_bytes();
+        let active_before = crate::ecs::legacy_compute_image_core::mlx_active_memory_bytes();
+        let cache_before = crate::ecs::legacy_compute_image_core::mlx_cache_memory_bytes();
         let t_total = std::time::Instant::now();
 
         let t_graph = std::time::Instant::now();
@@ -633,13 +633,13 @@ impl ProjectionHarness {
             } else {
                 None
             },
-            mlx_active_after: Some(crate::ecs::compute_image::mlx_active_memory_bytes()),
+            mlx_active_after: Some(crate::ecs::legacy_compute_image_core::mlx_active_memory_bytes()),
             mlx_cache_before: if cache_before > 0 {
                 Some(cache_before)
             } else {
                 None
             },
-            mlx_cache_after: Some(crate::ecs::compute_image::mlx_cache_memory_bytes()),
+            mlx_cache_after: Some(crate::ecs::legacy_compute_image_core::mlx_cache_memory_bytes()),
             peak_mlx_memory: None,
             process_rss: None,
             output_digest: digest,

@@ -864,7 +864,7 @@ pub struct AppleFp16ProductionInstallationReceipt {
     pub fp16_contract_admitted: bool,
     /// Per-slot IO-arena allocation attestations.
     pub slot_attestations:
-        Vec<crate::ecs::compute_image::apple_shared_arena::IOSurfaceAllocationAttestation>,
+        Vec<crate::ecs::legacy_compute_image_core::apple_shared_arena::IOSurfaceAllocationAttestation>,
     /// Digest of the compiled Core ML artifact.
     pub coreai_artifact_digest: String,
     /// Whether installation completed.

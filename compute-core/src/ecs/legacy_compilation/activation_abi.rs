@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use prism_ecs_kernel::backend::placement::ExecutionLane;
 use crate::ecs::legacy_compilation::phase_ir::TensorDtype;
 use crate::ecs::legacy_compilation::phase_types::MaterializationMode;
-use crate::ecs::compute_image::slot_types::SlotState;
+use crate::ecs::legacy_compute_image_core::slot_types::SlotState;
 
 // ── Activation ABI variants ──────────────────────────────────────────────
 
