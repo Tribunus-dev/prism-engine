@@ -34,7 +34,7 @@ use std::sync::Mutex;
 
 use lazy_static::lazy_static;
 
-use crate::ecs::backend::routing::BackendId;
+use prism_ecs_kernel::backend::routing::BackendId;
 
 // ── Traits and types ───────────────────────────────────────────────────────
 
@@ -130,7 +130,7 @@ pub fn lookup_operation(kernel_name: &str) -> Option<PluginOperation> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
+    use prism_ecs_kernel::backend::routing::{BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX};
 
     struct TestPlugin;
 

@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use candle_core::{DType, Device, Tensor};
 
-use crate::ecs::backend::DType as BackendDType;
+use prism_ecs_kernel::backend::DType as BackendDType;
 use crate::ecs::backend::{
     authority, BackendCapabilities, EvaluationReceipt, MatmulOp, QuantizedMatmulOp,
     QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle,

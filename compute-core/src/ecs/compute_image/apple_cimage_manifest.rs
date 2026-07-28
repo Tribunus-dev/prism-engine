@@ -15,7 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use crate::ecs::backend::placement::ExecutionLane;
+pub use prism_ecs_kernel::backend::placement::ExecutionLane;
 pub use crate::ecs::compilation::tri_lane::{
     ExecutionEpoch, LaneDependency, NumericalPolicy, ShapeClass,
 };
@@ -268,7 +268,7 @@ pub struct AppleTriLaneArtifactManifest {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::backend::placement::ExecutionLane;
+    use prism_ecs_kernel::backend::placement::ExecutionLane;
 
     fn minimal_hardware_compatibility() -> AppleHardwareCompatibility {
         AppleHardwareCompatibility {

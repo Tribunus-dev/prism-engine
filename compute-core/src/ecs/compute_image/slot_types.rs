@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::backend::placement::ExecutionLane;
+use prism_ecs_kernel::backend::placement::ExecutionLane;
 
 /// Failure reason for poisoned slots.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

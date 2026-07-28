@@ -1,11 +1,10 @@
-//! `pipeline::pass` — versioned compiler transformation passes with receipts.
+//! Compiler pass framework — versioned transformation passes with receipts.
 //!
-//! This file owns the canonical authority for the compiler pass framework:
-//! every transformation pass consumes a sealed IR identity and produces
-//! another, along with a [`TransformReceipt`], so compiler decisions are
-//! reproducible and attributable.
+//! Every pass consumes one sealed IR identity and produces another, along
+//! with a [`TransformReceipt`]. This makes every compiler decision
+//! reproducible and scientifically attributable.
 
-use prism_ecs_backend::routing::EvidenceDigest;
+use prism_ecs_kernel::backend::routing::EvidenceDigest;
 
 // ── Pass identity ──────────────────────────────────────────────────────────
 
@@ -142,7 +141,6 @@ pub struct NoopPass {
 }
 
 impl NoopPass {
-    /// Construct a no-op pass with the standard identity.
     pub fn new() -> Self {
         Self {
             identity: PassIdentity {
@@ -151,12 +149,6 @@ impl NoopPass {
                 implementation_digest: EvidenceDigest(String::new()),
             },
         }
-    }
-}
-
-impl Default for NoopPass {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

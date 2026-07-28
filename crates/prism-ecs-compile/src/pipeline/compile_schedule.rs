@@ -1,33 +1,28 @@
-//! `pipeline::compile_schedule` — model-to-schedule compiler.
+//! Model-to-schedule compiler — translates a model manifest into a
+//! [`ScheduledModule`] with populated regions, memory plan, transfer plan,
+//! and evaluation boundaries.
 //!
-//! This file owns the canonical authority for translating a
-//! [`ModelExecutionPlan`] and [`TextArchitecture`] into a
-//! [`ScheduledModule`] with populated regions, memory plan, transfer
-//! plan, and evaluation boundaries.
-//!
-//! This is the bridge between the static model description (weights,
-//! layers, shapes) and the runtime execution infrastructure that
-//! allocates memory slices, assigns backends, and sequences evaluation.
+//! This is the bridge between the static model description (weights, layers,
+//! shapes) and the runtime execution infrastructure that allocates IOSurface
+//! slices, assigns backends, and sequences evaluation.
 
-use std::collections::BTreeMap;
-
-use prism_ecs_backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, EvidenceDigest, OperationId, PhysicalLayout, TensorId, TensorShape,
     BACKEND_ACCELERATE, BACKEND_ANE, BACKEND_MLX,
 };
-use prism_ecs_backend::DType;
-
-use super::plan::{LayerPlan, ModelExecutionPlan, TextArchitecture};
-use super::scheduled::{
+use prism_ecs_kernel::backend::DType;
+use crate::ecs::compiler::scheduled::{
     BufferReuse, DependencyKind, MemoryPlan, RegionDependency, RegionId, ScheduledModule,
-    ScheduledRegion, SealedEvaluationBoundary, StateEffect, StorageClass, TransferPlan,
+    ScheduledRegion, SealedEvaluationBoundary, StorageClass, TransferPlan,
 };
+use crate::ecs::config::{LayerPlan, ModelExecutionPlan, TextArchitecture};
+use std::collections::HashMap;
 
 /// Compile a model manifest to a [`ScheduledModule`].
 ///
-/// Each transformer layer becomes one region. The regions are ordered
-/// sequentially. Evaluation boundaries are placed every 6 layers
-/// (matching the OPT-0005 synchronization fence). The memory plan
+/// Each transformer layer becomes one region.  The regions are ordered
+/// sequentially.  Evaluation boundaries are placed every 6 layers
+/// (matching the OPT-0005 synchronization fence).  The memory plan
 /// estimates per-layer peak memory and total budget.
 pub fn compile_model_to_scheduled_module(
     plan: &ModelExecutionPlan,
@@ -42,7 +37,18 @@ pub fn compile_model_to_scheduled_module(
     let seq_len = arch.max_position_embeddings.min(8192) as u64;
     let _vocab_size = arch.vocab_size as u64;
 
-    // Per-layer peak memory estimate.
+    // ── Compute per-layer memory ──
+    //
+    // Each layer needs:
+    //   - Hidden state buffer: seq_len × hidden_size × 4 (FP32, worst case)
+    //   - Attention QKV workspace: seq_len × (n_heads + 2×n_kv_heads) × head_dim × 4
+    //   - Attention score matrix: n_heads × seq_len × seq_len × 4 (only at peak)
+    //   - O projection: seq_len × hidden_size × 4
+    //   - FFN gate/up: 2 × seq_len × intermediate_size × 4
+    //   - FFN down: seq_len × hidden_size × 4
+    //
+    // In practice MLX fuses many of these, but we estimate the peak budget.
+
     let hidden_state_bytes = seq_len * hidden_size * 4;
 
     let per_layer_bytes: Vec<u64> = plan
@@ -53,10 +59,16 @@ pub fn compile_model_to_scheduled_module(
             let nh = l.n_heads as u64;
             let nkv = l.n_kv_heads as u64;
 
+            // Flash attention: no score matrix materialized.
+            // QKV workspace (concurrent Q/K/V intermediates)
             let qkv_workspace = seq_len * (nh + 2 * nkv) * hd * 4;
+            // FFN gate + up intermediates
             let ffn_inter = 2 * seq_len * intermediate_size * 4;
 
-            qkv_workspace.max(ffn_inter).max(hidden_state_bytes)
+            // Peak: concurrent QKV workspace + FFN intermediates + hidden state I/O
+            let peak = qkv_workspace.max(ffn_inter).max(hidden_state_bytes);
+
+            peak
         })
         .collect();
 
@@ -68,28 +80,29 @@ pub fn compile_model_to_scheduled_module(
         let nh = layer.n_heads as u64;
         let nkv = layer.n_kv_heads as u64;
 
-        let backend_id = BackendId(layer.dominant_backend());
+        let backend_id = BackendId(layer.route.dominant_backend() as u32);
 
         let mut physical_tensors = Vec::new();
 
         // Hidden state input/output tensor
         physical_tensors.push(physical_tensor(
             TensorId(layer_id * 100 + 1),
-            format!("layer_{i}_hidden_input"),
-            vec![seq_len, hidden_size],
+            format!("layer_{}_hidden_input", i),
+            vec![seq_len as u32, hidden_size as u32],
             DType::F32,
             StorageClass::IoSurface,
             backend_id,
         ));
         physical_tensors.push(physical_tensor(
             TensorId(layer_id * 100 + 2),
-            format!("layer_{i}_hidden_output"),
-            vec![seq_len, hidden_size],
+            format!("layer_{}_hidden_output", i),
+            vec![seq_len as u32, hidden_size as u32],
             DType::F32,
             StorageClass::IoSurface,
             backend_id,
         ));
 
+        // KV cache K
         let cache_capacity = if is_full {
             seq_len
         } else {
@@ -108,16 +121,16 @@ pub fn compile_model_to_scheduled_module(
 
         physical_tensors.push(physical_tensor(
             TensorId(layer_id * 100 + 3),
-            format!("layer_{i}_k_cache"),
-            vec![cache_capacity, kv_cache_size, kv_hd],
+            format!("layer_{}_k_cache", i),
+            vec![cache_capacity as u32, kv_cache_size as u32, kv_hd as u32],
             DType::F32,
             StorageClass::IoSurface,
             backend_id,
         ));
         physical_tensors.push(physical_tensor(
             TensorId(layer_id * 100 + 4),
-            format!("layer_{i}_v_cache"),
-            vec![cache_capacity, kv_cache_size, kv_hd],
+            format!("layer_{}_v_cache", i),
+            vec![cache_capacity as u32, kv_cache_size as u32, kv_hd as u32],
             DType::F32,
             StorageClass::IoSurface,
             backend_id,
@@ -127,8 +140,8 @@ pub fn compile_model_to_scheduled_module(
         for (suffix, n, h) in &[("q", nh, hd), ("k", nkv, hd), ("v", nkv, hd)] {
             physical_tensors.push(physical_tensor(
                 TensorId(layer_id * 100 + 10 + suffix.as_bytes()[0] as u64),
-                format!("layer_{i}_attn_{suffix}"),
-                vec![seq_len, *n, *h],
+                format!("layer_{}_attn_{}", i, suffix),
+                vec![seq_len as u32, *n as u32, *h as u32],
                 DType::F32,
                 StorageClass::IoSurface,
                 backend_id,
@@ -138,24 +151,24 @@ pub fn compile_model_to_scheduled_module(
         // FFN intermediates
         physical_tensors.push(physical_tensor(
             TensorId(layer_id * 100 + 20),
-            format!("layer_{i}_gate_proj"),
-            vec![seq_len, intermediate_size],
+            format!("layer_{}_gate_proj", i),
+            vec![seq_len as u32, intermediate_size as u32],
             DType::F32,
             StorageClass::IoSurface,
             backend_id,
         ));
         physical_tensors.push(physical_tensor(
             TensorId(layer_id * 100 + 21),
-            format!("layer_{i}_up_proj"),
-            vec![seq_len, intermediate_size],
+            format!("layer_{}_up_proj", i),
+            vec![seq_len as u32, intermediate_size as u32],
             DType::F32,
             StorageClass::IoSurface,
             backend_id,
         ));
         physical_tensors.push(physical_tensor(
             TensorId(layer_id * 100 + 22),
-            format!("layer_{i}_down_proj"),
-            vec![seq_len, hidden_size],
+            format!("layer_{}_down_proj", i),
+            vec![seq_len as u32, hidden_size as u32],
             DType::F32,
             StorageClass::IoSurface,
             backend_id,
@@ -172,14 +185,15 @@ pub fn compile_model_to_scheduled_module(
             vec![]
         };
 
-        let state_effects = vec![StateEffect::KvCacheWrite];
+        // State effects: KV cache write
+        let state_effects = vec![crate::ecs::compiler::scheduled::StateEffect::KvCacheWrite];
 
         module.regions.push(ScheduledRegion {
             region_id: RegionId(layer_id),
-            name: format!("layer_{i}_{}", layer.attention_kind),
+            name: format!("layer_{}_{}", i, layer.attention_kind),
             operations: vec![
-                OperationId(layer_id * 10 + 1),
-                OperationId(layer_id * 10 + 2),
+                OperationId(layer_id * 10 + 1), // attention
+                OperationId(layer_id * 10 + 2), // ffn
             ],
             selected_backend: backend_id,
             physical_tensors,
@@ -206,6 +220,7 @@ pub fn compile_model_to_scheduled_module(
         .copied()
         .unwrap_or(hidden_state_bytes);
 
+    // Buffer reuse: adjacent layers' hidden inputs/outputs share storage
     let mut buffer_reuse = Vec::new();
     for i in 1..n_layers {
         let prev_out = TensorId((i - 1) * 100 + 2);
@@ -218,10 +233,11 @@ pub fn compile_model_to_scheduled_module(
     }
 
     module.memory_plan = MemoryPlan {
+        // Total runtime memory = one layer's peak + hidden state I/O (+ vocab embedding is a weight, not runtime temp)
         total_bytes: peak_layer_bytes + hidden_state_bytes,
         peak_bytes: peak_bytes.max(hidden_state_bytes),
         per_backend: {
-            let mut m: BTreeMap<BackendId, u64> = BTreeMap::new();
+            let mut m = HashMap::new();
             m.insert(BACKEND_MLX, peak_layer_bytes);
             m.insert(BACKEND_ACCELERATE, 0);
             m.insert(BACKEND_ANE, 0);
@@ -233,9 +249,9 @@ pub fn compile_model_to_scheduled_module(
 
     // ── Transfers: IOSurface ↔ backend buffers ──
     for (i, _layer) in plan.layers.iter().enumerate() {
-        let layer_id = i as u64;
-        let in_tensor_id = TensorId(layer_id * 100 + 1);
-        let out_tensor_id = TensorId(layer_id * 100 + 2);
+        let _layer_id = i as u64;
+        let in_tensor_id = TensorId(_layer_id * 100 + 1);
+        let out_tensor_id = TensorId(_layer_id * 100 + 2);
         module.transfers.push(TransferPlan {
             source: in_tensor_id,
             destination: in_tensor_id,
@@ -262,7 +278,7 @@ pub fn compile_model_to_scheduled_module(
         });
     }
 
-    // ── Evaluation boundaries (every 6 layers) ──
+    // ── Evaluation boundaries (OPT-0005: every 6 layers) ──
     let boundary_interval = 6u64;
     for start in (0..n_layers).step_by(boundary_interval as usize) {
         let end = (start + boundary_interval).min(n_layers);
@@ -299,12 +315,12 @@ pub fn estimate_layer_peak_memory(layer: &LayerPlan, arch: &TextArchitecture) ->
 fn physical_tensor(
     id: TensorId,
     name: String,
-    shape: Vec<u64>,
+    shape: Vec<u32>,
     dtype: DType,
     storage: StorageClass,
     backend: BackendId,
-) -> super::scheduled::PhysicalTensor {
-    super::scheduled::PhysicalTensor {
+) -> crate::ecs::compiler::scheduled::PhysicalTensor {
+    crate::ecs::compiler::scheduled::PhysicalTensor {
         semantic_id: id,
         name,
         shape: TensorShape { dims: shape },
@@ -320,7 +336,6 @@ fn physical_tensor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::plan::{AttentionKind, OperationRoute, RopeSpec};
 
     fn test_arch() -> TextArchitecture {
         TextArchitecture {
@@ -342,8 +357,8 @@ mod tests {
             attention_k_eq_v: false,
             final_logit_softcapping: None,
             hidden_size_per_layer_input: 3840,
-            layer_types: vec![AttentionKind::SlidingAttention; 48],
-            rope_local: RopeSpec {
+            layer_types: vec![crate::ecs::config::AttentionKind::SlidingAttention; 48],
+            rope_local: crate::ecs::config::RopeSpec {
                 theta: 500_000.0,
                 rope_type: "default".into(),
                 partial_rotary_factor: None,
@@ -381,30 +396,30 @@ mod tests {
                 attention_k_eq_v: false,
                 q_norm_enabled: false,
                 k_norm_enabled: false,
-                q_proj_tensor_id: 100 + (i as u64) * 10,
-                k_proj_tensor_id: 101 + (i as u64) * 10,
-                v_proj_tensor_id: 102 + (i as u64) * 10,
-                o_proj_tensor_id: 103 + (i as u64) * 10,
+                q_proj_tensor_id: 100 + i * 10,
+                k_proj_tensor_id: 101 + i * 10,
+                v_proj_tensor_id: 102 + i * 10,
+                o_proj_tensor_id: 103 + i * 10,
                 q_norm_tensor_id: None,
                 k_norm_tensor_id: None,
-                gate_proj_tensor_id: 104 + (i as u64) * 10,
-                up_proj_tensor_id: 105 + (i as u64) * 10,
-                down_proj_tensor_id: 106 + (i as u64) * 10,
-                input_layernorm_tensor_id: 107 + (i as u64) * 10,
-                post_attention_layernorm_tensor_id: 108 + (i as u64) * 10,
+                gate_proj_tensor_id: 104 + i * 10,
+                up_proj_tensor_id: 105 + i * 10,
+                down_proj_tensor_id: 106 + i * 10,
+                input_layernorm_tensor_id: 107 + i * 10,
+                post_attention_layernorm_tensor_id: 108 + i * 10,
                 pre_ffw_layernorm_tensor_id: None,
                 post_ffw_layernorm_tensor_id: None,
                 layer_scalar_ids: vec![],
                 quantization_ids: vec![],
-                route: OperationRoute::default(),
+                route: crate::ecs::config::operation_route::OperationRoute::default(),
                 fused_operations: Default::default(),
             });
         }
 
         ModelExecutionPlan {
-            prologue: Default::default(),
+            prologue: crate::ecs::config::ProloguePlan::default(),
             layers,
-            epilogue: Default::default(),
+            epilogue: crate::ecs::config::EpiloguePlan::default(),
             fused_ane_islands: vec![],
             hidden_size: arch.hidden_size,
             vocab_size: arch.vocab_size,
@@ -428,7 +443,7 @@ mod tests {
         let module = compile_model_to_scheduled_module(&plan, &arch, digest);
 
         assert_eq!(module.regions.len(), 48);
-        assert_eq!(module.evaluation_boundaries.len(), 8);
+        assert_eq!(module.evaluation_boundaries.len(), 8); // 48 / 6
         for region in &module.regions {
             assert!(
                 region.temp_memory_bytes > 0,
@@ -448,13 +463,14 @@ mod tests {
             !module.memory_plan.buffer_reuse.is_empty(),
             "should have buffer reuse entries"
         );
+        // Must not include O(n²) attention scores or 48× sum of peaks.
         assert!(
-            module.memory_plan.total_bytes < 10_000_000_000,
+            module.memory_plan.total_bytes < 10_000_000_000, // < 10 GB, not 50+
             "total_bytes {} should be realistic (< 10GB)",
             module.memory_plan.total_bytes
         );
         assert!(
-            module.memory_plan.total_bytes > 100_000_000,
+            module.memory_plan.total_bytes > 100_000_000, // > 100 MB
             "total_bytes {} should be non-trivial (> 100MB)",
             module.memory_plan.total_bytes
         );
@@ -466,7 +482,8 @@ mod tests {
         let plan = test_execution_plan(&arch);
         let peak = estimate_layer_peak_memory(&plan.layers[0], &arch);
         assert!(peak > 0);
-        assert!(peak > 1_000_000);
+        // For Gemma 4 with seq=8192, peak should be substantial
+        assert!(peak > 1_000_000); // > 1MB
     }
 
     #[test]

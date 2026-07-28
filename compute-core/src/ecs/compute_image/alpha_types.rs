@@ -252,4 +252,4 @@ pub struct ModelImportResult {
     pub image_path: PathBuf,
 }
 
-use crate::ecs::backend::placement::ExecutionLane;
+use prism_ecs_kernel::backend::placement::ExecutionLane;

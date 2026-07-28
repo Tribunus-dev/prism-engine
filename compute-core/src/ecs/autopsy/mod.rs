@@ -17,7 +17,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use crate::ecs::backend::routing::{BackendId, BACKEND_MLX};
+use prism_ecs_kernel::backend::routing::{BackendId, BACKEND_MLX};
 use crate::profiled_executor::LoadedProfiledModel;
 use crate::runtime_orchestration::{InMemoryCoordinationFabric, RuntimeReceipt};
 

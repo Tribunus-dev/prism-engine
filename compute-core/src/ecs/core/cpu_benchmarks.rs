@@ -5,7 +5,7 @@
 //! measure 50 timed iterations.  Standard shapes (caller is expected to supply
 //! data of these lengths): 3840 (hidden), 15360 (intermediate), 256128 (vocab).
 
-use crate::ecs::backend::accelerate_ffi::{vDSP_vadd, vDSP_vsdiv, vDSP_vsmul};
+use prism_ecs_kernel::backend::accelerate_ffi::{vDSP_vadd, vDSP_vsdiv, vDSP_vsmul};
 use serde::{Deserialize, Serialize};
 use std::hint::black_box;
 use std::time::Instant;

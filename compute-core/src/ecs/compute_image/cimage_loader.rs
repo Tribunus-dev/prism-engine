@@ -80,7 +80,7 @@ fn align64(n: u64) -> u64 {
 ///
 /// The mmap handle keeps the file pages resident. Drop it to release.
 ///
-/// [`ArenaView::from_mmap_slice`]: crate::ecs::backend::unified_arena::ArenaView::from_mmap_slice
+/// [`ArenaView::from_mmap_slice`]: prism_ecs_kernel::backend::unified_arena::ArenaView::from_mmap_slice
 /// [`AlignedMmapBuilder`]: crate::ecs::compute_image::cimage_packer::builder::AlignedMmapBuilder
 pub fn load_cimage_mmap(path: &Path) -> io::Result<(Mmap, PrismCimageHeader)> {
     let file = File::open(path)?;
@@ -1013,11 +1013,11 @@ pub fn load_heterogeneous_executor(
     )>,
     String,
 > {
-    use crate::ecs::backend::routing::{
+    use prism_ecs_kernel::backend::routing::{
         CorrectnessCheckpointPolicy, LogicalShape, OperationDescriptor, OperationId, Phase,
         TensorShape,
     };
-    use crate::ecs::backend::DType;
+    use prism_ecs_kernel::backend::DType;
     use crate::ecs::compute_image::heterogeneous::types::HeterogeneousExecutionImage;
 
     let Some(segment) = header.segment(SegmentKind::HeterogeneousImage) else {
@@ -1059,7 +1059,7 @@ pub fn load_heterogeneous_executor(
             layer_index: Some(node.phase_id as u32),
             phase: Phase::Decode,
             logical_shape: LogicalShape { dims: Vec::new() },
-            physical_layout: crate::ecs::backend::routing::PhysicalLayout::RowMajor,
+            physical_layout: prism_ecs_kernel::backend::routing::PhysicalLayout::RowMajor,
             input_dtypes: Vec::new(),
             output_dtype: DType::F32,
             quantization: None,

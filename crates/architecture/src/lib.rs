@@ -8,9 +8,11 @@
 //! engine compiler surface, the legacy engine evaluator surface,
 //! the legacy engine evolution surface, the legacy engine bitnet
 //! surface, the legacy engine LUT surface, the legacy engine models
-//! surface, or the legacy engine system surface.
+//! surface, the legacy engine system surface, or the legacy engine
+//! backend surface.
 
 pub mod workspace_legacy_assistant_graph_imports;
+pub mod workspace_legacy_backend_imports;
 pub mod workspace_legacy_bitnet_imports;
 pub mod workspace_legacy_compiler_imports;
 pub mod workspace_legacy_evaluator_imports;

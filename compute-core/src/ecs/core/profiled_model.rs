@@ -843,7 +843,7 @@ impl LoadedProfiledModel {
             crate::ecs::compiler::compile_schedule::compile_model_to_scheduled_module(
                 &reader.manifest.execution_plan,
                 &reader.manifest.architecture,
-                crate::ecs::backend::routing::EvidenceDigest(reader.manifest.image_hash.clone()),
+                prism_ecs_kernel::backend::routing::EvidenceDigest(reader.manifest.image_hash.clone()),
             ),
         );
 

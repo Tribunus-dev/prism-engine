@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 // Re-export shared lane identity from the existing placement system.
-pub use crate::ecs::backend::placement::ExecutionLane;
+pub use prism_ecs_kernel::backend::placement::ExecutionLane;
 
 // ── Hardware identity ────────────────────────────────────────────────────
 

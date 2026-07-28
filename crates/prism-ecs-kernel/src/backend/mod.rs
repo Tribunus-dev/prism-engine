@@ -16,9 +16,33 @@
 //! arrive when the engine's heterogeneous_executor splits in step 36.
 
 pub mod accelerate;
+pub mod accelerate_ffi;
+pub mod accelerate_lane;
 pub mod ane;
+pub mod authority;
+pub mod completion;
 pub mod cpu;
 pub mod dispatcher;
+pub mod evaluation;
+pub mod graph;
+pub mod intel_usm;
 pub mod legacy;
 pub mod metal;
+pub mod npu;
+pub mod placement;
+pub mod routing;
+pub mod shared_event;
+pub mod tensor_registry;
+pub mod unified_arena;
 pub mod lane_executor_registry;
+
+// Re-export trait types from prism-ecs-backend so the kernel is the
+// canonical home for the trait surface (BackendCapabilities,
+// TensorBackend, MatmulOp, RmsNormOp, RoPEOp, DType, TensorHandle,
+// QuantizedWeightHandle, EvaluationReceipt, ReadbackReceipt).
+// Engine callers that previously imported these from
+// `crate::ecs::backend::*` can now use `prism_ecs_kernel::backend::*`.
+pub use prism_ecs_backend::{
+    BackendCapabilities, DType, EvaluationReceipt, MatmulOp, QuantizedMatmulOp,
+    QuantizedWeightHandle, ReadbackReceipt, RmsNormOp, RoPEOp, TensorBackend, TensorHandle,
+};

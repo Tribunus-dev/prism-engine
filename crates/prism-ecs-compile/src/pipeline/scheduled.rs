@@ -1,20 +1,22 @@
-//! `pipeline::scheduled` — physical regions with concrete layouts.
+//! Scheduled module — physical regions with concrete layouts, placements,
+//! materializations, fusion boundaries, residency, synchronization, and
+//! backend assignment.
 //!
-//! This file owns the canonical authority for the scheduled module: physical
-//! regions with concrete layouts, placements, materializations, fusion
-//! boundaries, residency, synchronization, and backend assignment. The
-//! semantic graph in [`super::semantic::SemanticModule`] remains untouched.
+//! This is where Orion's `shape[4]` convention, fp16 IOSurface format,
+//! convolution-based linear lowering, and uniform-output constraints
+//! would appear as backend-specific lowering decisions. The semantic
+//! graph in [`super::semantic::SemanticModule`] remains untouched.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
-use prism_ecs_backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendId, EvidenceDigest, OperationFamily, OperationId, PhysicalLayout, TensorId, TensorShape,
 };
-#[cfg(test)]
-use prism_ecs_backend::routing::BACKEND_ACCELERATE;
-use prism_ecs_backend::DType;
 
-use super::fused_op::FusedOperation;
+#[cfg(test)]
+use prism_ecs_kernel::backend::routing::BACKEND_ACCELERATE;
+use prism_ecs_kernel::backend::DType;
+use crate::ecs::config::FusedOperation;
 
 // ── Physical tensor ───────────────────────────────────────────────────────
 
@@ -198,7 +200,7 @@ pub struct MemoryPlan {
     /// Peak memory at any synchronization point (bytes).
     pub peak_bytes: u64,
     /// Memory per backend.
-    pub per_backend: BTreeMap<BackendId, u64>,
+    pub per_backend: HashMap<BackendId, u64>,
     /// Tensors that share physical storage (aliased).
     pub aliases: Vec<(TensorId, TensorId)>,
     /// Buffer reuse plan.
@@ -209,11 +211,8 @@ pub struct MemoryPlan {
 /// allocation because their lifetimes don't overlap.
 #[derive(Debug, Clone)]
 pub struct BufferReuse {
-    /// First tensor sharing the allocation.
     pub tensor_a: TensorId,
-    /// Second tensor sharing the allocation.
     pub tensor_b: TensorId,
-    /// Shared allocation size in bytes.
     pub size_bytes: u64,
 }
 
@@ -267,7 +266,7 @@ impl ScheduledModule {
             memory_plan: MemoryPlan {
                 total_bytes: 0,
                 peak_bytes: 0,
-                per_backend: BTreeMap::new(),
+                per_backend: HashMap::new(),
                 aliases: Vec::new(),
                 buffer_reuse: Vec::new(),
             },

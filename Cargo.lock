@@ -4061,9 +4061,13 @@ dependencies = [
 name = "prism-ecs-kernel"
 version = "0.1.0"
 dependencies = [
+ "block",
  "half",
  "hex",
+ "libc",
  "metal 0.29.0",
+ "parking_lot",
+ "prism-ecs-backend",
  "prism-ecs-core",
  "prism-ecs-ir",
  "serde",
@@ -6608,6 +6612,7 @@ dependencies = [
  "prism-ecs-constitutional",
  "prism-ecs-core",
  "prism-ecs-ir",
+ "prism-ecs-kernel",
  "prism-ecs-quantization",
  "prism-ecs-runtime",
  "prism-kv-cache",

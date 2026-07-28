@@ -45,7 +45,7 @@ pub struct IOSurfaceSlotManifest {
     pub required_alignment: u64,
 }
 
-pub use crate::ecs::backend::placement::ExecutionLane;
+pub use prism_ecs_kernel::backend::placement::ExecutionLane;
 pub use crate::ecs::compute_image::slot_types::SlotReuseClass;
 
 /// Pool-level telemetry for IOSurface lifecycle diagnostics.

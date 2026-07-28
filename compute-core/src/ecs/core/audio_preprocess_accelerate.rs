@@ -16,7 +16,7 @@
 //! - num_mel_bins: 640
 //! - max_audio_length_s: 30
 
-use crate::ecs::backend::accelerate_ffi::{self, DSPSplitComplex, FFT_FORWARD};
+use prism_ecs_kernel::backend::accelerate_ffi::{self, DSPSplitComplex, FFT_FORWARD};
 
 // ── Gemma 4 constants ───────────────────────────────────────────────────────
 

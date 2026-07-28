@@ -28,7 +28,7 @@ pub mod plan;
 pub mod scheduled;
 pub mod semantic;
 
-use prism_ecs_backend::routing::{
+use prism_ecs_kernel::backend::routing::{
     BackendArtifactId, BackendId, EvidenceDigest, OperationId,
 };
 

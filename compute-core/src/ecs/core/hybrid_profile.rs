@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use crate::ecs::arena::DataType;
 use crate::ecs::backend::heterogeneous_executor::BackendInstance;
-use crate::ecs::backend::routing::*;
+use prism_ecs_kernel::backend::routing::*;
 use crate::ecs::backend::MlxBackend;
-use crate::ecs::backend::TensorBackend;
+use prism_ecs_kernel::backend::TensorBackend;
 use crate::ecs::memory::allocator::IosurfaceAllocator;
 
 /// Complete hybrid deployment profile.
@@ -562,7 +562,7 @@ impl HybridExecutor {
 
                     // Since Core ML bridges are not runtime-qualified,
                     // emit a stub receipt with ExplicitOperation policy.
-                    let support = crate::ecs::backend::routing::policy_support(
+                    let support = prism_ecs_kernel::backend::routing::policy_support(
                         BACKEND_ANE,
                         &EvaluationPolicy::ExplicitOperation,
                     );
@@ -598,7 +598,7 @@ impl HybridExecutor {
                     )?;
                     ane_receipt.backend = BACKEND_ANE;
                     ane_receipt.group_id = EvaluationGroupId(slot.id as u64);
-                    ane_receipt.policy_support = crate::ecs::backend::routing::policy_support(
+                    ane_receipt.policy_support = prism_ecs_kernel::backend::routing::policy_support(
                         BACKEND_ANE,
                         &EvaluationPolicy::Eager {
                             release_inputs_after_use: true,

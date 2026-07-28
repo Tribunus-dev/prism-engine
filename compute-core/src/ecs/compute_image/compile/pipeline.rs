@@ -2148,7 +2148,7 @@ pub(crate) fn emit_heterogeneous_image(
         let node = CompiledPhaseNode {
             phase_id,
             variant_set_id: 0,
-            operation_family: crate::ecs::backend::routing::OperationFamily::DecoderLayer,
+            operation_family: prism_ecs_kernel::backend::routing::OperationFamily::DecoderLayer,
             ready_condition: ReadyCondition::AllDependenciesSatisfied,
             parallel_group: None,
             priority_class: PriorityClass::Batch,
@@ -2160,7 +2160,7 @@ pub(crate) fn emit_heterogeneous_image(
     let embed_node = CompiledPhaseNode {
         phase_id: 1,
         variant_set_id: 0,
-        operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+        operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
         ready_condition: ReadyCondition::AlwaysReady,
         parallel_group: None,
         priority_class: PriorityClass::Critical,
@@ -2171,7 +2171,7 @@ pub(crate) fn emit_heterogeneous_image(
     let lm_head_node = CompiledPhaseNode {
         phase_id: loaded.arch.num_hidden_layers as u64 + 10 + 1,
         variant_set_id: 0,
-        operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+        operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
         ready_condition: ReadyCondition::AllDependenciesSatisfied,
         parallel_group: None,
         priority_class: PriorityClass::Batch,
@@ -2185,7 +2185,7 @@ pub(crate) fn emit_heterogeneous_image(
         let vision_node = CompiledPhaseNode {
             phase_id: next_id,
             variant_set_id: 0,
-            operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+            operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
             ready_condition: ReadyCondition::AllDependenciesSatisfied,
             parallel_group: None,
             priority_class: PriorityClass::Critical,
@@ -2197,7 +2197,7 @@ pub(crate) fn emit_heterogeneous_image(
             let audio_node = CompiledPhaseNode {
                 phase_id: next_id + 1,
                 variant_set_id: 0,
-                operation_family: crate::ecs::backend::routing::OperationFamily::Matmul,
+                operation_family: prism_ecs_kernel::backend::routing::OperationFamily::Matmul,
                 ready_condition: ReadyCondition::AllDependenciesSatisfied,
                 parallel_group: Some(0),
                 priority_class: PriorityClass::Critical,

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ecs::backend::routing::{BackendId, EvidenceDigest, OperationFamily, OperationId};
+use prism_ecs_kernel::backend::routing::{BackendId, EvidenceDigest, OperationFamily, OperationId};
 use crate::ecs::component::compilation::{GraphNode, GraphNodeKind, NodeId};
 use crate::ecs::config::ModelExecutionPlan;
 use prism_ecs_compile::pipeline::backend_assessment::{

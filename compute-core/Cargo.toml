@@ -19,6 +19,13 @@ prism-ecs-constitutional = { path = "../crates/prism-ecs-constitutional" }
 prism-ecs-quantization = { path = "../crates/prism-ecs-quantization" }
 prism-kv-cache = { path = "../crates/prism-kv-cache" }
 prism-ecs-backend = { path = "../crates/prism-ecs-backend" }
+# Canonical home of the kernel backend surface — Metal/ANE/Accelerate/CPU
+# per-lane executors, dispatcher, lane-executor registry, hardware
+# adapters, and the engine-side backend migration inventory. The
+# engine used to have its own parallel `ecs::backend::*` module
+# (now absorbed; see
+# `changelogs/2026-07-27-engine-subsystem-deletion-backend.md`).
+prism-ecs-kernel = { path = "../crates/prism-ecs-kernel" }
 prism-ecs-runtime = { path = "../crates/prism-ecs-runtime" }
 # Canonical home of the assistant graph surface — region declarations,
 # bridge value types, route graphs, authority policies, shared state
