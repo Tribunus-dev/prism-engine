@@ -10,7 +10,8 @@
 //! legacy engine bitnet surface, the legacy engine LUT surface, the
 //! legacy engine nf4tile640 surface, the legacy engine kv_arena
 //! surface, the legacy engine memory surface, the legacy engine models
-//! surface, the legacy engine system surface, or the legacy engine backend surface.
+//! surface, the legacy engine system surface, the legacy engine tools
+//! surface, or the legacy engine backend surface.
 
 pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_backend_imports;
@@ -26,3 +27,4 @@ pub mod workspace_legacy_memory_imports;
 pub mod workspace_legacy_models_imports;
 pub mod workspace_legacy_nf4tile640_imports;
 pub mod workspace_legacy_system_imports;
+pub mod workspace_legacy_tools_imports;
