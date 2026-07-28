@@ -26,7 +26,7 @@ use prism_ecs_kernel::backend::unified_arena::{ArenaView, MemoryBacking, Unified
 /// by the MLX benchmarks.
 #[cfg(any(target_arch = "aarch64", target_os = "macos"))]
 fn bench_accelerate_rms_norm(candidate: &KernelCandidate, n: u32) -> KernelBenchResult {
-    use crate::ecs::backend::accelerate_lane::AccelerateLane;
+    use prism_ecs_kernel::backend::accelerate_lane::AccelerateLane;
     let lane = AccelerateLane::new();
 
     let x: Vec<f32> = (0..n as usize).map(|i| (i as f32) / n as f32).collect();
@@ -79,7 +79,7 @@ fn bench_accelerate_rms_norm(candidate: &KernelCandidate, n: u32) -> KernelBench
 /// Benchmark Accelerate softmax with real vDSP/NEON execution.
 #[cfg(any(target_arch = "aarch64", target_os = "macos"))]
 fn bench_accelerate_softmax(candidate: &KernelCandidate, n: u32) -> KernelBenchResult {
-    use crate::ecs::backend::accelerate_lane::AccelerateLane;
+    use prism_ecs_kernel::backend::accelerate_lane::AccelerateLane;
     let lane = AccelerateLane::new();
 
     let logits: Vec<f32> = (0..n as usize)
@@ -134,7 +134,7 @@ fn bench_accelerate_softmax(candidate: &KernelCandidate, n: u32) -> KernelBenchR
 /// Benchmark Accelerate 4x4 matmul via NEON microkernel.
 #[cfg(any(target_arch = "aarch64", target_os = "macos"))]
 fn bench_accelerate_matmul(candidate: &KernelCandidate, k: u32) -> KernelBenchResult {
-    use crate::ecs::backend::accelerate_lane::AccelerateLane;
+    use prism_ecs_kernel::backend::accelerate_lane::AccelerateLane;
     let lane = AccelerateLane::new();
 
     // 4x4 matmul: C[4][4] = A[4][k] * B[k][4]

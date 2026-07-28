@@ -30,18 +30,43 @@ use std::path::Path;
 /// surface are violations.
 pub fn legacy_backend_importers_outside_inventory() -> Vec<String> {
     let mut importers = Vec::new();
-    scan_workspace_excluding_inventory("compute-core", &mut importers);
+    // Walk up to the workspace root so the scan finds
+    // `compute-core/` regardless of the test's CWD.
+    let workspace_root = find_workspace_root();
+    let scan_root = match workspace_root {
+        Some(root) => root.join("compute-core"),
+        None => Path::new("compute-core").to_path_buf(),
+    };
+    scan_workspace_excluding_inventory(&scan_root, &mut importers);
     importers
 }
 
 const LEGACY_INVENTORY_DIR: &str = "compute-core/src/ecs/backend";
 
-fn scan_workspace_excluding_inventory(dir: &str, importers: &mut Vec<String>) {
-    let path = Path::new(dir);
-    if !path.exists() {
+/// Walk up the directory tree from CWD until a `Cargo.toml` with a
+/// `[workspace]` section is found, or the filesystem root is reached.
+fn find_workspace_root() -> Option<std::path::PathBuf> {
+    let mut current = std::env::current_dir().ok()?;
+    loop {
+        let candidate = current.join("Cargo.toml");
+        if candidate.exists() {
+            if let Ok(content) = fs::read_to_string(&candidate) {
+                if content.contains("[workspace]") {
+                    return Some(current);
+                }
+            }
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn scan_workspace_excluding_inventory(dir: &Path, importers: &mut Vec<String>) {
+    if !dir.exists() {
         return;
     }
-    let entries = match fs::read_dir(path) {
+    let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
     };
@@ -52,8 +77,24 @@ fn scan_workspace_excluding_inventory(dir: &str, importers: &mut Vec<String>) {
         if path_str.contains(LEGACY_INVENTORY_DIR) {
             continue;
         }
+        // Skip the engine's archaeology snapshot (compute-core.legacy/)
+        // — it is never built, only preserved for archaeology.
+        if path_str.contains("compute-core/compute-core.legacy/")
+            || path_str.contains("compute-core\\compute-core.legacy\\")
+        {
+            continue;
+        }
+        // Skip the engine's integration tests directory — those tests
+        // exercise the engine's public API path
+        // (`tribunus_compute_core::backend::*`) and are a separate
+        // migration concern.
+        if path_str.contains("compute-core/tests/")
+            || path_str.contains("compute-core\\tests\\")
+        {
+            continue;
+        }
         if p.is_dir() {
-            scan_workspace_excluding_inventory(&path_str, importers);
+            scan_workspace_excluding_inventory(&p, importers);
         } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
             if let Ok(content) = fs::read_to_string(&p) {
                 if content.contains("use crate::ecs::backend::")

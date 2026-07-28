@@ -16,6 +16,8 @@
 //! arrive when the engine's heterogeneous_executor splits in step 36.
 
 pub mod accelerate;
+pub mod accelerate_ffi;
+pub mod accelerate_lane;
 pub mod ane;
 pub mod authority;
 pub mod completion;
@@ -26,6 +28,7 @@ pub mod graph;
 pub mod intel_usm;
 pub mod legacy;
 pub mod metal;
+pub mod npu;
 pub mod placement;
 pub mod routing;
 pub mod shared_event;

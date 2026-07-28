@@ -18,7 +18,7 @@
 
 use lazy_static::lazy_static;
 
-use crate::ecs::backend::npu::ffi::{NpuBuffer, TargetNpu};
+use prism_ecs_kernel::backend::npu::ffi::{NpuBuffer, TargetNpu};
 use crate::ecs::runtime::components::{WorkerLifecycle, WorkerRequestPhase};
 use crate::ecs::runtime::scheduling::access::{ComponentSet, ResourceSet};
 use crate::ecs::runtime::scheduling::command::CommandWriter;
@@ -230,7 +230,7 @@ impl ErasedSystem for NpuSubmitterSystem {
                     (t, s, ib, ob, isz, osz)
                 };
                 unsafe {
-                    crate::ecs::backend::npu::ffi::npu_submit_execution(
+                    prism_ecs_kernel::backend::npu::ffi::npu_submit_execution(
                         target, session, in_buf, out_buf, in_bytes, out_bytes,
                     )
                 }
