@@ -1,1 +1,1 @@
-pub use crate::ecs::core::crash_breadcrumb::*;
+pub use crate::ecs::legacy_core::crash_breadcrumb::*;

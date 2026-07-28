@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::replay_projection::*;
+pub use crate::ecs::legacy_core::replay_projection::*;

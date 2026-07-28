@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::executor_projection::*;
+pub use crate::ecs::legacy_core::executor_projection::*;

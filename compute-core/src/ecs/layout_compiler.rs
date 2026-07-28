@@ -1,1 +1,1 @@
-pub use crate::ecs::core::layout_compiler::*;
+pub use crate::ecs::legacy_core::layout_compiler::*;

@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::cpu_worker_pool::*;
+pub use crate::ecs::legacy_core::cpu_worker_pool::*;

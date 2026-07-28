@@ -1,1 +1,1 @@
-pub use crate::ecs::core::mlx_patch_register::*;
+pub use crate::ecs::legacy_core::mlx_patch_register::*;

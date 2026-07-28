@@ -1,1 +1,1 @@
-pub use crate::ecs::core::runtime_trace::*;
+pub use crate::ecs::legacy_core::runtime_trace::*;

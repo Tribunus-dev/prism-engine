@@ -1,1 +1,1 @@
-pub use crate::ecs::core::compute_service::*;
+pub use crate::ecs::legacy_core::compute_service::*;

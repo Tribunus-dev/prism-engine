@@ -1,1 +1,1 @@
-pub use crate::ecs::core::mapped_image::*;
+pub use crate::ecs::legacy_core::mapped_image::*;

@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::model_runtime::*;
+pub use crate::ecs::legacy_core::model_runtime::*;

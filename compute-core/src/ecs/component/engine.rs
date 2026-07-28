@@ -111,7 +111,7 @@ impl Component for EngineMetrics {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInstallState {
     /// List of installed model metadata records.
-    pub installed_models: Vec<crate::ecs::core::model_store::InstalledModel>,
+    pub installed_models: Vec<crate::ecs::legacy_core::model_store::InstalledModel>,
 }
 impl Component for ModelInstallState {}
 

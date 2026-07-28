@@ -1,1 +1,1 @@
-pub use crate::ecs::core::metrics::*;
+pub use crate::ecs::legacy_core::metrics::*;

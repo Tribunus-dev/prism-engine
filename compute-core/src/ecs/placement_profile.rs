@@ -1,1 +1,1 @@
-pub use crate::ecs::core::placement_profile::*;
+pub use crate::ecs::legacy_core::placement_profile::*;

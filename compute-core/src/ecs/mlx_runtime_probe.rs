@@ -1,1 +1,1 @@
-pub use crate::ecs::core::mlx_runtime_probe::*;
+pub use crate::ecs::legacy_core::mlx_runtime_probe::*;

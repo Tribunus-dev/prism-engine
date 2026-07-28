@@ -1,1 +1,1 @@
-pub use crate::ecs::core::compile_pipeline::*;
+pub use crate::ecs::legacy_core::compile_pipeline::*;

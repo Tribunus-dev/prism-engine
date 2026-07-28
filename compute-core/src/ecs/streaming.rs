@@ -1,1 +1,1 @@
-pub use crate::ecs::core::streaming::*;
+pub use crate::ecs::legacy_core::streaming::*;

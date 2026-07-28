@@ -9,6 +9,7 @@ pub mod capacity;
 pub mod column;
 pub mod compilation;
 pub mod component;
+pub mod core;
 pub mod entity;
 pub mod epoch;
 pub mod error;

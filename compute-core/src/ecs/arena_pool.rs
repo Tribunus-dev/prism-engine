@@ -1,1 +1,1 @@
-pub use crate::ecs::core::arena_pool::*;
+pub use crate::ecs::legacy_core::arena_pool::*;

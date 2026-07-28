@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::lora::*;
+pub use crate::ecs::legacy_core::lora::*;

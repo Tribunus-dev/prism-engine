@@ -1,1 +1,1 @@
-pub use crate::ecs::core::logging::*;
+pub use crate::ecs::legacy_core::logging::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::ane_bridge::*;
+pub use crate::ecs::legacy_core::ane_bridge::*;

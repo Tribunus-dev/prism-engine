@@ -1,1 +1,1 @@
-pub use crate::ecs::core::readiness_gates::*;
+pub use crate::ecs::legacy_core::readiness_gates::*;

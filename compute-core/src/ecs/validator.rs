@@ -1,1 +1,1 @@
-pub use crate::ecs::core::validator::*;
+pub use crate::ecs::legacy_core::validator::*;

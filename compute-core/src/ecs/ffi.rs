@@ -1,1 +1,1 @@
-pub use crate::ecs::core::ffi::*;
+pub use crate::ecs::legacy_core::ffi::*;

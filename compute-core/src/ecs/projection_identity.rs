@@ -1,1 +1,1 @@
-pub use crate::ecs::core::projection_identity::*;
+pub use crate::ecs::legacy_core::projection_identity::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::projection_executor::*;
+pub use crate::ecs::legacy_core::projection_executor::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::engine_receipts::*;
+pub use crate::ecs::legacy_core::engine_receipts::*;

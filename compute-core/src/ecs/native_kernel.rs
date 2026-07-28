@@ -1,1 +1,1 @@
-pub use crate::ecs::core::native_kernel::*;
+pub use crate::ecs::legacy_core::native_kernel::*;

@@ -1183,7 +1183,7 @@ pub fn classify_workload(req: &GenerationRequest) -> crate::model_runtime::Workl
 #[cfg(test)]
 mod qualification_budget_tests {
     #[cfg(feature = "mlx-backend")]
-    use crate::ecs::core::engine_policy;
+    use crate::ecs::legacy_core::engine_policy;
 
     #[cfg(feature = "mlx-backend")]
     #[test]

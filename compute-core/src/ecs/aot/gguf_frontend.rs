@@ -14,7 +14,7 @@ use crate::ecs::canonical::model_ir::{
     SourceType, TensorCatalogue, TensorDescriptor, TensorId, TokenizerDescriptor,
 };
 #[cfg(feature = "prism-backend")]
-use crate::ecs::core::gguf;
+use crate::ecs::legacy_core::gguf;
 #[cfg(feature = "prism-backend")]
 use std::collections::HashMap;
 #[cfg(feature = "prism-backend")]

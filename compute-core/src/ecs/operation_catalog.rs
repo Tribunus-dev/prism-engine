@@ -1,1 +1,1 @@
-pub use crate::ecs::core::operation_catalog::*;
+pub use crate::ecs::legacy_core::operation_catalog::*;

@@ -1,1 +1,1 @@
-pub use crate::ecs::core::pipeline_parity::*;
+pub use crate::ecs::legacy_core::pipeline_parity::*;

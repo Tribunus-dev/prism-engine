@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::image_provider::*;
+pub use crate::ecs::legacy_core::image_provider::*;

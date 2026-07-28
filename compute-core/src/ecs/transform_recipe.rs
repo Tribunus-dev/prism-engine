@@ -1,1 +1,1 @@
-pub use crate::ecs::core::transform_recipe::*;
+pub use crate::ecs::legacy_core::transform_recipe::*;

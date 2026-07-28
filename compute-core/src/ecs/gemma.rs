@@ -1,2 +1,2 @@
 #[cfg(feature = "mlx-backend")]
-pub use crate::ecs::core::gemma::*;
+pub use crate::ecs::legacy_core::gemma::*;

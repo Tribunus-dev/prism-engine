@@ -56,7 +56,11 @@ pub mod config_namespace;
 // `changelogs/2026-07-25-compute-core-absorption-phase-0-1.md`.
 pub mod contracts;
 pub mod copy_ledger;
-pub mod core;
+// `core/` was deleted in the core engine-subsystem deletion
+// migration (2026-07-27); the 121 files now live in `legacy_core/`
+// as engine-internal types awaiting their constitutional re-homing.
+// See `changelogs/2026-07-27-engine-subsystem-deletion-core.md`.
+pub mod legacy_core;
 pub mod coreai;
 pub mod coreai_audit;
 pub mod coreai_bridge;
