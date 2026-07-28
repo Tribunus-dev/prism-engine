@@ -462,7 +462,6 @@ pub use crate::ecs::core::worker_dispatch;
 ))]
 pub use crate::ecs::core::worker_memory;
 pub use crate::ecs::core::worker_protocol;
-pub use crate::ecs::nf4tile640;
 pub use prism_ecs_quantization;
 pub use crate::ecs::reasoning_evidence;
 #[cfg(any(feature = "mlx-backend", feature = "prism-backend"))]
