@@ -5,23 +5,25 @@
 //! their own callers; only a workspace-level test can check
 //! "no file in the workspace imports the legacy engine scheduling
 //! surface", the legacy engine assistant_graph surface, the legacy
-//! engine compiler surface, the legacy engine compilation surface,
-//! the legacy engine compute_image_compile surface, the legacy
-//! engine core surface, the legacy
-//! engine evaluator surface, the legacy engine evolution surface, the
-//! legacy engine bitnet surface, the legacy engine LUT surface, the
-//! legacy engine nf4tile640 surface, the legacy engine kv_arena
-//! surface, the legacy engine memory surface, the legacy engine cimage
-//! surface, the legacy engine models surface, the legacy engine runtime
-//! surface, the legacy engine system surface, the legacy engine
-//! decode_attribution surface, the legacy engine tools surface, the
-//! legacy engine compute_image_core surface, the legacy engine
-//! compute_image_compile surface, the legacy engine compute_image_runtime
-//! surface, or the legacy engine backend surface.
+//! engine canonical surface, the legacy engine compiler surface,
+//! the legacy engine compilation surface, the legacy engine
+//! compute_image_compile surface, the legacy engine core surface,
+//! the legacy engine evaluator surface, the legacy engine evolution
+//! surface, the legacy engine bitnet surface, the legacy engine LUT
+//! surface, the legacy engine nf4tile640 surface, the legacy engine
+//! kv_arena surface, the legacy engine memory surface, the legacy
+//! engine cimage surface, the legacy engine models surface, the
+//! legacy engine runtime surface, the legacy engine system surface,
+//! the legacy engine decode_attribution surface, the legacy engine
+//! tools surface, the legacy engine compute_image_core surface, the
+//! legacy engine compute_image_compile surface, the legacy engine
+//! compute_image_runtime surface, or the legacy engine backend
+//! surface.
 
 pub mod workspace_legacy_assistant_graph_imports;
 pub mod workspace_legacy_backend_imports;
 pub mod workspace_legacy_bitnet_imports;
+pub mod workspace_legacy_canonical_imports;
 pub mod workspace_legacy_cimage_imports;
 pub mod workspace_legacy_compilation_imports;
 pub mod workspace_legacy_compute_image_core_imports;
