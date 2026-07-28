@@ -14,7 +14,7 @@ use std::process::Command;
 use std::time::Instant;
 
 #[cfg(feature = "prism-backend")]
-use tribunus_compute_core::compute_image::orchestrator::Orchestrator;
+use tribunus_compute_core::compute_image::legacy_compute_image_compile_orchestrator::Orchestrator;
 
 #[derive(Parser)]
 struct Args {

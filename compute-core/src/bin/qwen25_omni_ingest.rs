@@ -8,7 +8,7 @@
 use std::path::Path;
 use std::time::Instant;
 
-use tribunus_compute_core::compute_image::compile::ternary::{
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::ternary::{
     CimageHeader, SegmentEntry, SegmentKind, CIMAGE_SEGMENT_CAPACITY,
 };
 
@@ -154,7 +154,7 @@ fn main() {
     // ── Step 2: Quantize decoder weights ──────────────────────────
     println!("\n  Step 2: Ternary quantization of Thinker LM weights...");
 
-    use tribunus_compute_core::compute_image::compile::ternary::ternary_quantize_block;
+    use tribunus_compute_core::compute_image::legacy_compute_image_compile::ternary::ternary_quantize_block;
 
     let mut all_weights = Vec::new();
     let mut all_scales = Vec::new();
@@ -210,7 +210,7 @@ fn main() {
                                 for j in 0..sb_n {
                                     let bo = (r * cols + c_start + sb_start + j) * 2;
                                     let bf16 = u16::from_le_bytes([raw[bo], raw[bo + 1]]);
-                                    blk[j] = tribunus_compute_core::compute_image::compile::ternary::fp16_to_f32(bf16.to_le_bytes());
+                                    blk[j] = tribunus_compute_core::compute_image::legacy_compute_image_compile::ternary::fp16_to_f32(bf16.to_le_bytes());
                                 }
                                 // Zero-fill trailing elements in the block
                                 for j in sb_n..256 {

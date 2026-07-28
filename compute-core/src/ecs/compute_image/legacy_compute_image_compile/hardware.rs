@@ -735,10 +735,10 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&tmp_dir).ok();
-        let candidates = crate::ecs::compute_image::compile::coreai::candidate_subgraphs();
+        let candidates = crate::ecs::compute_image::legacy_compute_image_compile::coreai::candidate_subgraphs();
         let mut decompositions = Vec::new();
         for (name, ops) in &candidates {
-            let decomp = crate::ecs::compute_image::compile::coreai::decompose_subgraph(
+            let decomp = crate::ecs::compute_image::legacy_compute_image_compile::coreai::decompose_subgraph(
                 name,
                 ops,
                 &concurrency,
@@ -750,7 +750,7 @@ pub fn run_hardware_assessment() -> AssessmentReceipt {
                 decomp.accelerate_ops.len()
             );
             if !decomp.coreai_ops.is_empty() {
-                match crate::ecs::compute_image::compile::coreai::compile_subgraph(
+                match crate::ecs::compute_image::legacy_compute_image_compile::coreai::compile_subgraph(
                     name,
                     &decomp.coreai_ops,
                     &std::collections::HashMap::from([

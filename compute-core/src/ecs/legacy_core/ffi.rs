@@ -38,7 +38,7 @@ use crate::ecs::compute_image::cimage_packer::pipeline::compile_and_pack_god_bin
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-use crate::ecs::compute_image::compile::source::load_source;
+use crate::ecs::compute_image::legacy_compute_image_compile::source::load_source;
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",

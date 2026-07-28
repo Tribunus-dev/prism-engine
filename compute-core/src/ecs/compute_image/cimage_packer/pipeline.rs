@@ -3,21 +3,21 @@
 use super::archive::archive_mlmodelc_to_mmap;
 use super::builder::AlignedMmapBuilder;
 use super::layout::{predict_tar_size, CImageLayoutPlan, CImageTopologyTable};
-use crate::ecs::compute_image::compile::execution_graph::{
+use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{
     AttentionKind as GraphAttentionKind, CompactionEpoch, DeviceCapability, DraftSubGraph,
     ExecutionGraphDescriptor, LayerExecutionNode, NodeKind,
 };
-use crate::ecs::compute_image::compile::source::LoadedSource;
-use crate::ecs::compute_image::compile::source::{source_tensor_byte_len, source_tensor_view};
-use crate::ecs::compute_image::compile::ternary::model_artifact_tag;
-use crate::ecs::compute_image::compile::ternary::{
+use crate::ecs::compute_image::legacy_compute_image_compile::source::LoadedSource;
+use crate::ecs::compute_image::legacy_compute_image_compile::source::{source_tensor_byte_len, source_tensor_view};
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::model_artifact_tag;
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
     CimageHeader, LayerDirectoryEntry, ModelArtifactEntry, SegmentEntry, SegmentKind,
     CIMAGE_SEGMENT_CAPACITY,
 };
-use crate::ecs::compute_image::compile::ternary::{
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{
     QUANT_SCHEMA_NF4_TILE640, QUANT_SCHEMA_TERNARY_TILE640,
 };
-use crate::ecs::compute_image::compile::tts_compile::pack_tts_weights;
+use crate::ecs::compute_image::legacy_compute_image_compile::tts_compile::pack_tts_weights;
 use crate::ecs::compute_image::manifest::Manifest;
 use crate::ecs::compute_image::manifest::SharedWeightLayout;
 use crate::ecs::compute_image::multimodal::descriptor::{
@@ -468,7 +468,7 @@ fn synthesize_execution_graph_for_loaded(loaded: &LoadedSource) -> Option<Vec<u8
 
     Some(
         ExecutionGraphDescriptor {
-            magic: crate::ecs::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
+            magic: crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::EXECUTION_GRAPH_MAGIC,
             version: 1,
             num_layers: main_entries.len().min(u16::MAX as usize) as u16,
             num_draft_layers: draft_entries.len().min(u16::MAX as usize) as u16,
@@ -574,7 +574,7 @@ fn stream_ternary_segment_to_mmap_gpu(
     mmap_base: *mut u8,
     segment_file_offset: u64,
 ) -> crate::Result<u64> {
-    use crate::ecs::compute_image::compile::try_ternary_tile640_pack_gpu;
+    use crate::ecs::compute_image::legacy_compute_image_compile::try_ternary_tile640_pack_gpu;
 
     let mut tensor_cursor = 0u64;
     for binding_name in weight_names {
@@ -583,7 +583,7 @@ fn stream_ternary_segment_to_mmap_gpu(
                 continue;
             };
             for mmap in &loaded.mmap_bytes {
-                crate::ecs::compute_image::compile::source::ensure_tensor_loaded(entry, mmap);
+                crate::ecs::compute_image::legacy_compute_image_compile::source::ensure_tensor_loaded(entry, mmap);
                 if !entry.data.is_empty() {
                     break;
                 }
@@ -630,7 +630,7 @@ fn stream_nf4_segment_to_mmap_gpu(
     scales_segment_offset: u64,
     biases_segment_offset: u64,
 ) -> crate::Result<u64> {
-    use crate::ecs::compute_image::compile::{
+    use crate::ecs::compute_image::legacy_compute_image_compile::{
         nf4_tile640_pack_layout, try_nf4_tile640_pack_gpu_to_output, Nf4Tile640MmapOutput,
     };
 
@@ -644,7 +644,7 @@ fn stream_nf4_segment_to_mmap_gpu(
                 continue;
             };
             for mmap in &loaded.mmap_bytes {
-                crate::ecs::compute_image::compile::source::ensure_tensor_loaded(entry, mmap);
+                crate::ecs::compute_image::legacy_compute_image_compile::source::ensure_tensor_loaded(entry, mmap);
                 if !entry.data.is_empty() {
                     break;
                 }
@@ -726,7 +726,7 @@ pub(crate) fn compile_and_pack_god_binary(
     const SEG_MM_PROJ_BIASES: usize = 18;
 
     if matches!(qmode, CompileQuantMode::Nf4Tile640 { .. }) {
-        crate::ecs::compute_image::compile::apply_quantize_to_loaded(loaded, qmode)
+        crate::ecs::compute_image::legacy_compute_image_compile::apply_quantize_to_loaded(loaded, qmode)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
     }
 
@@ -1005,7 +1005,7 @@ pub(crate) fn compile_and_pack_god_binary(
                     std::io::Error::other(format!("missing vocabulary tensor {}", embed_key))
                 })?;
                 for mmap in &loaded.mmap_bytes {
-                    crate::ecs::compute_image::compile::source::ensure_tensor_loaded(st, mmap);
+                    crate::ecs::compute_image::legacy_compute_image_compile::source::ensure_tensor_loaded(st, mmap);
                     if !st.data.is_empty() {
                         break;
                     }
@@ -1013,14 +1013,14 @@ pub(crate) fn compile_and_pack_god_binary(
                 std::mem::take(&mut st.data)
             };
             if !raw_bytes.is_empty() {
-                crate::ecs::compute_image::compile::try_nf4_tile640_pack_gpu_to_output(
+                crate::ecs::compute_image::legacy_compute_image_compile::try_nf4_tile640_pack_gpu_to_output(
                     loaded,
                     embed_key,
                     &raw_bytes,
                     &vocab_dtype,
                     vocab_out_dim,
                     vocab_in_dim,
-                    Some(crate::ecs::compute_image::compile::Nf4Tile640MmapOutput {
+                    Some(crate::ecs::compute_image::legacy_compute_image_compile::Nf4Tile640MmapOutput {
                         mmap_base: mmap_capture,
                         weights_offset: plan.vocabulary.offset,
                         scales_offset: plan.vocabulary.offset + weight_len,
@@ -1039,7 +1039,7 @@ pub(crate) fn compile_and_pack_god_binary(
         let raw_bytes: Vec<u8> = {
             let st = loaded.source_tensors.get_mut(embed_key).unwrap();
             for mmap in &loaded.mmap_bytes {
-                crate::ecs::compute_image::compile::source::ensure_tensor_loaded(st, mmap);
+                crate::ecs::compute_image::legacy_compute_image_compile::source::ensure_tensor_loaded(st, mmap);
                 if !st.data.is_empty() {
                     break;
                 }
@@ -1074,7 +1074,7 @@ pub(crate) fn compile_and_pack_god_binary(
         let gpu_done = {
             let mmap_base = mmap_capture;
             let vocab_file_offset = plan.vocabulary.offset;
-            let result = crate::ecs::compute_image::compile::try_ternary_tile640_pack_gpu(
+            let result = crate::ecs::compute_image::legacy_compute_image_compile::try_ternary_tile640_pack_gpu(
                 loaded,
                 embed_key,
                 &raw_bytes,
@@ -1106,7 +1106,7 @@ pub(crate) fn compile_and_pack_god_binary(
                         let bf_bits = (bits as u32) << 16;
                         f32::from_bits(bf_bits)
                     } else {
-                        crate::ecs::compute_image::compile::half_to_f32(bits)
+                        crate::ecs::compute_image::legacy_compute_image_compile::half_to_f32(bits)
                     }
                 })
                 .collect();
@@ -2265,7 +2265,7 @@ fn synthesize_execution_graph(manifest: &Manifest) -> Option<Vec<u8>> {
 
     Some(
         ExecutionGraphDescriptor {
-            magic: crate::ecs::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
+            magic: crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::EXECUTION_GRAPH_MAGIC,
             version: 1,
             num_layers: manifest.architecture.num_hidden_layers.min(u16::MAX as u32) as u16,
             num_draft_layers: manifest
@@ -3270,7 +3270,7 @@ mod tests {
     #[test]
     fn execution_graph_multimodal_nodes_pick_up_descriptor_offsets() {
         let mut graph = ExecutionGraphDescriptor {
-            magic: crate::ecs::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
+            magic: crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::EXECUTION_GRAPH_MAGIC,
             version: 1,
             num_layers: 0,
             num_draft_layers: 0,

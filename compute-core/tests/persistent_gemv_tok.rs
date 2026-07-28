@@ -12,7 +12,7 @@
 
 use metal::*;
 use std::time::Instant;
-use tribunus_compute_core::compute_image::compile::int4_pack::quantize_to_ternary_block32;
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::int4_pack::quantize_to_ternary_block32;
 use tribunus_compute_core::compute_image::megakernel::{
     PERSISTENT_GEMV_ROWS_PER_TG, PERSISTENT_GEMV_SRC, PERSISTENT_GEMV_THREADS_PER_TG,
 };

@@ -17,13 +17,13 @@ use metal::*;
 use parking_lot::Mutex;
 use rand::Rng;
 use std::sync::Arc;
-use tribunus_compute_core::compute_image::compile::kernel_dispatch::{
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::kernel_dispatch::{
     Int8Tile640GEMVDispatcher, Int8Tile640Offsets, Nf4ScaledReductionTile640Dispatcher,
     Nf4ScaledReductionTile640Offsets, Nf4Tile640Offsets, Nf4Tile640ProjectionDispatcher,
     RegistryRef,
 };
-use tribunus_compute_core::compute_image::compile::kernel_registry::KernelRegistry;
-use tribunus_compute_core::compute_image::compile::kernel_types::{
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::kernel_registry::KernelRegistry;
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::kernel_types::{
     KernelReceipt, ProjectionParams,
 };
 use prism_ecs_quantization::nf4tile640::{

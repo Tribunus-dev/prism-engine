@@ -4,7 +4,7 @@
 //! Authority and shape live in
 //! `prism_ecs_constitutional::compilation::observation::CompileProgress`.
 //! This module re-exports it so engine consumers (e.g.
-//! `compute_image::plan`, `compute_image::compile::pipeline`) that
+//! `compute_image::plan`, `compute_image::legacy_compute_image_compile::pipeline`) that
 //! import `crate::compile_progress::CompileProgress` continue to
 //! compile without a find/replace churn.
 //!

@@ -8,11 +8,11 @@ use super::emit::{
 use crate::ecs::canonical::kernel_abi::KernelSemanticId;
 use crate::ecs::compute_image::cimage_packer::pack_cimage_from_dir;
 use crate::ecs::compute_image::compatibility::CompatibilityMatrix;
-use crate::ecs::compute_image::compile::hardware::run_hardware_assessment;
-use crate::ecs::compute_image::compile::quantize::apply_quantize_to_loaded;
+use crate::ecs::compute_image::legacy_compute_image_compile::hardware::run_hardware_assessment;
+use crate::ecs::compute_image::legacy_compute_image_compile::quantize::apply_quantize_to_loaded;
 #[cfg(feature = "prism-backend")]
-use crate::ecs::compute_image::compile::source::load_gguf_source;
-use crate::ecs::compute_image::compile::source::{
+use crate::ecs::compute_image::legacy_compute_image_compile::source::load_gguf_source;
+use crate::ecs::compute_image::legacy_compute_image_compile::source::{
     diff_tensors, ensure_tensor_loaded, LoadedSource,
 };
 use crate::ecs::compute_image::hw_assessment::AssessmentReceipt;

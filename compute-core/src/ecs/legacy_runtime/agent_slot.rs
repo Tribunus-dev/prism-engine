@@ -95,7 +95,7 @@ impl MultiplexerState {
     pub fn init_from_cimage(
         &mut self,
         mmap: Arc<memmap2::Mmap>,
-        header: &crate::ecs::compute_image::compile::ternary::CimageHeader,
+        header: &crate::ecs::compute_image::legacy_compute_image_compile::ternary::CimageHeader,
         hidden_dim: u32,
         intermediate_dim: u32,
     ) {
@@ -108,7 +108,7 @@ impl MultiplexerState {
         let rows_per_agent = (max_out + 31) / 32;
         let cols = intermediate_dim.max(hidden_dim) as usize;
         let slc_size =
-            crate::ecs::compute_image::compile::ternary::swizzled_buffer_size(rows_per_agent, cols);
+            crate::ecs::compute_image::legacy_compute_image_compile::ternary::swizzled_buffer_size(rows_per_agent, cols);
         let mut buf = vec![0u8; slc_size];
         self.slc_buf_ptr = Some(buf.as_mut_ptr());
         self.slc_buf = Some(buf);

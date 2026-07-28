@@ -3,7 +3,7 @@
 //! source identity / manifest hash for deterministic compilation.
 #![allow(dead_code)]
 
-use crate::ecs::compute_image::compile::source::{source_tensor_view, SourceTensor};
+use crate::ecs::compute_image::legacy_compute_image_compile::source::{source_tensor_view, SourceTensor};
 use crate::ecs::compute_image::manifest::{
     Manifest, Nf4Tile640Layout, QuantizationDesc, QuantizationProfileEntry,
     QuantizationQualityStatus, SegmentKind, ShardHash, SharedWeightLayout, SourceIdentity,

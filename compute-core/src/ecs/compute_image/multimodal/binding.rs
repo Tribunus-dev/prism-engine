@@ -7,8 +7,8 @@
 ))]
 
 use crate::ecs::compute_image::cimage_loader::CimageDeployment;
-use crate::ecs::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
-use crate::ecs::compute_image::compile::ternary::{verify_cimage, SegmentEntry, SegmentKind};
+use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{verify_cimage, SegmentEntry, SegmentKind};
 use crate::ecs::compute_image::multimodal::{
     MultimodalArtifactSummary, MultimodalCapabilities, MultimodalInputDescriptorV1,
     ProjectionPrecision, ProjectionRole, ProjectionTensorRecord,
@@ -137,7 +137,7 @@ impl SealedMultimodalBindings {
 
     pub fn validate_node_binding(
         &self,
-        node: &crate::ecs::compute_image::compile::execution_graph::LayerExecutionNode,
+        node: &crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::LayerExecutionNode,
     ) -> Result<&ProjectionTensorBinding, String> {
         let node_kind = match node.node_kind {
             x if x == NodeKind::VisionPatchEmbed as u8 => NodeKind::VisionPatchEmbed,
@@ -423,10 +423,10 @@ fn is_audio_role(role: ProjectionRole) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ecs::compute_image::compile::execution_graph::{
+    use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{
         DeviceCapability, ExecutionGraphDescriptor, LayerExecutionNode, NodeKind,
     };
-    use crate::ecs::compute_image::compile::ternary::CIMAGE_SEGMENT_CAPACITY;
+    use crate::ecs::compute_image::legacy_compute_image_compile::ternary::CIMAGE_SEGMENT_CAPACITY;
     use crate::ecs::compute_image::multimodal::MULTIMODAL_DESCRIPTOR_MAGIC;
 
     fn make_descriptor() -> MultimodalInputDescriptorV1 {
@@ -768,7 +768,7 @@ mod tests {
         .expect("bindings");
 
         let graph = ExecutionGraphDescriptor {
-            magic: crate::ecs::compute_image::compile::execution_graph::EXECUTION_GRAPH_MAGIC,
+            magic: crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::EXECUTION_GRAPH_MAGIC,
             version: 1,
             num_layers: 1,
             num_draft_layers: 0,

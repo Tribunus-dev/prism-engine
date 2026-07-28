@@ -541,7 +541,7 @@ fn cmd_build_ecs(args: &[String]) -> Result<(), String> {
     use std::fs;
     use std::fs::File;
     use std::path::Path;
-    use tribunus_compute_core::compute_image::compile::capability_registry::CapabilityRegistry;
+    use tribunus_compute_core::compute_image::legacy_compute_image_compile::capability_registry::CapabilityRegistry;
     use tribunus_compute_core::quantization::admission::compute_weight_nrmse;
     use tribunus_compute_core::quantization::contract::QuantizationValidationProfile;
     use tribunus_compute_core::quantization::contract::{BackendKind, CanonicalShape};

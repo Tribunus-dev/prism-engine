@@ -23,7 +23,7 @@
 //! | `tts_codec_weight.bin`        | TtsCodecWeight   (36)  |
 //! | `tts_codebook.bin`            | TtsCodebook      (37)  |
 
-use crate::ecs::compute_image::compile::quantize::quantize_nf4_tile640_matrix_from_raw;
+use crate::ecs::compute_image::legacy_compute_image_compile::quantize::quantize_nf4_tile640_matrix_from_raw;
 use crate::ecs::compute_image::manifest::TensorEntry;
 use std::collections::HashMap;
 use std::path::Path;

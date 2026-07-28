@@ -508,7 +508,7 @@ pub fn meta_str<'a>(metadata: &'a [(String, String)], key: &str) -> Option<&'a s
 /// 4. Returns a GgufImportResult that feeds into compile_sequential()
 ///
 /// The actual compilation happens when the result is passed to the
-/// compute_image::compile pipeline.
+/// compute_image::legacy_compute_image_compile pipeline.
 pub fn import_gguf_model(path: &Path) -> Result<GgufImportResult, String> {
     let (metadata, tensor_inventory) = parse_gguf_header(path)?;
 

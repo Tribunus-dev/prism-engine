@@ -19,12 +19,12 @@ use crate::arena::DataType;
 use crate::coreai_bridge::{CoreAiComputeUnits, CoreAiModel};
 use crate::ecs::compute_image::cimage_loader::CimageDeployment;
 use crate::ecs::compute_image::compaction;
-use crate::ecs::compute_image::compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
-use crate::ecs::compute_image::compile::kernel_dispatch::{
+use crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::{ExecutionGraphDescriptor, NodeKind};
+use crate::ecs::compute_image::legacy_compute_image_compile::kernel_dispatch::{
     Nf4Tile640Offsets, Nf4Tile640ProjectionDispatcher,
 };
-use crate::ecs::compute_image::compile::kernel_registry::KernelRegistry;
-use crate::ecs::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
+use crate::ecs::compute_image::legacy_compute_image_compile::kernel_registry::KernelRegistry;
+use crate::ecs::compute_image::legacy_compute_image_compile::kernel_types::{KernelReceipt, ProjectionParams};
 pub use crate::ecs::compute_image::megakernel::kernels::TapMode;
 use crate::ecs::compute_image::megakernel::{KernelBuffers, Megakernel};
 use crate::ecs::compute_image::megakernel::{MAX_DRAFT_CANDIDATES, NUM_MTP_HEADS};
@@ -287,7 +287,7 @@ impl Orchestrator {
     /// path.
     pub fn run_nf4_multimodal_node(
         &self,
-        node: &crate::ecs::compute_image::compile::execution_graph::LayerExecutionNode,
+        node: &crate::ecs::compute_image::legacy_compute_image_compile::execution_graph::LayerExecutionNode,
         input: &[f32],
     ) -> Result<Vec<f32>, String> {
         let bindings = SealedMultimodalBindings::from_deployment(&self.deployment)?;

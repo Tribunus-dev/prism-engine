@@ -10,12 +10,12 @@
 //! unbounded beam search, and no full block autograd graph.
 
 #[cfg(feature = "metal-dispatch")]
-use crate::ecs::compute_image::compile::kernel_dispatch::{
+use crate::ecs::compute_image::legacy_compute_image_compile::kernel_dispatch::{
     create_dispatchers, RegistryRef, TernaryProjectionDispatcher,
 };
 #[cfg(feature = "metal-dispatch")]
-use crate::ecs::compute_image::compile::kernel_types::{KernelReceipt, ProjectionParams};
-use crate::ecs::compute_image::compile::ternary_pipeline::{quantize_tensor, QuantConfig};
+use crate::ecs::compute_image::legacy_compute_image_compile::kernel_types::{KernelReceipt, ProjectionParams};
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary_pipeline::{quantize_tensor, QuantConfig};
 #[cfg(feature = "metal-dispatch")]
 use half;
 

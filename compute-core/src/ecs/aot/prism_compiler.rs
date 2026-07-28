@@ -179,7 +179,7 @@ impl PrismCompiler {
                 .and_then(crate::ecs::config::CompileQuantMode::from_name);
 
             let (_compiled_image, mut outcome) =
-                crate::ecs::compute_image::compile::compile_gguf_to_canonical(
+                crate::ecs::compute_image::legacy_compute_image_compile::compile_gguf_to_canonical(
                     &request.source_path,
                     &output_dir,
                     quant_mode,
@@ -305,7 +305,7 @@ impl PrismCompiler {
             .as_deref()
             .and_then(|s| parse_hardware_target(Some(s)));
 
-        let compiled_image = crate::ecs::compute_image::compile::compile_gguf_speculative(
+        let compiled_image = crate::ecs::compute_image::legacy_compute_image_compile::compile_gguf_speculative(
             &request.source_path,
             draft_path,
             &output_dir,
@@ -374,7 +374,7 @@ impl PrismCompiler {
         let metal_path = request.metallib_path.as_deref();
         let mlx_cap = request.mlx_capture_dir.as_deref();
 
-        let compiled_image = crate::ecs::compute_image::compile::compile_gguf_with_authority(
+        let compiled_image = crate::ecs::compute_image::legacy_compute_image_compile::compile_gguf_with_authority(
             &request.source_path,
             &output_dir,
             authority,

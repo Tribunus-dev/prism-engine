@@ -604,7 +604,7 @@ fn run_parity_stage(
     total_blocks: usize,
 ) -> Result<Option<(ParityRun, String, PathBuf, CalibrationStream)>, String> {
     use prism_ecs_compile::compilation::level1::kd_gate::validate_token_taps;
-    use crate::ecs::compute_image::orchestrator::Orchestrator;
+    use crate::ecs::compute_image::legacy_compute_image_compile_orchestrator::Orchestrator;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let Some(golden_dir) = request.parity_golden_dir.as_ref() else {
@@ -757,7 +757,7 @@ fn build_profile() -> String {
 /// artifact actually seals (kernels/MULTIMODAL_NF4_BIAS_ABI.md). Returns the
 /// residency string for the operational receipt.
 fn check_bias_policy(request: &DistillationRequest) -> Result<String, (FailureClass, String)> {
-    use crate::ecs::compute_image::compile::ternary::{verify_cimage, SegmentKind};
+    use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{verify_cimage, SegmentKind};
     let policy = request.multimodal_bias_policy.as_deref().unwrap_or("auto");
     if !matches!(policy, "auto" | "require-resident" | "zero-only") {
         return Err((

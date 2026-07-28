@@ -7,7 +7,7 @@
 //! isolation for the RawF32 (RuntimeRepresentationClass::RawF32 = 3) path.
 
 use tribunus_compute_core::compute_image::cimage_loader::validate_binding;
-use tribunus_compute_core::compute_image::compile::ternary::MatrixWeightBindingV1;
+use tribunus_compute_core::compute_image::legacy_compute_image_compile::ternary::MatrixWeightBindingV1;
 use tribunus_compute_core::quantization::admission::{pack_candidate, reconstruct_candidate};
 use tribunus_compute_core::quantization::contract::{
     validate_source_layout, RuntimeRepresentationClass, SourceMatrixLayout, TileMacroLayout,

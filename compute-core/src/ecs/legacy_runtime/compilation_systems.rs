@@ -11,9 +11,9 @@ use crate::ecs::legacy_cimage::generation_api::{GenerationApi, PromotionEvidence
 use prism_ecs_compile::compilation::distill_core::{
     on_policy_refine, RefinementConfig, TemperatureSchedule,
 };
-use crate::ecs::compute_image::compile::capability_registry::CapabilityRegistry;
-use crate::ecs::compute_image::compile::ternary::MatrixWeightBindingV1;
-pub use crate::ecs::compute_image::compile::ternary::ModelConfig;
+use crate::ecs::compute_image::legacy_compute_image_compile::capability_registry::CapabilityRegistry;
+use crate::ecs::compute_image::legacy_compute_image_compile::ternary::MatrixWeightBindingV1;
+pub use crate::ecs::compute_image::legacy_compute_image_compile::ternary::ModelConfig;
 use prism_ecs_ir::evolution::receipts::{NumericalReceipt, PerformanceReceipt};
 use crate::ecs::runtime::ecs_components::{
     CodesData, CompilationPhase, CompilationStatus, ReconstructedWeights, RefinementOutcome,
@@ -478,7 +478,7 @@ pub fn refine_tensors(world: &mut World) {
 /// produce the sealed binary.  The result is stored as a `SealedCimage`
 /// resource on the World.
 pub fn seal_cimage(world: &mut World, model_config: ModelConfig) {
-    use crate::ecs::compute_image::compile::ternary::{build_cimage, CompiledTensor};
+    use crate::ecs::compute_image::legacy_compute_image_compile::ternary::{build_cimage, CompiledTensor};
 
     let entities: Vec<Entity> = world.iter_entities_with::<TensorBinding>().collect();
     let mut tensors = Vec::with_capacity(entities.len());

@@ -1,6 +1,6 @@
 //! Vision model compilation pipeline.
 //!
-//! Mirrors [`crate::ecs::compute_image::compile::pipeline::compile_sequential`] but
+//! Mirrors [`crate::ecs::compute_image::legacy_compute_image_compile::pipeline::compile_sequential`] but
 //! for vision weights: extracts tensor data from safetensors, optionally packages
 //! an ANE program archive, and writes a portable cimage manifest to disk.
 

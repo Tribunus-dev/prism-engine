@@ -10,7 +10,7 @@
 //! Q/K/V/O/Gate/Up/Down projections and pack them into `draft_fused_w` for
 //! the Metal speculator kernel.
 
-use crate::ecs::compute_image::compile::int4_pack;
+use crate::ecs::compute_image::legacy_compute_image_compile::int4_pack;
 use std::path::Path;
 /// Log target for draft loader diagnostics.
 const LOG_TARGET: &str = "draft_loader";

@@ -40,7 +40,7 @@ fn mlx_quantize_reference(matrix: &[f32], rows: u32, cols: u32) -> (Array, Array
 /// Tribunus compiler quantization reference.
 #[allow(dead_code)]
 fn tribunus_quantize_int4(matrix: &[f32]) -> (Vec<u32>, f32, f32) {
-    crate::ecs::compute_image::compile::quantize_int4_group(matrix)
+    crate::ecs::compute_image::legacy_compute_image_compile::quantize_int4_group(matrix)
 }
 
 #[test]

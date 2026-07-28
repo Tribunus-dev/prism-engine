@@ -36,7 +36,7 @@ fn main() {
     let mut tri_b = Vec::new();
     for r in 0..rows as usize {
         let start = r * cols as usize;
-        let (pw, s, b) = tribunus_compute_core::compute_image::compile::quantize_int4_group(
+        let (pw, s, b) = tribunus_compute_core::compute_image::legacy_compute_image_compile::quantize_int4_group(
             &matrix[start..start + cols as usize],
         );
         tri_w.extend(pw);

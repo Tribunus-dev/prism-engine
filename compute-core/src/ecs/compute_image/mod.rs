@@ -31,7 +31,7 @@ pub mod cimage_packer;
 #[cfg(target_os = "macos")]
 pub mod compaction;
 pub mod compatibility;
-pub mod compile;
+pub mod legacy_compute_image_compile;
 pub mod content_store;
 pub mod diag;
 pub mod executable;
@@ -80,7 +80,7 @@ pub mod multimodal;
     target_os = "macos",
     all(feature = "prism-backend-ios", target_os = "ios")
 ))]
-pub mod orchestrator;
+pub mod legacy_compute_image_compile_orchestrator;
 pub mod phase_dag;
 pub mod phase_fallback;
 pub mod phase_graph;
@@ -139,17 +139,17 @@ pub use manifest::{
 
 pub use kv_plan::{KVDtype, KvCachePlan, KvCodec, KvLayout, KvQuantMode, PrefixCompatibilityKey};
 
-pub use compile::{download_hf_model, parse_hf_source};
+pub use legacy_compute_image_compile::{download_hf_model, parse_hf_source};
 
 #[cfg(any(
     feature = "mlx-backend",
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub use compile::{diff_tensors, load_source_tensor_table, SourceTensorInfo};
+pub use legacy_compute_image_compile::{diff_tensors, load_source_tensor_table, SourceTensorInfo};
 
 #[cfg(feature = "mlx-backend")]
-pub use compile::{
+pub use legacy_compute_image_compile::{
     compile_differential, compile_with_authority, compile_with_authority_speculative,
 };
 
@@ -158,7 +158,7 @@ pub use compile::{
     feature = "prism-backend",
     feature = "prism-backend-ios"
 ))]
-pub use compile::hardware::run_hardware_assessment;
+pub use legacy_compute_image_compile::hardware::run_hardware_assessment;
 
 #[cfg(feature = "mlx-backend")] // research surface: MLX image runtime
 pub use segment::{ImageRuntime, LayerLease};
